@@ -51,14 +51,14 @@ Legenda de fases: **FUNDAÇÃO** → **UI (mock)** → **BACKEND** → **CONFORM
   layout autenticado (sidebar + topbar) navegável entre todos os módulos (telas vazias).
 
 ### Entregas
-- [ ] Tokens de tema: paleta neutra + primária discreta, dark mode via CSS variables.
-- [ ] Tipografia (Inter) e números tabulares para colunas de preço.
-- [ ] Componente `StatusBadge` com estados semânticos (aderente / parcial / não aderente / pendente).
-- [ ] `AppShell`: sidebar com navegação dos módulos + topbar (usuário, busca global placeholder).
-- [ ] `DataTable` reutilizável (ordenação, paginação, filtros) sobre shadcn/ui.
-- [ ] `MetricCard` para dashboard.
-- [ ] Rotas-placeholder de todos os módulos (dashboard, processos, contratações, sites, fornecedores, cotações, relatórios).
-- [ ] Página de estados vazios/erro/carregamento padronizada.
+- [x] Tokens de tema: paleta neutra + primária discreta (azul institucional), dark mode via CSS variables.
+- [x] Tipografia (Geist — "Inter ou similar") e números tabulares (`tabular-nums`) para colunas de preço.
+- [x] Componente `StatusBadge` com estados semânticos (aderente / parcial / não aderente / pendente).
+- [x] `AppShell`: sidebar com navegação dos módulos + topbar (usuário, busca global placeholder).
+- [x] `DataTable` reutilizável (ordenação, paginação, filtros) sobre shadcn/ui.
+- [x] `MetricCard` para dashboard.
+- [x] Rotas-placeholder de todos os módulos (dashboard, processos, contratações, sites, fornecedores, cotações, relatórios).
+- [x] Página de estados vazios/erro/carregamento padronizada.
 
 ### Critério de aceite
 Navegação entre todos os módulos funciona; tema claro/escuro alterna; componentes base catalogados.
