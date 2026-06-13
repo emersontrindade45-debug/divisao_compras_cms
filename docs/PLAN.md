@@ -28,14 +28,14 @@ Legenda de fases: **FUNDAÇÃO** → **UI (mock)** → **BACKEND** → **CONFORM
   estrutura de pastas do CLAUDE.md prontos — sem features ainda.
 
 ### Entregas
-- [ ] Scaffold Next.js (App Router) + TypeScript `strict` + pnpm.
-- [ ] Tailwind CSS configurado.
-- [ ] shadcn/ui inicializado (`components/ui`).
-- [ ] ESLint + Prettier + scripts (`lint`, `format`, `typecheck`, `dev`, `build`).
-- [ ] Estrutura de pastas `src/` conforme CLAUDE.md §4 (pastas vazias com `.gitkeep` onde fizer sentido).
-- [ ] `.env.example` com variáveis previstas (DATABASE_URL, RESEND_API_KEY, AUTH_SECRET, etc.).
-- [ ] `.gitignore`, `README.md` curto de "como rodar".
-- [ ] Vitest + Testing Library configurados (sem testes reais ainda, só o "hello test" verde).
+- [x] Scaffold Next.js (App Router) + TypeScript `strict` + pnpm.
+- [x] Tailwind CSS configurado.
+- [x] shadcn/ui inicializado (`components/ui`). _(base **Base UI**, preset `base-nova`; Button validado)_
+- [x] ESLint + Prettier + scripts (`lint`, `format`, `typecheck`, `dev`, `build`).
+- [x] Estrutura de pastas `src/` conforme CLAUDE.md §4 (pastas vazias com `.gitkeep` onde fizer sentido).
+- [x] `.env.example` com variáveis previstas (DATABASE_URL, RESEND_API_KEY, AUTH_SECRET, etc.).
+- [x] `.gitignore`, `README.md` curto de "como rodar".
+- [x] Vitest + Testing Library configurados (sem testes reais ainda, só o "hello test" verde).
 
 ### Critério de aceite
 `pnpm dev` sobe, `pnpm lint` / `pnpm typecheck` / `pnpm test` passam limpos.
