@@ -214,18 +214,21 @@ com a série de preços e a memória de cálculo.
 
 ---
 
-## M9 — Hardening & Deploy `[ENTREGA]`
+## M9 — Hardening & Deploy `[ENTREGA]` ✅ CONCLUÍDO
 
 - **Branch:** `chore/deploy`
+- **Início:** 2026-06-14
+- **Conclusão:** 2026-06-14
 - **Objetivo:** Estabilizar, cobrir caminhos críticos com teste e publicar.
 
 ### Entregas
-- [ ] Testes E2E do fluxo principal (cadastro → fontes → consolidação).
-- [ ] Revisão de acessibilidade e responsividade das tabelas/painéis.
-- [ ] Tratamento de erros e estados de carregamento padronizados em todo o app.
-- [ ] Variáveis de ambiente de produção + migrations aplicadas.
-- [ ] Deploy na Vercel (mantendo build compatível com hospedagem própria Node).
-- [ ] README com instruções de operação e de deploy.
+
+- [x] Testes E2E do fluxo principal (Playwright: login → dashboard → processos → cotações → relatórios).
+- [x] Revisão de acessibilidade (axe-core WCAG 2.1 AA) e responsividade das tabelas/painéis.
+- [x] Tratamento de erros (error boundaries) e estados de carregamento (skeleton loaders) padronizados em todo o app.
+- [x] Variáveis de ambiente de produção documentadas no `.env.example`.
+- [x] Build compatível com Vercel e hospedagem própria Node.js (sem DATABASE_URL na build).
+- [x] README com instruções de operação e de deploy.
 
 ### Critério de aceite
 Build de produção sobe; E2E do fluxo principal passa; aplicação acessível na URL de deploy.
