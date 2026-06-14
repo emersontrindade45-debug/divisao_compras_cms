@@ -1,5 +1,5 @@
 import "server-only";
-import { resend, EMAIL_FROM } from "./client";
+import { getResend, EMAIL_FROM } from "./client";
 import { renderCotacaoEmail, type CotacaoEmailData } from "./templates/cotacao";
 import { renderLembreteEmail, type LembreteEmailData } from "./templates/lembrete";
 
@@ -16,7 +16,7 @@ export async function enviarCotacao(
   const { subject, html, text } = renderCotacaoEmail(data);
 
   try {
-    const result = await resend.emails.send({
+    const result = await getResend().emails.send({
       from: EMAIL_FROM,
       to: para,
       subject,
@@ -44,7 +44,7 @@ export async function enviarLembrete(
   const { subject, html, text } = renderLembreteEmail(data);
 
   try {
-    const result = await resend.emails.send({
+    const result = await getResend().emails.send({
       from: EMAIL_FROM,
       to: para,
       subject,
