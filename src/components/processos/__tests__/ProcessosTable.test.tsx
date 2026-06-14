@@ -16,9 +16,7 @@ describe("ProcessosTable", () => {
       target: { value: "cadeira" },
     });
     expect(screen.getByText("Aquisição de cadeiras ergonômicas")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Locação de impressoras multifuncionais")
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Locação de impressoras multifuncionais")).not.toBeInTheDocument();
   });
 
   it("o número do processo é um link para o detalhe", () => {

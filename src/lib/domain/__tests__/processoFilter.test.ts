@@ -46,7 +46,7 @@ describe("filtrarProcessos", () => {
       dataFim: "2026-12-31",
     });
     expect(r.every((p) => p.dataAbertura >= "2026-01-01" && p.dataAbertura <= "2026-12-31")).toBe(
-      true
+      true,
     );
     expect(r.some((p) => p.dataAbertura.startsWith("2025"))).toBe(false);
   });
@@ -58,7 +58,7 @@ describe("filtrarProcessos", () => {
       responsavel: "Diego Alves",
     });
     expect(r.every((p) => p.status === "nao-aderente" && p.responsavel === "Diego Alves")).toBe(
-      true
+      true,
     );
   });
 });

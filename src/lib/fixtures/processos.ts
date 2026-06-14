@@ -130,6 +130,6 @@ export function getProcessoById(id: string): ProcessoFixture | undefined {
 
 export function getResponsaveis(): string[] {
   return Array.from(new Set(PROCESSOS.map((p) => p.responsavel))).sort((a, b) =>
-    a.localeCompare(b, "pt-BR")
+    a.localeCompare(b, "pt-BR"),
   );
 }

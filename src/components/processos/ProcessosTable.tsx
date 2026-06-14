@@ -8,10 +8,7 @@ import { DataTable } from "@/components/data-table/DataTable";
 import { EmptyState } from "@/components/common/EmptyState";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Badge } from "@/components/ui/badge";
-import {
-  ProcessoFilters,
-  type FiltrosProcesso,
-} from "@/components/processos/ProcessoFilters";
+import { ProcessoFilters, type FiltrosProcesso } from "@/components/processos/ProcessoFilters";
 import { filtrarProcessos } from "@/lib/domain/processoFilter";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 
@@ -75,9 +72,9 @@ export function ProcessosTable({ processos }: { processos: ProcessoFixture[] }) 
   const responsaveis = useMemo(
     () =>
       Array.from(new Set(processos.map((p) => p.responsavel))).sort((a, b) =>
-        a.localeCompare(b, "pt-BR")
+        a.localeCompare(b, "pt-BR"),
       ),
-    [processos]
+    [processos],
   );
 
   const filtrados = useMemo(() => filtrarProcessos(processos, filtros), [processos, filtros]);

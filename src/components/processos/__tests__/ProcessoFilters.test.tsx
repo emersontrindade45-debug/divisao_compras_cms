@@ -14,11 +14,7 @@ describe("ProcessoFilters", () => {
   it("chama onChange ao digitar na busca", () => {
     const onChange = vi.fn();
     render(
-      <ProcessoFilters
-        filtros={FILTROS_VAZIOS}
-        responsaveis={["Ana Souza"]}
-        onChange={onChange}
-      />
+      <ProcessoFilters filtros={FILTROS_VAZIOS} responsaveis={["Ana Souza"]} onChange={onChange} />,
     );
     fireEvent.change(screen.getByPlaceholderText(/filtrar por objeto/i), {
       target: { value: "cadeira" },
@@ -32,7 +28,7 @@ describe("ProcessoFilters", () => {
         filtros={FILTROS_VAZIOS}
         responsaveis={["Ana Souza", "Bruno Lima"]}
         onChange={vi.fn()}
-      />
+      />,
     );
     expect(screen.getByRole("option", { name: "Ana Souza" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Bruno Lima" })).toBeInTheDocument();

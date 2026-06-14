@@ -3,7 +3,7 @@ import type { ProcessoFixture } from "@/lib/fixtures/processos";
 
 export function filtrarProcessos(
   processos: ProcessoFixture[],
-  filtros: FiltrosProcesso
+  filtros: FiltrosProcesso,
 ): ProcessoFixture[] {
   const busca = filtros.busca.trim().toLowerCase();
 

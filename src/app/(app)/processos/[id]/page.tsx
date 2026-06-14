@@ -5,11 +5,7 @@ import { ProcessoHeader } from "@/components/processos/ProcessoHeader";
 import { ProcessoTabs } from "@/components/processos/ProcessoTabs";
 import { getProcessoById } from "@/lib/fixtures/processos";
 
-export default async function ProcessoDetalhePage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function ProcessoDetalhePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const processo = getProcessoById(id);
 
