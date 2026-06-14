@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BookOpen,
   Building2,
   FileText,
   FolderSearch,
@@ -23,4 +24,5 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/fornecedores", label: "Fornecedores", icon: Building2 },
   { href: "/cotacoes", label: "Cotações", icon: Mail },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
+  { href: "/onboarding", label: "Guia de uso", icon: BookOpen },
 ] as const;

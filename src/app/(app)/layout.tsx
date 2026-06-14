@@ -1,8 +1,11 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/shell/AppSidebar";
 import { Topbar } from "@/components/shell/Topbar";
+import { requireAuth } from "@/lib/auth/rbac";
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  await requireAuth();
+
   return (
     <SidebarProvider>
       <AppSidebar />
