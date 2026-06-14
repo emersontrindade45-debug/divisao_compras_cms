@@ -16,7 +16,7 @@ export async function Topbar() {
           className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
           aria-hidden
         />
-        <Input placeholder="Buscar (em breve)" disabled className="pl-8" />
+        <Input placeholder="Buscar (em breve)" disabled className="pl-8" aria-label="Busca global (em breve)" />
       </div>
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
