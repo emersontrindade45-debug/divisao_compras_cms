@@ -17,7 +17,12 @@ export function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon" className="rounded-full" aria-label="Menu do usuário" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full"
+            aria-label="Menu do usuário"
+          />
         }
       >
         <Avatar className="size-7">

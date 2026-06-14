@@ -28,7 +28,7 @@ export function MetricCard({
             <span
               className={cn(
                 "text-xs font-medium tabular-nums",
-                delta.positive ? "text-success" : "text-danger"
+                delta.positive ? "text-success" : "text-danger",
               )}
             >
               {delta.value}

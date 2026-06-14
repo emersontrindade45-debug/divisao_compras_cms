@@ -20,6 +20,8 @@ describe("STATUS_CONFIG", () => {
 
   it("cobre exatamente os 4 status de domínio", () => {
     const keys = Object.keys(STATUS_CONFIG).sort();
-    expect(keys).toEqual((["aderente", "nao-aderente", "parcial", "pendente"] satisfies StatusDominio[]).sort());
+    expect(keys).toEqual(
+      (["aderente", "nao-aderente", "parcial", "pendente"] satisfies StatusDominio[]).sort(),
+    );
   });
 });
