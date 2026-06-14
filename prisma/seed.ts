@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import * as bcrypt from "bcryptjs";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -15,18 +16,30 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log("🌱 Iniciando seed...");
 
-  // ── Usuário padrão ──────────────────────────────────────────────────────────
+  // ── Usuários ─────────────────────────────────────────────────────────────────
+  const adminHash = await bcrypt.hash("teste123", 10);
   const user = await prisma.user.upsert({
     where: { email: "admin@cms.santos.sp.gov.br" },
-    update: {},
+    update: { passwordHash: adminHash },
     create: {
       email: "admin@cms.santos.sp.gov.br",
       name: "Administrador",
-      passwordHash: "$2b$10$placeholder_hash_change_in_m6",
+      passwordHash: adminHash,
       role: "aprovacao",
     },
   });
-  console.log("✓ Usuário criado:", user.email);
+  // Usuário dedicado para testes E2E (senha conhecida)
+  await prisma.user.upsert({
+    where: { email: "admin@cms.gov.br" },
+    update: { passwordHash: adminHash },
+    create: {
+      email: "admin@cms.gov.br",
+      name: "Admin Teste E2E",
+      passwordHash: adminHash,
+      role: "aprovacao",
+    },
+  });
+  console.log("✓ Usuários criados:", user.email, "| admin@cms.gov.br");
 
   // ── Sites ───────────────────────────────────────────────────────────────────
   const sites = await Promise.all([
