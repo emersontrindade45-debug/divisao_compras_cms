@@ -12,12 +12,15 @@ export function SheetsBanner({ sheetsUrl }: { sheetsUrl: string | undefined }) {
         </p>
       </div>
       {sheetsUrl ? (
-        <a href={sheetsUrl} target="_blank" rel="noopener noreferrer">
-          <Button variant="outline" size="sm" className="shrink-0">
-            <ExternalLink className="size-3.5" aria-hidden />
-            Ver planilha
-          </Button>
-        </a>
+        <Button
+          render={<a href={sheetsUrl} target="_blank" rel="noopener noreferrer" />}
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+        >
+          <ExternalLink className="size-3.5" aria-hidden />
+          Ver planilha
+        </Button>
       ) : null}
     </div>
   );

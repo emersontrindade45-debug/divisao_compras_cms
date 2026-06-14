@@ -18,11 +18,9 @@ function formatarData(iso: string): string {
 export function ProcessoHeader({ processo }: { processo: ProcessoFixture }) {
   return (
     <div className="space-y-4">
-      <Button asChild variant="ghost" size="sm" className="-ml-2">
-        <Link href="/processos">
-          <ArrowLeft className="size-4" aria-hidden />
-          Voltar
-        </Link>
+      <Button render={<Link href="/processos" />} variant="ghost" size="sm" className="-ml-2">
+        <ArrowLeft className="size-4" aria-hidden />
+        Voltar
       </Button>
 
       <div className="space-y-3">
