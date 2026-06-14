@@ -112,12 +112,12 @@ As três fontes têm UI completa e o orquestrador exibe recomendação coerente 
   série de preços e relatórios — tudo mock.
 
 ### Entregas
-- [ ] Seleção em lote de fornecedores + composição de e-mail por template (preview).
-- [ ] Painel de controle de cotações: status (positiva/negativa/incompleta/silenciosa), SLA, lembretes.
-- [ ] Checklist de validade da proposta (CNPJ, descrição, valor unit./total, data, responsável) com marcação válida/ressalva/inválida.
-- [ ] Tabela de série de preços com fonte por preço, método (média/mediana/menor valor) e exclusões.
-- [ ] Dashboard com MetricCards (processos em andamento, taxa de resposta, gargalos).
-- [ ] Telas de relatório resumido/completo e memória de cálculo (layout).
+- [x] Seleção em lote de fornecedores + composição de e-mail por template (preview).
+- [x] Painel de controle de cotações: status (positiva/negativa/incompleta/silenciosa), SLA, lembretes.
+- [x] Checklist de validade da proposta (CNPJ, descrição, valor unit./total, data, responsável) com marcação válida/ressalva/inválida.
+- [x] Tabela de série de preços com fonte por preço, método (média/mediana/menor valor) e exclusões.
+- [x] Dashboard com MetricCards (processos em andamento, taxa de resposta, gargalos).
+- [x] Telas de relatório resumido/completo e memória de cálculo (layout).
 
 ### Critério de aceite
 Fluxo completo demonstrável em mock, do cadastro do objeto até a tela de memória de cálculo.
