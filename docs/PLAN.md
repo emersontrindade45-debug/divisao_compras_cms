@@ -92,11 +92,11 @@ A lista mostra os processos da planilha (mock) com filtros; é possível abrir o
 - **Objetivo:** Interfaces das três fontes de preço + orquestrador de estratégia, ainda com mock.
 
 ### Entregas
-- [ ] **Orquestrador de estratégia:** painel que sugere a ordem de busca por tipo de objeto.
-- [ ] **Contratações públicas similares:** busca/filtros, registro de aderência (alta/parcial/não aderente) com justificativa, comparador lado a lado.
-- [ ] **Sites admissíveis:** listas branca/cinza/vermelha, formulário com captura de URL + data/hora, alerta de marketplace bloqueado.
-- [ ] **Fornecedores:** cadastro vivo (CNPJ, contatos, categoria, cidade, responsável), badge de score, histórico.
-- [ ] Painel de evidência reutilizável (arquivo + metadados de data/hora).
+- [x] **Orquestrador de estratégia:** painel que sugere a ordem de busca por tipo de objeto.
+- [x] **Contratações públicas similares:** busca/filtros, registro de aderência (alta/parcial/não aderente) com justificativa, comparador lado a lado.
+- [x] **Sites admissíveis:** listas branca/cinza/vermelha, formulário com captura de URL + data/hora, alerta de marketplace bloqueado.
+- [x] **Fornecedores:** cadastro vivo (CNPJ, contatos, categoria, cidade, responsável), badge de score, histórico.
+- [x] Painel de evidência reutilizável (arquivo + metadados de data/hora).
 
 ### Critério de aceite
 As três fontes têm UI completa e o orquestrador exibe recomendação coerente com o tipo de item (mock).
