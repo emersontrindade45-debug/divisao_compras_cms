@@ -7,15 +7,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ContratacaoFixture } from "@/lib/fixtures/contratacoes";
-import type { StatusDominio } from "@/lib/domain/status";
-
-const formatBRL = (value: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-const formatDate = (iso: string) => {
-  const [year, month, day] = iso.split("-");
-  return `${day}/${month}/${year}`;
-};
+import { formatBRL, formatDate } from "@/lib/formatters";
 
 interface ContratacoesTableProps {
   contratacoes: ContratacaoFixture[];
@@ -100,7 +92,7 @@ export function ContratacoesTable({ contratacoes, onCompare, onClassificar }: Co
       accessorKey: "aderencia",
       header: "Aderência",
       cell: ({ row }) => (
-        <StatusBadge status={row.original.aderencia as StatusDominio} />
+        <StatusBadge status={row.original.aderencia} />
       ),
     },
     {

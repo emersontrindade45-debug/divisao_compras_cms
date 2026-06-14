@@ -12,8 +12,7 @@ import { CapturaForm, type NovaCapturaData } from "@/components/sites/CapturaFor
 export default function SitesPage() {
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
 
-  function handleNovaCapturaSubmit(data: NovaCapturaData) {
-    console.log("Nova captura registrada:", data);
+  function handleNovaCapturaSubmit(_data: NovaCapturaData) {
     setMostrarFormulario(false);
   }
 

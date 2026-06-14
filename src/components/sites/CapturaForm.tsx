@@ -24,8 +24,7 @@ interface CapturaFormProps {
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus:ring-2 focus:ring-ring/50";
 
-export function CapturaForm({ sites, processoId, onSubmit }: CapturaFormProps) {
-  void processoId; // reserved for future server action integration
+export function CapturaForm({ sites, processoId: _processoId, onSubmit }: CapturaFormProps) {
   const [siteId, setSiteId] = useState("");
   const [url, setUrl] = useState("");
   const [produto, setProduto] = useState("");

@@ -91,7 +91,7 @@ export default function ContratacoesPage() {
       {classificando !== null && (
         <RegistroAderenciaForm
           contratacao={classificando}
-          open={classificando !== null}
+          open
           onOpenChange={(v) => {
             if (!v) setClassificando(null);
           }}

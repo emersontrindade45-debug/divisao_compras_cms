@@ -1,3 +1,5 @@
+import type { StatusDominio } from "@/lib/domain/status";
+
 export interface ContratacaoFixture {
   id: string;
   numero: string;
@@ -9,7 +11,7 @@ export interface ContratacaoFixture {
   unidade: string;
   dataContratacao: string;
   fonte: string;
-  aderencia: "aderente" | "parcial" | "nao-aderente" | "pendente";
+  aderencia: StatusDominio;
   justificativaAderencia?: string;
   palavrasChave: string[];
 }

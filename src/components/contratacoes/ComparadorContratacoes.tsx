@@ -1,18 +1,11 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import type { ContratacaoFixture } from "@/lib/fixtures/contratacoes";
-import type { StatusDominio } from "@/lib/domain/status";
-
-const formatBRL = (value: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-const formatDate = (iso: string) => {
-  const [year, month, day] = iso.split("-");
-  return `${day}/${month}/${year}`;
-};
+import { formatBRL, formatDate } from "@/lib/formatters";
 
 interface ComparadorContratacoesProps {
   items: ContratacaoFixture[];
@@ -21,7 +14,7 @@ interface ComparadorContratacoesProps {
 
 interface LinhaComparador {
   label: string;
-  renderCell: (item: ContratacaoFixture) => React.ReactNode;
+  renderCell: (item: ContratacaoFixture) => ReactNode;
 }
 
 const LINHAS: LinhaComparador[] = [
@@ -49,7 +42,7 @@ const LINHAS: LinhaComparador[] = [
   { label: "Fonte", renderCell: (item) => <span className="text-sm">{item.fonte}</span> },
   {
     label: "Aderência",
-    renderCell: (item) => <StatusBadge status={item.aderencia as StatusDominio} />,
+    renderCell: (item) => <StatusBadge status={item.aderencia} />,
   },
 ];
 

@@ -1,6 +1,7 @@
 import { FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDataHora } from "@/lib/formatters";
 
 interface EvidenciaPanelProps {
   nomeArquivo: string;
@@ -8,13 +9,6 @@ interface EvidenciaPanelProps {
   url?: string;
   observacoes?: string;
 }
-
-const formatDataHora = (iso: string) =>
-  new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "America/Sao_Paulo",
-  }).format(new Date(iso));
 
 export function EvidenciaPanel({
   nomeArquivo,

@@ -4,16 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table/DataTable";
 import type { CapturaFixture } from "@/lib/fixtures/capturas";
 import type { SiteFixture } from "@/lib/fixtures/sites";
-
-const formatBRL = (value: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-
-const formatDataHora = (iso: string) =>
-  new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "America/Sao_Paulo",
-  }).format(new Date(iso));
+import { formatBRL, formatDataHora } from "@/lib/formatters";
 
 interface CapturasTableProps {
   capturas: CapturaFixture[];
