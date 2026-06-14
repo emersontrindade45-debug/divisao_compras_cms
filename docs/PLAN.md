@@ -133,11 +133,11 @@ Fluxo completo demonstrável em mock, do cadastro do objeto até a tela de memó
   trocar as telas — seed alimenta o que antes era mock).
 
 ### Entregas
-- [ ] Postgres local (docker-compose) + `DATABASE_URL`.
-- [ ] `prisma/schema.prisma` com modelos: User, Processo, Item, Fonte, Evidencia, Fornecedor, Cotacao, Proposta, SeriePreco/PrecoConsolidado, AuditLog.
-- [ ] Migration inicial + `lib/db.ts` (singleton Prisma).
-- [ ] Script de seed com dados equivalentes às fixtures de UI.
-- [ ] Schemas Zod compartilhados em `lib/validations/` alinhados ao schema do banco.
+- [x] Postgres local (docker-compose) + `DATABASE_URL`.
+- [x] `prisma/schema.prisma` com modelos: User, Processo, Item, Fonte, Evidencia, Fornecedor, Cotacao, Proposta, SeriePreco/PrecoConsolidado, AuditLog.
+- [x] Migration inicial + `lib/db.ts` (singleton Prisma).
+- [x] Script de seed com dados equivalentes às fixtures de UI.
+- [x] Schemas Zod compartilhados em `lib/validations/` alinhados ao schema do banco.
 
 ### Critério de aceite
 `prisma migrate` e `prisma db seed` rodam; dados visíveis via Prisma Studio.

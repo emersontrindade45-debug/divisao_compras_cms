@@ -1,0 +1,370 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  pesquisa
+  revisao
+  aprovacao
+}
+
+enum StatusProcesso {
+  aderente
+  parcial
+  nao_aderente
+  pendente
+}
+
+enum ClassificacaoItem {
+  comum
+  especifico
+}
+
+enum TipoFonte {
+  contratacao_publica
+  site_eletronico
+  fornecedor_direto
+}
+
+enum AderenciaFonte {
+  aderente
+  parcial
+  nao_aderente
+}
+
+enum ListaSite {
+  branca
+  cinza
+  vermelha
+}
+
+enum StatusCotacao {
+  positiva
+  negativa
+  incompleta
+  silenciosa
+}
+
+enum StatusChecklist {
+  valido
+  ressalva
+  invalido
+}
+
+enum StatusGeral {
+  valida
+  com_ressalva
+  invalida
+}
+
+enum MetodoConsolidacao {
+  media
+  mediana
+  menor_valor
+}
+
+enum StatusPreco {
+  incluido
+  excluido
+}
+
+enum StatusFornecedor {
+  ativo
+  inativo
+}
+
+enum StatusResposta {
+  respondido
+  nao_respondido
+  recusado
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  name         String
+  passwordHash String
+  role         Role       @default(pesquisa)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model Processo {
+  id                      String             @id @default(cuid())
+  numero                  String             @unique
+  objeto                  String
+  unidade                 String
+  quantidade              Int
+  caracteristicasTecnicas String
+  palavrasChave           String[]
+  classificacao           ClassificacaoItem
+  responsavel             String
+  status                  StatusProcesso     @default(pendente)
+  dataAbertura            DateTime
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  itens        Item[]
+  contratacoes ContratacaoPublica[]
+  capturas     CapturaEvidencia[]
+  cotacoes     Cotacao[]
+  auditLogs    AuditLog[]
+
+  @@map("processos")
+}
+
+model Item {
+  id                      String            @id @default(cuid())
+  processoId              String
+  descricao               String
+  unidade                 String
+  quantidade              Int
+  classificacao           ClassificacaoItem
+  caracteristicasTecnicas String?
+  palavrasChave           String[]
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  processo    Processo     @relation(fields: [processoId], references: [id], onDelete: Cascade)
+  fontes      Fonte[]
+  seriePrecos SeriePreco[]
+
+  @@map("itens")
+}
+
+model Fonte {
+  id                String      @id @default(cuid())
+  itemId            String
+  tipo              TipoFonte
+  descricao         String
+  orgaoOuFornecedor String
+  dataReferencia    DateTime
+  valorUnitario     Decimal     @db.Decimal(12, 2)
+  status            StatusPreco @default(incluido)
+  motivoExclusao    String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  item       Item        @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  evidencias Evidencia[]
+
+  @@map("fontes")
+}
+
+model Evidencia {
+  id             String   @id @default(cuid())
+  fonteId        String
+  arquivo        String?
+  url            String?
+  dataHoraAcesso DateTime
+  descricao      String?
+  createdAt      DateTime @default(now())
+
+  fonte Fonte @relation(fields: [fonteId], references: [id], onDelete: Cascade)
+
+  @@map("evidencias")
+}
+
+model ContratacaoPublica {
+  id                     String         @id @default(cuid())
+  processoId             String
+  numero                 String
+  orgao                  String
+  objeto                 String
+  modalidade             String
+  valorUnitario          Decimal        @db.Decimal(12, 2)
+  quantidade             Int
+  unidade                String
+  dataContratacao        DateTime
+  fonteUrl               String?
+  aderencia              AderenciaFonte
+  justificativaAderencia String?
+  palavrasChave          String[]
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  processo Processo @relation(fields: [processoId], references: [id], onDelete: Cascade)
+
+  @@map("contratacoes_publicas")
+}
+
+model Site {
+  id            String    @id @default(cuid())
+  url           String    @unique
+  nome          String
+  lista         ListaSite
+  motivo        String?
+  categoria     String
+  isMarketplace Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  capturas CapturaEvidencia[]
+
+  @@map("sites")
+}
+
+model CapturaEvidencia {
+  id             String   @id @default(cuid())
+  siteId         String
+  processoId     String
+  url            String
+  produto        String
+  valorUnitario  Decimal  @db.Decimal(12, 2)
+  dataHoraAcesso DateTime
+  evidencia      String?
+  createdAt      DateTime @default(now())
+
+  site     Site     @relation(fields: [siteId], references: [id])
+  processo Processo @relation(fields: [processoId], references: [id], onDelete: Cascade)
+
+  @@map("capturas_evidencias")
+}
+
+model Fornecedor {
+  id                 String           @id @default(cuid())
+  cnpj               String           @unique
+  razaoSocial        String
+  nomeFantasia       String?
+  categoria          String[]
+  cidade             String
+  estado             String
+  responsavelContato String
+  email              String
+  telefone           String?
+  score              Int              @default(0)
+  totalCotacoes      Int              @default(0)
+  totalRespostas     Int              @default(0)
+  taxaResposta       Decimal          @db.Decimal(5, 2) @default(0)
+  ultimaResposta     DateTime?
+  status             StatusFornecedor @default(ativo)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  cotacoes          Cotacao[]
+  historicoCotacoes HistoricoCotacao[]
+
+  @@map("fornecedores")
+}
+
+model HistoricoCotacao {
+  id             String         @id @default(cuid())
+  fornecedorId   String
+  processoNumero String
+  data           DateTime
+  statusResposta StatusResposta
+  valorProposto  Decimal?       @db.Decimal(12, 2)
+  createdAt      DateTime       @default(now())
+
+  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Cascade)
+
+  @@map("historico_cotacoes")
+}
+
+model Cotacao {
+  id              String        @id @default(cuid())
+  processoId      String
+  fornecedorId    String
+  dataEnvio       DateTime
+  dataLimite      DateTime
+  status          StatusCotacao @default(silenciosa)
+  lembreteEnviado Boolean       @default(false)
+  valorProposto   Decimal?      @db.Decimal(12, 2)
+  observacao      String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  processo   Processo   @relation(fields: [processoId], references: [id], onDelete: Cascade)
+  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id])
+  proposta   Proposta?
+  auditLogs  AuditLog[]
+
+  @@map("cotacoes")
+}
+
+model Proposta {
+  id                  String          @id @default(cuid())
+  cotacaoId           String          @unique
+  cnpjValido          StatusChecklist
+  descricaoValida     StatusChecklist
+  valorUnitarioValido StatusChecklist
+  valorTotalValido    StatusChecklist
+  dataValida          StatusChecklist
+  responsavelValido   StatusChecklist
+  statusGeral         StatusGeral
+  valorUnitario       Decimal?        @db.Decimal(12, 2)
+  valorTotal          Decimal?        @db.Decimal(12, 2)
+  dataProposta        DateTime?
+  responsavel         String?
+  observacoes         String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  cotacao Cotacao @relation(fields: [cotacaoId], references: [id], onDelete: Cascade)
+
+  @@map("propostas")
+}
+
+model SeriePreco {
+  id                  String             @id @default(cuid())
+  itemId              String
+  metodo              MetodoConsolidacao
+  valorEstimado       Decimal            @db.Decimal(12, 2)
+  media               Decimal            @db.Decimal(12, 2)
+  mediana             Decimal            @db.Decimal(12, 2)
+  menorValor          Decimal            @db.Decimal(12, 2)
+  coeficienteVariacao Decimal            @db.Decimal(6, 2)
+  totalPrecos         Int
+  precosIncluidos     Int
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  item   Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  precos PrecoConsolidado[]
+
+  @@map("series_precos")
+}
+
+model PrecoConsolidado {
+  id                String      @id @default(cuid())
+  seriePrecoId      String
+  fonte             TipoFonte
+  descricaoFonte    String
+  fornecedorOuOrgao String
+  dataReferencia    DateTime
+  valorUnitario     Decimal     @db.Decimal(12, 2)
+  status            StatusPreco @default(incluido)
+  motivoExclusao    String?
+  createdAt         DateTime    @default(now())
+
+  seriePreco SeriePreco @relation(fields: [seriePrecoId], references: [id], onDelete: Cascade)
+
+  @@map("precos_consolidados")
+}
+
+model AuditLog {
+  id         String    @id @default(cuid())
+  userId     String
+  processoId String?
+  cotacaoId  String?
+  acao       String
+  detalhes   Json?
+  createdAt  DateTime  @default(now())
+
+  user     User      @relation(fields: [userId], references: [id])
+  processo Processo? @relation(fields: [processoId], references: [id])
+  cotacao  Cotacao?  @relation(fields: [cotacaoId], references: [id])
+
+  @@map("audit_logs")
+}
