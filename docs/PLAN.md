@@ -165,21 +165,24 @@ Acesso exige login; um usuário "pesquisa" não consegue aprovar; ações geram 
 
 ---
 
-## M7 — Ligação Backend & Regras da IN 65/2021 `[CONFORMIDADE]`
+## M7 — Ligação Backend & Regras da IN 65/2021 `[CONFORMIDADE]` ✅ CONCLUÍDO
 
 - **Branch:** `feat/backend-integracao`
+- **Início:** 2026-06-14
+- **Conclusão:** 2026-06-14
+- **Base normativa:** [docs/regulamentos-cms.md](regulamentos-cms.md)
 - **Objetivo:** Substituir o mock por dados reais via server actions e implementar a lógica de
   domínio com as regras de conformidade — o núcleo de maior risco.
 
 ### Entregas
-- [ ] Server actions de CRUD para processos, itens, fontes, fornecedores, cotações, propostas.
-- [ ] `lib/domain/`: estatística de preços (média/mediana/menor valor) **com testes unitários**.
-- [ ] Regras IN 65 aplicadas: preço só entra com fonte+data+evidência; ≥3 fornecedores na pesquisa direta; justificativa obrigatória ao não usar fonte pública; alerta de dispersão exigindo análise crítica.
-- [ ] Score de fornecedor (tempo de resposta + completude documental).
-- [ ] Validador de proposta server-side (checklist mínimo).
-- [ ] Upload de arquivos via abstração `lib/storage`.
-- [ ] Busca e filtros server-side (item, período, quantidade, localidade, fornecedor, aderência).
-- [ ] Telas de M2–M4 desligadas do mock e ligadas aos dados reais.
+- [x] Server actions de CRUD para processos, itens, fontes, fornecedores, cotações, propostas.
+- [x] `lib/domain/`: estatística de preços (média/mediana/menor valor) **com testes unitários**.
+- [x] Regras IN 65 aplicadas: preço só entra com fonte+data+evidência; ≥3 fornecedores na pesquisa direta; justificativa obrigatória ao não usar fonte pública; alerta de dispersão exigindo análise crítica.
+- [x] Score de fornecedor (tempo de resposta + completude documental).
+- [x] Validador de proposta server-side (checklist mínimo).
+- [x] Upload de arquivos via abstração `lib/storage`.
+- [x] Busca e filtros server-side (item, período, quantidade, localidade, fornecedor, aderência).
+- [x] Telas de M2–M4 desligadas do mock e ligadas aos dados reais.
 
 ### Critério de aceite
 Fluxo ponta-a-ponta com dados reais; testes de domínio passam; regras de conformidade bloqueiam
