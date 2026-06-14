@@ -9,6 +9,7 @@ import {
   createPropostaSchema,
 } from "@/lib/validations/cotacao";
 import { validarProposta } from "@/lib/domain/proposalValidator";
+import { enviarCotacao } from "@/lib/email";
 import type { ActionResult } from "./processos";
 
 export async function criarCotacao(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -19,6 +20,27 @@ export async function criarCotacao(input: unknown): Promise<ActionResult<{ id: s
   const cotacao = await db.cotacao.create({
     data: { ...parsed.data, status: "silenciosa" },
   });
+
+  // Fetch related data for email
+  const [fornecedor, processo] = await Promise.all([
+    db.fornecedor.findUnique({ where: { id: parsed.data.fornecedorId } }),
+    db.processo.findUnique({ where: { id: parsed.data.processoId } }),
+  ]);
+
+  if (fornecedor && processo) {
+    await enviarCotacao(fornecedor.email, {
+      fornecedorNome: fornecedor.razaoSocial,
+      processoNumero: processo.numero,
+      objeto: processo.objeto,
+      unidade: processo.unidade,
+      quantidade: processo.quantidade,
+      caracteristicasTecnicas: processo.caracteristicasTecnicas,
+      dataLimite: parsed.data.dataLimite,
+      responsavelNome: user.name,
+      responsavelEmail: user.email,
+      appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    });
+  }
 
   await registrarAuditoria({
     userId: user.id,
@@ -63,7 +85,6 @@ export async function registrarProposta(input: unknown): Promise<ActionResult<{ 
   const cotacao = await db.cotacao.findUnique({ where: { id: parsed.data.cotacaoId } });
   if (!cotacao) return { error: "Cotação não encontrada" };
 
-  // Run domain validation for date expiry
   const validacao = validarProposta(
     {
       cnpj: parsed.data.cnpjValido !== "invalido" ? "present" : undefined,
@@ -100,6 +121,27 @@ export async function listarCotacoesPorProcesso(processoId: string) {
     where: { processoId },
     include: {
       fornecedor: { select: { razaoSocial: true, cnpj: true } },
+      proposta: true,
+    },
+    orderBy: { dataEnvio: "desc" },
+  });
+}
+
+export async function listarCotacoes(filtros?: {
+  processoId?: string;
+  status?: string;
+  fornecedorId?: string;
+}) {
+  await requireAuth();
+  return db.cotacao.findMany({
+    where: {
+      ...(filtros?.processoId ? { processoId: filtros.processoId } : {}),
+      ...(filtros?.status ? { status: filtros.status as never } : {}),
+      ...(filtros?.fornecedorId ? { fornecedorId: filtros.fornecedorId } : {}),
+    },
+    include: {
+      fornecedor: { select: { razaoSocial: true, cnpj: true, email: true } },
+      processo: { select: { numero: true, objeto: true } },
       proposta: true,
     },
     orderBy: { dataEnvio: "desc" },

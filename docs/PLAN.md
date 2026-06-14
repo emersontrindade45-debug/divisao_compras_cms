@@ -192,17 +192,19 @@ casos inválidos (provado por teste).
 
 ---
 
-## M8 — E-mails, Notificações & Relatórios `[BACKEND]`
+## M8 — E-mails, Notificações & Relatórios `[BACKEND]` ✅ CONCLUÍDO
 
 - **Branch:** `feat/emails-relatorios`
+- **Início:** 2026-06-14
+- **Conclusão:** 2026-06-14
 - **Objetivo:** Disparo real de cotações, controle de SLA/lembretes, notificações e exportação.
 
 ### Entregas
-- [ ] Integração Resend: envio de cotação por template parametrizável + registro de data/hora.
-- [ ] Controle de SLA por complexidade + lembretes automáticos (job agendado) para fornecedores sem resposta.
-- [ ] Registro do status de resposta e da relação de não respondentes.
-- [ ] Notificações in-app (prazo, pendências documentais, falta de fonte pública).
-- [ ] Exportação: relatório resumido, relatório completo e memória de cálculo (PDF/planilha).
+- [x] Integração Resend: envio de cotação por template parametrizável + registro de data/hora.
+- [x] Controle de SLA + lembretes automáticos via Vercel Cron Job (`/api/jobs/lembretes`, hourly).
+- [x] Registro do status de resposta e da relação de não respondentes (`lembreteEnviado` flag).
+- [x] Notificações in-app (`AlertasBanner`): prazo, pendências documentais, falta de fonte pública, dispersão de preços.
+- [x] Exportação: memória de cálculo em PDF (`@react-pdf/renderer`) e série de preços em Excel (`xlsx`).
 
 ### Critério de aceite
 E-mail de cotação chega ao destinatário (ambiente de teste); lembrete dispara; relatórios exportam

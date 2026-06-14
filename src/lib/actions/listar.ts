@@ -43,6 +43,26 @@ export async function listarProcessos(filtros?: FiltrosProcessoServer) {
   });
 }
 
+export async function listarProcessosComSerie() {
+  await requireAuth();
+
+  return db.processo.findMany({
+    include: {
+      itens: {
+        include: {
+          seriePrecos: {
+            include: { precos: { orderBy: { dataReferencia: "asc" } } },
+            take: 1,
+            orderBy: { createdAt: "desc" },
+          },
+        },
+        take: 1,
+      },
+    },
+    orderBy: { dataAbertura: "desc" },
+  });
+}
+
 export async function obterProcessoDetalhado(id: string) {
   await requireAuth();
 

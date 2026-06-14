@@ -1,23 +1,55 @@
-import { FileText, Download } from "lucide-react";
+import { FileText, FileSpreadsheet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/common/StatusBadge";
-import { formatBRL, formatDate } from "@/lib/formatters";
-import type { ProcessoFixture } from "@/lib/fixtures/processos";
-import type { SeriePrecoFixture } from "@/lib/fixtures/seriePrecos";
+import { formatBRL } from "@/lib/formatters";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 const METODO_LABEL: Record<string, string> = {
   media: "Média aritmética",
   mediana: "Mediana",
+  menor_valor: "Menor valor",
   "menor-valor": "Menor valor",
 };
 
-interface RelatorioResumoCardProps {
-  processo: ProcessoFixture;
-  serie?: SeriePrecoFixture;
+function formatDate(date: Date | string): string {
+  return new Intl.DateTimeFormat("pt-BR").format(new Date(date));
 }
 
+interface SerieData {
+  metodo: string;
+  valorEstimado: number | { toString(): string };
+  precosIncluidos: number;
+  totalPrecos: number;
+  coeficienteVariacao: number | { toString(): string };
+}
+
+interface ProcessoData {
+  id: string;
+  numero: string;
+  objeto: string;
+  responsavel: string;
+  dataAbertura: Date | string;
+  quantidade: number;
+  unidade: string;
+  classificacao: string;
+  status: string;
+}
+
+interface RelatorioResumoCardProps {
+  processo: ProcessoData;
+  serie?: SerieData;
+}
+
+const linkBtn = cn(
+  buttonVariants({ variant: "outline", size: "sm" }),
+  "gap-2 h-8 no-underline",
+);
+
 export function RelatorioResumoCard({ processo, serie }: RelatorioResumoCardProps) {
+  const valorEstimado = serie ? Number(serie.valorEstimado) : 0;
+  const cv = serie ? Number(serie.coeficienteVariacao) : 0;
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
@@ -25,7 +57,7 @@ export function RelatorioResumoCard({ processo, serie }: RelatorioResumoCardProp
           <CardTitle className="text-base">{processo.numero}</CardTitle>
           <p className="text-sm text-muted-foreground mt-0.5">{processo.objeto}</p>
         </div>
-        <StatusBadge status={processo.status} />
+        <StatusBadge status={processo.status as never} />
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
@@ -55,12 +87,12 @@ export function RelatorioResumoCard({ processo, serie }: RelatorioResumoCardProp
               <div>
                 <p className="text-xs text-muted-foreground">Valor estimado</p>
                 <p className="text-lg font-semibold tabular-nums">
-                  {formatBRL(serie.valorEstimado)}
+                  {formatBRL(valorEstimado)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Método</p>
-                <p className="font-medium">{METODO_LABEL[serie.metodo]}</p>
+                <p className="font-medium">{METODO_LABEL[serie.metodo] ?? serie.metodo}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Preços na série</p>
@@ -70,7 +102,7 @@ export function RelatorioResumoCard({ processo, serie }: RelatorioResumoCardProp
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">CV (dispersão)</p>
-                <p className="font-medium tabular-nums">{serie.coeficienteVariacao.toFixed(1)}%</p>
+                <p className="font-medium tabular-nums">{cv.toFixed(1)}%</p>
               </div>
             </div>
           </div>
@@ -80,19 +112,23 @@ export function RelatorioResumoCard({ processo, serie }: RelatorioResumoCardProp
           </p>
         )}
 
-        <div className="flex items-center gap-2 pt-1">
-          <Button variant="outline" size="sm" className="gap-2 h-8">
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <a href={`/processos/${processo.id}`} className={linkBtn}>
             <FileText className="size-3.5" />
-            Relatório resumido
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2 h-8">
-            <FileText className="size-3.5" />
-            Relatório completo
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2 h-8">
-            <Download className="size-3.5" />
-            Memória de cálculo
-          </Button>
+            Ver processo
+          </a>
+          {serie && (
+            <>
+              <a href={`/api/relatorios/${processo.id}/pdf`} download className={linkBtn}>
+                <FileText className="size-3.5" />
+                Memória de cálculo (PDF)
+              </a>
+              <a href={`/api/relatorios/${processo.id}/xlsx`} download className={linkBtn}>
+                <FileSpreadsheet className="size-3.5" />
+                Série de preços (Excel)
+              </a>
+            </>
+          )}
         </div>
       </CardContent>
     </Card>
