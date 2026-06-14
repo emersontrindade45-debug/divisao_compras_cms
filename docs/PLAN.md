@@ -165,9 +165,11 @@ Acesso exige login; um usuário "pesquisa" não consegue aprovar; ações geram 
 
 ---
 
-## M7 — Ligação Backend & Regras da IN 65/2021 `[CONFORMIDADE]`
+## M7 — Ligação Backend & Regras da IN 65/2021 `[CONFORMIDADE]` 🔄 EM ANDAMENTO
 
 - **Branch:** `feat/backend-integracao`
+- **Início:** 2026-06-14
+- **Base normativa:** [docs/regulamentos-cms.md](regulamentos-cms.md)
 - **Objetivo:** Substituir o mock por dados reais via server actions e implementar a lógica de
   domínio com as regras de conformidade — o núcleo de maior risco.
 
