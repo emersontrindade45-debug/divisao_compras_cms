@@ -20,18 +20,14 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="px-3 py-3">
         <span className="text-sm font-semibold">Pesquisa de Preços</span>
-        <span className="block text-xs text-muted-foreground">
-          Divisão de Compras · CMS
-        </span>
+        <span className="block text-xs text-muted-foreground">Divisão de Compras · CMS</span>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
               {NAV_ITEMS.map((item) => {
-                const active =
-                  pathname === item.href ||
-                  pathname.startsWith(`${item.href}/`);
+                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton

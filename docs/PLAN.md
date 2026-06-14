@@ -73,14 +73,14 @@ Navegação entre todos os módulos funciona; tema claro/escuro alterna; compone
 - **Objetivo:** Telas de listagem e detalhe de processo e o cadastro estruturado do objeto, com dados mock.
 
 ### Entregas
-- [ ] Lista de processos (DataTable + filtros: status, responsável, data).
-- [ ] Formulário de cadastro de objeto (descrição, unidade, quantidade, características técnicas, palavras-chave) validado com Zod.
-- [ ] Tela de detalhe do processo com abas: Estratégia · Fontes · Evidências · Série de preços.
-- [ ] Classificação do item (comum / específico) na UI.
-- [ ] Fixtures de processos/itens para popular as telas.
+- [x] Lista de processos (DataTable + filtros: status, responsável, data).
+- [x] Cadastro de objeto via planilha Google Sheets (sincronização automática — UI mock; integração no M7). _(decisão: a entrada de dados é feita na planilha; a plataforma é leitora/orquestradora, sem formulário interno nesta fase)_
+- [x] Tela de detalhe do processo com abas: Estratégia · Fontes · Evidências · Série de preços.
+- [x] Classificação do item (comum / específico) na UI.
+- [x] Fixtures de processos/itens para popular as telas.
 
 ### Critério de aceite
-É possível "criar" um processo (em memória), vê-lo na lista e abrir o detalhe com as abas.
+A lista mostra os processos da planilha (mock) com filtros; é possível abrir o detalhe com as abas; id inválido exibe estado de erro.
 
 > **Commit final:** `feat: telas de processos e cadastro estruturado de objeto (mock)`
 
