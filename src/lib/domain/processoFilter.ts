@@ -1,5 +1,13 @@
-import type { FiltrosProcesso } from "@/components/processos/ProcessoFilters";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
+import type { StatusDominio } from "@/lib/domain/status";
+
+export interface FiltrosProcesso {
+  busca: string;
+  status: StatusDominio | "todos";
+  responsavel: string;
+  dataInicio: string;
+  dataFim: string;
+}
 
 export function filtrarProcessos(
   processos: ProcessoFixture[],

@@ -2,14 +2,9 @@
 
 import { Input } from "@/components/ui/input";
 import { STATUS_CONFIG, type StatusDominio } from "@/lib/domain/status";
+import type { FiltrosProcesso } from "@/lib/domain/processoFilter";
 
-export interface FiltrosProcesso {
-  busca: string;
-  status: StatusDominio | "todos";
-  responsavel: string;
-  dataInicio: string;
-  dataFim: string;
-}
+export type { FiltrosProcesso };
 
 const STATUS_OPTIONS = Object.entries(STATUS_CONFIG) as [StatusDominio, { label: string }][];
 
