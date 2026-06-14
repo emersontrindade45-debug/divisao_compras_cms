@@ -1,13 +1,17 @@
 "use client";
 
-import { FileText, Globe, Layers } from "lucide-react";
+import { FileText, Globe } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/common/EmptyState";
+import { TabelaSeriePrecos } from "@/components/cotacoes/TabelaSeriePrecos";
 import { EstrategiaOrquestrador } from "./EstrategiaOrquestrador";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
+import { getSerieByProcessoId } from "@/lib/fixtures/seriePrecos";
 
 export function ProcessoTabs({ processo }: { processo: ProcessoFixture }) {
+  const serie = getSerieByProcessoId(processo.id);
+
   return (
     <Tabs defaultValue="estrategia" className="space-y-4">
       <TabsList>
@@ -56,11 +60,15 @@ export function ProcessoTabs({ processo }: { processo: ProcessoFixture }) {
       </TabsContent>
 
       <TabsContent value="serie">
-        <EmptyState
-          icon={Layers}
-          title="Nenhum preço registrado ainda"
-          description="A série de preços será consolidada no módulo de cotações (M4)."
-        />
+        {serie ? (
+          <TabelaSeriePrecos serie={serie} />
+        ) : (
+          <EmptyState
+            icon={FileText}
+            title="Nenhum preço registrado ainda"
+            description="A série de preços é consolidada na aba de cotações."
+          />
+        )}
       </TabsContent>
     </Tabs>
   );
