@@ -4,14 +4,8 @@ import { FileText, Globe, Layers } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/common/EmptyState";
+import { EstrategiaOrquestrador } from "./EstrategiaOrquestrador";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
-
-function estrategiaTexto(processo: ProcessoFixture): string {
-  if (processo.classificacao === "comum") {
-    return "Item comum: priorize contratações públicas similares e sites admissíveis, com cotação direta apenas como complemento.";
-  }
-  return "Item específico: priorize cotação direta com fornecedores qualificados e contratações públicas similares; sites tendem a ter menor aderência.";
-}
 
 export function ProcessoTabs({ processo }: { processo: ProcessoFixture }) {
   return (
@@ -23,13 +17,16 @@ export function ProcessoTabs({ processo }: { processo: ProcessoFixture }) {
         <TabsTrigger value="serie">Série de preços</TabsTrigger>
       </TabsList>
 
-      <TabsContent value="estrategia">
+      <TabsContent value="estrategia" className="space-y-4">
+        <EstrategiaOrquestrador
+          classificacao={processo.classificacao}
+          objeto={processo.objeto}
+        />
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Ordem de busca recomendada</CardTitle>
+            <CardTitle className="text-base">Informações técnicas do objeto</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <p className="text-muted-foreground">{estrategiaTexto(processo)}</p>
             <div>
               <p className="font-medium">Características técnicas</p>
               <p className="text-muted-foreground">{processo.caracteristicasTecnicas}</p>
