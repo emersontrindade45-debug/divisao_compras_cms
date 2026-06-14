@@ -152,11 +152,11 @@ Fluxo completo demonstrável em mock, do cadastro do objeto até a tela de memó
 - **Objetivo:** Login real, sessões, permissões por papel e trilha de auditoria por usuário.
 
 ### Entregas
-- [ ] Login/logout + sessão (solução própria sobre Postgres/Prisma, conforme CLAUDE.md §2).
-- [ ] Papéis: pesquisa / revisão / aprovação + middleware de proteção de rotas.
-- [ ] Guarda de permissão em server actions sensíveis.
-- [ ] `AuditLog` gravado em ações relevantes (criação/edição/exclusão, mudança de status).
-- [ ] Onboarding mínimo (tela/checklist do fluxo correto de pesquisa).
+- [x] Login/logout + sessão (solução própria sobre Postgres/Prisma, conforme CLAUDE.md §2).
+- [x] Papéis: pesquisa / revisão / aprovação + middleware de proteção de rotas.
+- [x] Guarda de permissão em server actions sensíveis.
+- [x] `AuditLog` gravado em ações relevantes (criação/edição/exclusão, mudança de status).
+- [x] Onboarding mínimo (tela/checklist do fluxo correto de pesquisa).
 
 ### Critério de aceite
 Acesso exige login; um usuário "pesquisa" não consegue aprovar; ações geram registro de auditoria.
