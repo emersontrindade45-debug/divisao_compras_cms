@@ -8,6 +8,7 @@ import {
 } from "@/components/contratacoes/ContratacoesFilters";
 import { ContratacoesTable } from "@/components/contratacoes/ContratacoesTable";
 import { ComparadorContratacoes } from "@/components/contratacoes/ComparadorContratacoes";
+import { RegistroAderenciaForm } from "@/components/contratacoes/RegistroAderenciaForm";
 import type { ContratacaoFixture } from "@/lib/fixtures/contratacoes";
 
 const modalidades = Array.from(new Set(CONTRATACOES.map((c) => c.modalidade))).sort((a, b) =>
@@ -24,6 +25,7 @@ export default function ContratacoesPage() {
   });
 
   const [comparando, setComparando] = useState<ContratacaoFixture[] | null>(null);
+  const [classificando, setClassificando] = useState<ContratacaoFixture | null>(null);
 
   const contratacoesFiltradas = useMemo(() => {
     return CONTRATACOES.filter((c) => {
@@ -76,12 +78,23 @@ export default function ContratacoesPage() {
       <ContratacoesTable
         contratacoes={contratacoesFiltradas}
         onCompare={(items) => setComparando(items)}
+        onClassificar={(item) => setClassificando(item)}
       />
 
       {comparando !== null && (
         <ComparadorContratacoes
           items={comparando}
           onClose={() => setComparando(null)}
+        />
+      )}
+
+      {classificando !== null && (
+        <RegistroAderenciaForm
+          contratacao={classificando}
+          open={classificando !== null}
+          onOpenChange={(v) => {
+            if (!v) setClassificando(null);
+          }}
         />
       )}
     </div>

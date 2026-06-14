@@ -71,7 +71,23 @@ export function FornecedorHistorico({ fornecedor, historico }: FornecedorHistori
             <ScoreBadge score={fornecedor.score} />
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm border-b pb-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Responsável</p>
+              <p className="font-medium">{fornecedor.responsavelContato}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">E-mail</p>
+              <p className="font-medium truncate">{fornecedor.email}</p>
+            </div>
+            {fornecedor.telefone && (
+              <div>
+                <p className="text-xs text-muted-foreground">Telefone</p>
+                <p className="font-medium">{fornecedor.telefone}</p>
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
               <p className="text-2xl font-semibold tabular-nums">{fornecedor.totalCotacoes}</p>

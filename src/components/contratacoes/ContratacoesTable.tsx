@@ -20,9 +20,10 @@ const formatDate = (iso: string) => {
 interface ContratacoesTableProps {
   contratacoes: ContratacaoFixture[];
   onCompare?: (items: ContratacaoFixture[]) => void;
+  onClassificar?: (item: ContratacaoFixture) => void;
 }
 
-export function ContratacoesTable({ contratacoes, onCompare }: ContratacoesTableProps) {
+export function ContratacoesTable({ contratacoes, onCompare, onClassificar }: ContratacoesTableProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const COLUNAS: ColumnDef<ContratacaoFixture>[] = [
@@ -101,6 +102,20 @@ export function ContratacoesTable({ contratacoes, onCompare }: ContratacoesTable
       cell: ({ row }) => (
         <StatusBadge status={row.original.aderencia as StatusDominio} />
       ),
+    },
+    {
+      id: "classificar",
+      header: "",
+      cell: ({ row }) =>
+        onClassificar ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onClassificar(row.original)}
+          >
+            Classificar
+          </Button>
+        ) : null,
     },
   ];
 

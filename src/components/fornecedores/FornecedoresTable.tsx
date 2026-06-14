@@ -52,6 +52,16 @@ export function FornecedoresTable({ fornecedores, onVerHistorico }: Fornecedores
       ),
     },
     {
+      id: "contato",
+      header: "Contato",
+      cell: ({ row }) => (
+        <div>
+          <span className="text-sm">{row.original.responsavelContato}</span>
+          <p className="text-xs text-muted-foreground">{row.original.email}</p>
+        </div>
+      ),
+    },
+    {
       id: "cidadeUf",
       header: "Cidade/UF",
       cell: ({ row }) => (
