@@ -1,4 +1,5 @@
 import { SheetsBanner } from "@/components/processos/SheetsBanner";
+import { SincronizarPlanilhaForm } from "@/components/processos/SincronizarPlanilhaForm";
 import { ProcessosTable } from "@/components/processos/ProcessosTable";
 import { listarProcessos } from "@/lib/actions/listar";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
@@ -38,6 +39,7 @@ export default async function ProcessosPage() {
         </p>
       </div>
       <SheetsBanner sheetsUrl={sheetsUrl} />
+      <SincronizarPlanilhaForm defaultUrl={sheetsUrl} />
       <ProcessosTable processos={processosMapeados} />
     </div>
   );

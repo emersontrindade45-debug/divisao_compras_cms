@@ -1,6 +1,7 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/shell/AppSidebar";
 import { Topbar } from "@/components/shell/Topbar";
+import { Toaster } from "@/components/ui/sonner";
 import { requireAuth } from "@/lib/auth/rbac";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -13,6 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <Topbar />
         <main className="flex-1 space-y-6 p-6">{children}</main>
       </SidebarInset>
+      <Toaster />
     </SidebarProvider>
   );
 }
