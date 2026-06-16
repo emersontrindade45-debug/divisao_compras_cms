@@ -234,6 +234,43 @@ Build de produção sobe; E2E do fluxo principal passa; aplicação acessível n
 
 ---
 
+## M10 — Pesquisa por Similaridade (TR → Contratos → Fornecedores) `[CONFORMIDADE]`
+
+- **Branch:** `feat/pesquisa-similaridade`
+- **Design:** [docs/superpowers/specs/2026-06-15-pesquisa-similaridade-design.md](superpowers/specs/2026-06-15-pesquisa-similaridade-design.md)
+- **Objetivo:** Resolver o maior gargalo do fluxo real — encontrar contratações públicas
+  similares com precisão suficiente para servir de justificativa formal — a partir do
+  Termo de Referência (TR) e da planilha padrão que já é o registro mestre dos itens.
+
+### Entregas
+
+- [ ] `lib/ia/`: client abstrato (Gemini Flash) com `extrairEspecificacaoTR()` e `rankearSimilaridade()`.
+- [ ] `lib/integracoes/pncp.ts` e `painelPrecos.ts`: clients tipados para as APIs públicas.
+- [ ] `lib/similaridade/`: orquestração do pipeline (extração → busca paralela → ranking),
+  reaproveitando `priceStats.ts` e `in65Rules.ts` sem duplicar regras de conformidade.
+- [ ] Ranking de similaridade com 3 parâmetros ponderados (descrição semântica 40%, especificação
+  técnica 35%, unidade/quantidade 25%) e corte de recência (>365 dias fora), com marcação de
+  candidatos "adaptados" (desmembramento/conversão de unidade).
+- [ ] Busca de fornecedores diretos por nicho + camadas geográficas (Baixada Santista → SP →
+  Sudeste → Sul → Centro-Oeste), priorizando base existente antes de buscar na internet.
+- [ ] Busca em sites eletrônicos restrita à lista branca já existente no módulo Sites, para itens
+  de uso comum.
+- [ ] Nova aba "Pesquisa por Similaridade" no detalhe do processo: upload de planilha + TR, caixa
+  de diálogo de revisão por item, tabela resumo read-only pós-revisão.
+- [ ] Escrita de volta na planilha original (`lib/sheets/atualizarPlanilha()`), com credencial
+  Google (Service Account recomendado) a configurar no início da implementação.
+- [ ] Remoção do disparo automático de e-mail via Resend em `criarCotacao` (a Câmara envia por
+  fora do sistema); mantém apenas o registro de cotação/SLA.
+
+### Critério de aceite
+Para um TR + planilha de teste real, o sistema retorna candidatos a contrato público rankeados,
+com os 3 parâmetros detalhados; edição na caixa de diálogo reflete na planilha original; nenhum
+preço é promovido a `Fonte` sem ação manual do usuário.
+
+> **Commit final:** `feat: pesquisa de similaridade entre TR, contratos públicos e fornecedores`
+
+---
+
 ## Resumo das milestones
 
 | # | Branch | Fase | Entrega-chave |
@@ -248,3 +285,4 @@ Build de produção sobe; E2E do fluxo principal passa; aplicação acessível n
 | M7 | `feat/backend-integracao` | Conformidade | Server actions + regras IN 65 |
 | M8 | `feat/emails-relatorios` | Backend | Resend, SLA, notificações, exportação |
 | M9 | `chore/deploy` | Entrega | E2E, hardening, deploy |
+| M10 | `feat/pesquisa-similaridade` | Conformidade | TR → contratos similares → fornecedores, via IA |

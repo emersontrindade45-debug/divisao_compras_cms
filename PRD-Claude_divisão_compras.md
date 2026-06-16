@@ -26,7 +26,7 @@ Notificações, para alertar sobre prazo de resposta de fornecedores, pendência
 
 Relatórios e Exportação, para gerar relatório resumido, relatório completo e memória de cálculo da pesquisa de preços.
 
-Integrações (API), para conexão com bases públicas, e-mail e eventualmente Google Drive, Google Sheets e Backsite.
+Integrações (API), para conexão com bases públicas de contratações (PNCP, Painel de Preços/Compras.gov.br), Google Sheets (planilha padrão como registro mestre dos itens, com leitura e escrita sincronizada) e um provedor de IA para extração do Termo de Referência e ranking de similaridade. O disparo de e-mail de cotação é feito fora do sistema, pela própria Câmara — a plataforma apenas registra o status e o SLA da cotação.
 
 Upload de Arquivos, para anexar propostas, prints, PDFs, e-mails, TR e documentos comprobatórios.
 
@@ -36,21 +36,40 @@ Onboarding do Usuário, para ensinar o fluxo correto de pesquisa e padronizar a 
 
 Funcionalidades específicas do produto:
 
-Cadastro estruturado do objeto, com descrição, unidade, quantidade, características técnicas e palavras-chave.
+Cadastro do objeto via planilha padrão (formato fixo, já em uso pela Divisão de Compras) como
+registro mestre dos itens a cotar — a plataforma lê e escreve nessa planilha, não substitui o
+formulário por um cadastro interno.
 
-Motor de estratégia de busca, que sugere a ordem ideal entre contrato similar, site eletrônico e fornecedor direto.
+Pesquisa por similaridade assistida por IA: a partir do Termo de Referência (PDF) e da planilha de
+itens, o sistema extrai descrição, especificação técnica, unidade e quantidade de cada item, e
+busca contratações públicas similares (PNCP, Painel de Preços) com um ranking de similaridade
+explícito — pesos por descrição semântica, especificação técnica e unidade/quantidade, com corte
+por recência (validade de 365 dias). Esta é a funcionalidade núcleo do produto: o maior gargalo do
+fluxo manual está em encontrar contratos similares com precisão suficiente para justificar a
+instrução processual.
+
+Motor de estratégia de busca, que sugere a ordem ideal entre contrato similar, site eletrônico e
+fornecedor direto, e aciona busca em sites eletrônicos (lista branca já validada) quando o item for
+de uso comum.
 
 Módulo de contratações públicas similares, com classificação de aderência e histórico reutilizável.
 
 Validador de sites eletrônicos, com bloqueio de marketplaces e captura de data e hora do acesso.
 
-Cadastro vivo de fornecedores, com categoria, contatos, histórico de resposta e score operacional.
+Descoberta e qualificação de fornecedores diretos por nicho do objeto e proximidade geográfica
+(prioridade: Baixada Santista → Estado de SP → Sudeste → Sul → Centro-Oeste), cruzando primeiro com
+a base de fornecedores já cadastrada e só buscando fornecedor novo quando a camada geográfica
+adequada não tiver candidato qualificado. Fornecedores novos alimentam a base existente, tagueados
+por nicho.
 
-Disparo de e-mails de cotação com template padronizado e controle de SLA.
+Registro de cotações com controle de SLA — o envio do e-mail em si é feito pela Câmara fora do
+sistema; a plataforma rastreia status de resposta e lembretes de prazo.
 
 Checklist automático de validade da proposta recebida, com CNPJ, descrição, valor, data e responsável.
 
-Consolidação automática da série de preços com média, mediana ou menor valor e justificativa metodológica.
+Consolidação automática da série de preços com média, mediana ou menor valor e justificativa
+metodológica. Nenhum resultado da pesquisa por similaridade entra automaticamente na série de
+preços — fica disponível para análise, e a promoção a fonte é sempre uma ação manual do usuário.
 
 Não faz sentido priorizar, nesta versão, Kanban, Multi empresa, Parte premium, Chat/Mensagens, Calendário e Landing Page como núcleo do produto, porque o ganho principal está na inteligência operacional da pesquisa de preços, não em recursos comerciais ou de colaboração social
 
@@ -78,7 +97,11 @@ PostgreSQL, para guardar processos, fontes, fornecedores, logs, respostas e hist
 
 Prisma, para modelagem e acesso ao banco com produtividade.
 
-Resend (e-mails), para disparo controlado de solicitações de orçamento e lembretes.
+Resend (e-mails), reservado para lembretes internos do sistema; o disparo da cotação ao fornecedor é feito pela Câmara fora da plataforma.
+
+PNCP e Painel de Preços (Compras.gov.br), via API pública, para a busca de contratações públicas similares.
+
+Gemini Flash (camada gratuita), para extração estruturada do Termo de Referência e ranking de similaridade — integração abstraída para permitir troca de provedor de IA sem reescrever os módulos que a consomem.
 
 Vercel, se a implantação for web moderna com ambiente gerenciável, embora em contexto institucional também possa haver hospedagem própria.
 
