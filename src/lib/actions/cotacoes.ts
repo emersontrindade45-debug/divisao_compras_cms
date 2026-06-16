@@ -9,7 +9,6 @@ import {
   createPropostaSchema,
 } from "@/lib/validations/cotacao";
 import { validarProposta } from "@/lib/domain/proposalValidator";
-import { enviarCotacao } from "@/lib/email";
 import type { ActionResult } from "./processos";
 
 export async function criarCotacao(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -20,27 +19,6 @@ export async function criarCotacao(input: unknown): Promise<ActionResult<{ id: s
   const cotacao = await db.cotacao.create({
     data: { ...parsed.data, status: "silenciosa" },
   });
-
-  // Fetch related data for email
-  const [fornecedor, processo] = await Promise.all([
-    db.fornecedor.findUnique({ where: { id: parsed.data.fornecedorId } }),
-    db.processo.findUnique({ where: { id: parsed.data.processoId } }),
-  ]);
-
-  if (fornecedor && processo) {
-    await enviarCotacao(fornecedor.email, {
-      fornecedorNome: fornecedor.razaoSocial,
-      processoNumero: processo.numero,
-      objeto: processo.objeto,
-      unidade: processo.unidade,
-      quantidade: processo.quantidade,
-      caracteristicasTecnicas: processo.caracteristicasTecnicas,
-      dataLimite: parsed.data.dataLimite,
-      responsavelNome: user.name,
-      responsavelEmail: user.email,
-      appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-    });
-  }
 
   await registrarAuditoria({
     userId: user.id,
