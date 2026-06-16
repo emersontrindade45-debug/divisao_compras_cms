@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/common/EmptyState";
 import { TabelaSeriePrecos } from "@/components/cotacoes/TabelaSeriePrecos";
 import { EstrategiaOrquestrador } from "./EstrategiaOrquestrador";
+import { PesquisaSimilaridadeUploadForm } from "./PesquisaSimilaridadeUploadForm";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import { getSerieByProcessoId } from "@/lib/fixtures/seriePrecos";
 
@@ -16,6 +17,7 @@ export function ProcessoTabs({ processo }: { processo: ProcessoFixture }) {
     <Tabs defaultValue="estrategia" className="space-y-4">
       <TabsList>
         <TabsTrigger value="estrategia">Estratégia</TabsTrigger>
+        <TabsTrigger value="similaridade">Pesquisa por Similaridade</TabsTrigger>
         <TabsTrigger value="fontes">Fontes</TabsTrigger>
         <TabsTrigger value="evidencias">Evidências</TabsTrigger>
         <TabsTrigger value="serie">Série de preços</TabsTrigger>
@@ -41,6 +43,10 @@ export function ProcessoTabs({ processo }: { processo: ProcessoFixture }) {
             </div>
           </CardContent>
         </Card>
+      </TabsContent>
+
+      <TabsContent value="similaridade" className="space-y-4">
+        <PesquisaSimilaridadeUploadForm processoId={processo.id} />
       </TabsContent>
 
       <TabsContent value="fontes">
