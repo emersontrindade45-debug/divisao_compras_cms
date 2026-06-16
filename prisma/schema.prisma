@@ -32,6 +32,11 @@ enum TipoFonte {
   fornecedor_direto
 }
 
+enum TipoCandidatoSimilaridade {
+  contratacao_publica
+  painel_precos
+}
+
 enum AderenciaFonte {
   aderente
   parcial
@@ -101,8 +106,8 @@ model User {
 }
 
 model Processo {
-  id                      String             @id @default(cuid())
-  numero                  String             @unique
+  id                      String            @id @default(cuid())
+  numero                  String            @unique
   objeto                  String
   unidade                 String
   quantidade              Int
@@ -110,10 +115,10 @@ model Processo {
   palavrasChave           String[]
   classificacao           ClassificacaoItem
   responsavel             String
-  status                  StatusProcesso     @default(pendente)
+  status                  StatusProcesso    @default(pendente)
   dataAbertura            DateTime
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
 
   itens        Item[]
   contratacoes ContratacaoPublica[]
@@ -136,11 +141,36 @@ model Item {
   createdAt               DateTime          @default(now())
   updatedAt               DateTime          @updatedAt
 
-  processo    Processo     @relation(fields: [processoId], references: [id], onDelete: Cascade)
-  fontes      Fonte[]
-  seriePrecos SeriePreco[]
+  processo               Processo                @relation(fields: [processoId], references: [id], onDelete: Cascade)
+  fontes                 Fonte[]
+  seriePrecos            SeriePreco[]
+  resultadosSimilaridade ResultadoSimilaridade[]
 
   @@map("itens")
+}
+
+model ResultadoSimilaridade {
+  id                     String                    @id @default(cuid())
+  itemId                 String
+  tipoCandidato          TipoCandidatoSimilaridade
+  fonteDescricao         String
+  fonteOrgaoOuId         String
+  fonteUrl               String?
+  valorUnitario          Decimal                   @db.Decimal(12, 2)
+  dataReferencia         DateTime
+  scoreFinal             Decimal                   @db.Decimal(5, 2)
+  scoreDescricao         Decimal                   @db.Decimal(5, 2)
+  scoreEspecificacao     Decimal                   @db.Decimal(5, 2)
+  scoreUnidadeQuantidade Decimal                   @db.Decimal(5, 2)
+  adaptado               Boolean                   @default(false)
+  justificativa          String
+  promovidoParaFonte     Boolean                   @default(false)
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@map("resultados_similaridade")
 }
 
 model Fonte {
@@ -246,7 +276,7 @@ model Fornecedor {
   score              Int              @default(0)
   totalCotacoes      Int              @default(0)
   totalRespostas     Int              @default(0)
-  taxaResposta       Decimal          @db.Decimal(5, 2) @default(0)
+  taxaResposta       Decimal          @default(0) @db.Decimal(5, 2)
   ultimaResposta     DateTime?
   status             StatusFornecedor @default(ativo)
   createdAt          DateTime         @default(now())
@@ -354,13 +384,13 @@ model PrecoConsolidado {
 }
 
 model AuditLog {
-  id         String    @id @default(cuid())
+  id         String   @id @default(cuid())
   userId     String
   processoId String?
   cotacaoId  String?
   acao       String
   detalhes   Json?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
 
   user     User      @relation(fields: [userId], references: [id])
   processo Processo? @relation(fields: [processoId], references: [id])
