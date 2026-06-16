@@ -1,11 +1,29 @@
 import "server-only";
+import { z } from "zod";
 import { getGeminiClient, GEMINI_MODEL } from "./geminiClient";
-import type {
-  ItemExtraidoTR,
-  CandidatoSimilaridade,
-  ScoreSimilaridade,
-  ProvedorIA,
-} from "./types";
+import type { ItemExtraidoTR, CandidatoSimilaridade, ScoreSimilaridade, ProvedorIA } from "./types";
+
+const itemExtraidoTRSchema = z.object({
+  descricao: z.string(),
+  especificacaoTecnica: z.string(),
+  unidade: z.string(),
+  quantidade: z.number(),
+});
+
+const itensExtraidosTRSchema = z.array(itemExtraidoTRSchema);
+
+const avaliacaoSimilaridadeSchema = z.object({
+  scoreDescricao: z.number(),
+  scoreEspecificacao: z.number(),
+  scoreUnidadeQuantidade: z.number(),
+  adaptado: z.boolean(),
+  justificativa: z.string(),
+});
+
+const avaliacoesSimilaridadeSchema = z.array(avaliacaoSimilaridadeSchema);
+
+/** Avaliação bruta retornada pela IA para um candidato, antes do cálculo do scoreFinal. */
+type AvaliacaoBruta = Omit<ScoreSimilaridade, "candidato" | "scoreFinal">;
 
 const PROMPT_EXTRACAO = `Você é um analista de compras públicas. Leia o Termo de Referência (TR) em anexo
 e extraia cada item a ser cotado. Para cada item, retorne um objeto JSON com:
@@ -42,9 +60,74 @@ Responda APENAS com um array JSON, na mesma ordem dos candidatos, sem texto adic
 [{ "scoreDescricao": number, "scoreEspecificacao": number, "scoreUnidadeQuantidade": number, "adaptado": boolean, "justificativa": string }]`;
 }
 
-function parseJsonResponse<T>(texto: string): T {
-  const limpo = texto.trim().replace(/^```json\s*/i, "").replace(/```$/, "").trim();
-  return JSON.parse(limpo) as T;
+const TAMANHO_TRECHO_DIAGNOSTICO = 500;
+
+/**
+ * Extrai o "ilhote" de JSON de uma resposta de modelo de linguagem, tolerando ruído
+ * ao redor (cercas de markdown não exatamente no início/fim, comentários após o
+ * bloco, etc.).
+ *
+ * Estratégia:
+ * 1. Procura um bloco cercado por ``` (ou ```json) em qualquer posição do texto.
+ * 2. Se não houver cerca, cai para o trecho entre o primeiro `[`/`{` e o último
+ *    `]`/`}` correspondente, que cobre a resposta "JSON puro com texto solto ao redor".
+ */
+function extrairJson(texto: string): string {
+  const textoTrim = texto.trim();
+
+  const fenceMatch = textoTrim.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch?.[1]) {
+    return fenceMatch[1].trim();
+  }
+
+  const inicioArray = textoTrim.indexOf("[");
+  const inicioObjeto = textoTrim.indexOf("{");
+  const candidatosInicio = [inicioArray, inicioObjeto].filter((idx) => idx !== -1);
+  if (candidatosInicio.length === 0) {
+    return textoTrim;
+  }
+  const inicio = Math.min(...candidatosInicio);
+  const charAbertura = textoTrim[inicio];
+  const charFechamento = charAbertura === "[" ? "]" : "}";
+  const fim = textoTrim.lastIndexOf(charFechamento);
+  if (fim === -1 || fim < inicio) {
+    return textoTrim;
+  }
+
+  return textoTrim.slice(inicio, fim + 1).trim();
+}
+
+function truncar(texto: string, tamanho: number): string {
+  return texto.length > tamanho ? `${texto.slice(0, tamanho)}…` : texto;
+}
+
+/**
+ * Faz o parse da resposta textual do modelo e valida seu formato contra `schema`.
+ * Lança um erro com contexto (`contexto`) e um trecho truncado da resposta crua,
+ * essencial para depuração quando o modelo retorna algo fora do esperado.
+ */
+function parseJsonResponse<T>(texto: string, schema: z.ZodType<T>, contexto: string): T {
+  const limpo = extrairJson(texto);
+
+  let bruto: unknown;
+  try {
+    bruto = JSON.parse(limpo);
+  } catch (erro) {
+    throw new Error(
+      `[${contexto}] Falha ao fazer parse do JSON retornado pela IA. Trecho recebido: "${truncar(texto, TAMANHO_TRECHO_DIAGNOSTICO)}"`,
+      { cause: erro },
+    );
+  }
+
+  const resultado = schema.safeParse(bruto);
+  if (!resultado.success) {
+    throw new Error(
+      `[${contexto}] Resposta da IA não corresponde ao formato esperado: ${resultado.error.message}. Trecho recebido: "${truncar(texto, TAMANHO_TRECHO_DIAGNOSTICO)}"`,
+      { cause: resultado.error },
+    );
+  }
+
+  return resultado.data;
 }
 
 export class GeminiProvider implements ProvedorIA {
@@ -64,7 +147,7 @@ export class GeminiProvider implements ProvedorIA {
     });
 
     const texto = response.text ?? "[]";
-    return parseJsonResponse<ItemExtraidoTR[]>(texto);
+    return parseJsonResponse(texto, itensExtraidosTRSchema, "extrairEspecificacaoTR");
   }
 
   async rankearSimilaridade(
@@ -80,14 +163,11 @@ export class GeminiProvider implements ProvedorIA {
     });
 
     const texto = response.text ?? "[]";
-    type AvaliacaoBruta = {
-      scoreDescricao: number;
-      scoreEspecificacao: number;
-      scoreUnidadeQuantidade: number;
-      adaptado: boolean;
-      justificativa: string;
-    };
-    const avaliacoes = parseJsonResponse<AvaliacaoBruta[]>(texto);
+    const avaliacoes: AvaliacaoBruta[] = parseJsonResponse(
+      texto,
+      avaliacoesSimilaridadeSchema,
+      "rankearSimilaridade",
+    );
 
     return candidatos.map((candidato, idx) => {
       const avaliacao = avaliacoes[idx];
