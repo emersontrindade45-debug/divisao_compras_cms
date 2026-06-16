@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { createFornecedorSchema, updateFornecedorSchema } from "@/lib/validations/fornecedor";
 import { calcularScore } from "@/lib/domain/supplierScore";
+import { buscarFornecedorPorCamada } from "@/lib/domain/buscarFornecedorPorCamada";
 import type { ActionResult } from "./processos";
 
 export async function criarFornecedor(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -94,4 +95,41 @@ export async function obterScoreFornecedor(fornecedorId: string) {
       dataResposta: h.statusResposta === "respondido" ? h.data : undefined,
     })),
   });
+}
+
+export interface ResultadoBuscaFornecedor {
+  camadaEncontrada: string | null;
+  fornecedores: Array<{
+    id: string;
+    razaoSocial: string;
+    cidade: string;
+    estado: string;
+    score: number;
+  }>;
+  precisaBuscarNovo: boolean;
+}
+
+export async function buscarOuQualificarFornecedor(
+  nicho: string,
+): Promise<ResultadoBuscaFornecedor> {
+  await requireAuth();
+
+  const candidatos = await db.fornecedor.findMany({
+    where: { categoria: { has: nicho }, status: "ativo" },
+    select: { id: true, razaoSocial: true, cidade: true, estado: true, categoria: true, score: true },
+  });
+
+  const { camadaEncontrada, fornecedores } = buscarFornecedorPorCamada(candidatos, nicho);
+
+  return {
+    camadaEncontrada,
+    fornecedores: fornecedores.map((f) => ({
+      id: f.id,
+      razaoSocial: f.razaoSocial,
+      cidade: f.cidade,
+      estado: f.estado,
+      score: f.score,
+    })),
+    precisaBuscarNovo: camadaEncontrada === null,
+  };
 }
