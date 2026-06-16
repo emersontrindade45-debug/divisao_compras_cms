@@ -14,6 +14,8 @@ export interface ItemProcessadoSimilaridade {
   itemId: string;
   descricao: string;
   totalCandidatos: number;
+  status: "sucesso" | "erro" | "ignorado";
+  erro?: string;
 }
 
 export interface ResultadoPesquisaSimilaridade {
@@ -61,50 +63,82 @@ export async function processarPesquisaSimilaridade(
   const itensProcessados: ItemProcessadoSimilaridade[] = [];
 
   for (const item of itens) {
-    const itemTR = casarItemComExtrato(item.descricao, extratos) ?? {
-      descricao: item.descricao,
-      especificacaoTecnica: item.caracteristicasTecnicas ?? "",
-      unidade: item.unidade,
-      quantidade: item.quantidade,
-    };
+    try {
+      const jaPromovido = await db.resultadoSimilaridade.findFirst({
+        where: { itemId: item.id, promovidoParaFonte: true },
+        select: { id: true },
+      });
 
-    const candidatos = await buscarCandidatosPublicos(itemTR.descricao);
-    const ranqueados = await rankearCandidatos(itemTR, candidatos, provedor);
-
-    await db.resultadoSimilaridade.deleteMany({ where: { itemId: item.id } });
-
-    if (ranqueados.length > 0) {
-      await db.resultadoSimilaridade.createMany({
-        data: ranqueados.map((r) => ({
+      if (jaPromovido) {
+        itensProcessados.push({
           itemId: item.id,
-          tipoCandidato: r.candidato.tipoCandidato,
-          fonteDescricao: r.candidato.fonteDescricao,
-          fonteOrgaoOuId: r.candidato.fonteOrgaoOuId,
-          fonteUrl: r.candidato.fonteUrl ?? null,
-          valorUnitario: r.candidato.valorUnitario,
-          dataReferencia: r.candidato.dataReferencia,
-          scoreFinal: r.scoreFinal,
-          scoreDescricao: r.scoreDescricao,
-          scoreEspecificacao: r.scoreEspecificacao,
-          scoreUnidadeQuantidade: r.scoreUnidadeQuantidade,
-          adaptado: r.adaptado,
-          justificativa: r.justificativa,
-        })),
+          descricao: item.descricao,
+          totalCandidatos: 0,
+          status: "ignorado",
+          erro: "Já possui resultado promovido para a série de preços; não foi reprocessado.",
+        });
+        continue;
+      }
+
+      const itemTR = casarItemComExtrato(item.descricao, extratos) ?? {
+        descricao: item.descricao,
+        especificacaoTecnica: item.caracteristicasTecnicas ?? "",
+        unidade: item.unidade,
+        quantidade: item.quantidade,
+      };
+
+      const candidatos = await buscarCandidatosPublicos(itemTR.descricao);
+      const ranqueados = await rankearCandidatos(itemTR, candidatos, provedor);
+
+      await db.resultadoSimilaridade.deleteMany({ where: { itemId: item.id } });
+
+      if (ranqueados.length > 0) {
+        await db.resultadoSimilaridade.createMany({
+          data: ranqueados.map((r) => ({
+            itemId: item.id,
+            tipoCandidato: r.candidato.tipoCandidato,
+            fonteDescricao: r.candidato.fonteDescricao,
+            fonteOrgaoOuId: r.candidato.fonteOrgaoOuId,
+            fonteUrl: r.candidato.fonteUrl ?? null,
+            valorUnitario: r.candidato.valorUnitario,
+            dataReferencia: r.candidato.dataReferencia,
+            scoreFinal: r.scoreFinal,
+            scoreDescricao: r.scoreDescricao,
+            scoreEspecificacao: r.scoreEspecificacao,
+            scoreUnidadeQuantidade: r.scoreUnidadeQuantidade,
+            adaptado: r.adaptado,
+            justificativa: r.justificativa,
+          })),
+        });
+      }
+
+      itensProcessados.push({
+        itemId: item.id,
+        descricao: item.descricao,
+        totalCandidatos: ranqueados.length,
+        status: "sucesso",
+      });
+    } catch (err) {
+      itensProcessados.push({
+        itemId: item.id,
+        descricao: item.descricao,
+        totalCandidatos: 0,
+        status: "erro",
+        erro: err instanceof Error ? err.message : "Falha desconhecida ao processar o item.",
       });
     }
-
-    itensProcessados.push({
-      itemId: item.id,
-      descricao: item.descricao,
-      totalCandidatos: ranqueados.length,
-    });
   }
 
   await registrarAuditoria({
     userId: user.id,
     processoId,
     acao: "processar_pesquisa_similaridade",
-    detalhes: { itens: itensProcessados.length },
+    detalhes: {
+      itens: itensProcessados.length,
+      sucesso: itensProcessados.filter((i) => i.status === "sucesso").length,
+      erro: itensProcessados.filter((i) => i.status === "erro").length,
+      ignorado: itensProcessados.filter((i) => i.status === "ignorado").length,
+    },
   });
 
   revalidatePath(`/processos/${processoId}`);
