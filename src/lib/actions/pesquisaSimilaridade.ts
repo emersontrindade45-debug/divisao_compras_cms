@@ -9,8 +9,14 @@ import { rankearCandidatos } from "@/lib/similaridade/rankearCandidatos";
 import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPublicos";
 import { filtrarPorPalavrasChave } from "@/lib/similaridade/filtroPalavrasChave";
 import { resolverTermoBusca } from "@/lib/similaridade/extrairTermoBusca";
+import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorrencia";
 import type { ItemExtraidoTR } from "@/lib/ia/types";
 import type { ActionResult } from "./processos";
+
+// Itens são independentes entre si; processá-los em paralelo (com limite) evita que a
+// soma das buscas sequenciais no PNCP/Painel de Preços estoure o timeout da função
+// serverless quando essas fontes estão instáveis (retries + backoff por item).
+const LIMITE_CONCORRENCIA_ITENS = 4;
 
 export interface ItemProcessadoSimilaridade {
   itemId: string;
@@ -70,35 +76,38 @@ export async function processarPesquisaSimilaridade(
 
   // Cada item busca candidatos pelo seu próprio termo (a busca textual do PNCP é o
   // que torna os resultados relevantes); o cache evita repetir a mesma busca de rede
-  // quando vários itens do processo compartilham termo (ex.: variações de cor).
-  const cacheCandidatosPorTermo = new Map<string, Awaited<ReturnType<typeof buscarCandidatosPublicos>>>();
-  async function buscarCandidatosComCache(termo: string) {
+  // quando vários itens do processo compartilham termo (ex.: variações de cor). Guarda
+  // a Promise (não o resultado) para que itens concorrentes com o mesmo termo aguardem
+  // a mesma busca em vez de disparar chamadas de rede duplicadas.
+  const cacheCandidatosPorTermo = new Map<string, ReturnType<typeof buscarCandidatosPublicos>>();
+  function buscarCandidatosComCache(termo: string) {
     const cacheKey = termo.toLowerCase();
     const cacheado = cacheCandidatosPorTermo.get(cacheKey);
     if (cacheado) return cacheado;
-    const resultado = await buscarCandidatosPublicos(termo);
+    const resultado = buscarCandidatosPublicos(termo);
     cacheCandidatosPorTermo.set(cacheKey, resultado);
     return resultado;
   }
 
-  const itensProcessados: ItemProcessadoSimilaridade[] = [];
+  const mensagensErroPorItem = new Map<string, string>();
 
-  for (const item of itens) {
-    try {
+  const resultados = await processarComConcorrencia(
+    itens,
+    LIMITE_CONCORRENCIA_ITENS,
+    async (item): Promise<ItemProcessadoSimilaridade> => {
       const jaPromovido = await db.resultadoSimilaridade.findFirst({
         where: { itemId: item.id, promovidoParaFonte: true },
         select: { id: true },
       });
 
       if (jaPromovido) {
-        itensProcessados.push({
+        return {
           itemId: item.id,
           descricao: item.descricao,
           totalCandidatos: 0,
           status: "ignorado",
           erro: "Já possui resultado promovido para a série de preços; não foi reprocessado.",
-        });
-        continue;
+        };
       }
 
       const itemTR = casarItemComExtrato(item.descricao, extratos) ?? {
@@ -143,23 +152,29 @@ export async function processarPesquisaSimilaridade(
         });
       }
 
-      itensProcessados.push({
+      return {
         itemId: item.id,
         descricao: item.descricao,
         totalCandidatos: ranqueados.length,
         status: "sucesso",
-      });
-    } catch (err) {
+      };
+    },
+    (item, err) => {
       console.error(`[PesquisaSimilaridade] Erro ao processar item ${item.id}:`, err);
-      itensProcessados.push({
-        itemId: item.id,
-        descricao: item.descricao,
+      mensagensErroPorItem.set(item.id, err instanceof Error ? err.message : "Falha desconhecida ao processar o item.");
+    },
+  );
+
+  const itensProcessados: ItemProcessadoSimilaridade[] = resultados.map(
+    (resultado, indice) =>
+      resultado ?? {
+        itemId: itens[indice].id,
+        descricao: itens[indice].descricao,
         totalCandidatos: 0,
         status: "erro",
-        erro: err instanceof Error ? err.message : "Falha desconhecida ao processar o item.",
-      });
-    }
-  }
+        erro: mensagensErroPorItem.get(itens[indice].id) ?? "Falha desconhecida ao processar o item.",
+      },
+  );
 
   await registrarAuditoria({
     userId: user.id,
