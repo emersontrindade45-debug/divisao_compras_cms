@@ -7,6 +7,8 @@ import { registrarAuditoria } from "@/lib/auth/audit";
 import { getProvedorIA } from "@/lib/ia";
 import { rankearCandidatos } from "@/lib/similaridade/rankearCandidatos";
 import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPublicos";
+import { filtrarPorPalavrasChave } from "@/lib/similaridade/filtroPalavrasChave";
+import { resolverTermoBusca } from "@/lib/similaridade/extrairTermoBusca";
 import type { ItemExtraidoTR } from "@/lib/ia/types";
 import type { ActionResult } from "./processos";
 
@@ -40,9 +42,15 @@ function casarItemComExtrato(
 
 export async function processarPesquisaSimilaridade(
   processoId: string,
-  trPdfBuffer: Buffer,
+  formData: FormData,
 ): Promise<ActionResult<ResultadoPesquisaSimilaridade>> {
   const user = await requireAuth();
+
+  const trPdfFile = formData.get("trPdf");
+  if (!(trPdfFile instanceof File)) {
+    return { error: "Selecione o PDF do Termo de Referência." };
+  }
+  const trPdfBuffer = Buffer.from(await trPdfFile.arrayBuffer());
 
   const itens = await db.item.findMany({ where: { processoId } });
   if (itens.length === 0) {
@@ -58,6 +66,19 @@ export async function processarPesquisaSimilaridade(
     return {
       error: err instanceof Error ? `Falha ao processar o TR: ${err.message}` : "Falha ao processar o TR.",
     };
+  }
+
+  // Cada item busca candidatos pelo seu próprio termo (a busca textual do PNCP é o
+  // que torna os resultados relevantes); o cache evita repetir a mesma busca de rede
+  // quando vários itens do processo compartilham termo (ex.: variações de cor).
+  const cacheCandidatosPorTermo = new Map<string, Awaited<ReturnType<typeof buscarCandidatosPublicos>>>();
+  async function buscarCandidatosComCache(termo: string) {
+    const cacheKey = termo.toLowerCase();
+    const cacheado = cacheCandidatosPorTermo.get(cacheKey);
+    if (cacheado) return cacheado;
+    const resultado = await buscarCandidatosPublicos(termo);
+    cacheCandidatosPorTermo.set(cacheKey, resultado);
+    return resultado;
   }
 
   const itensProcessados: ItemProcessadoSimilaridade[] = [];
@@ -87,8 +108,18 @@ export async function processarPesquisaSimilaridade(
         quantidade: item.quantidade,
       };
 
-      const candidatos = await buscarCandidatosPublicos(itemTR.descricao);
-      const ranqueados = await rankearCandidatos(itemTR, candidatos, provedor);
+      const termoBusca = resolverTermoBusca({
+        descricao: item.descricao,
+        palavrasChave: item.palavrasChave,
+        termoBuscaIA: itemTR.termoBusca,
+      });
+      const candidatosPublicos = await buscarCandidatosComCache(termoBusca);
+      // A busca textual do PNCP retorna editais inteiros (ex.: "material de expediente"
+      // completo); o filtro exige a palavra-núcleo do termo (primeiro token) em cada
+      // candidato antes de gastar tokens de IA com itens de outra categoria.
+      const candidatosFiltrados = filtrarPorPalavrasChave(candidatosPublicos, termoBusca.split(/\s+/));
+
+      const ranqueados = await rankearCandidatos(itemTR, candidatosFiltrados, provedor);
 
       await db.resultadoSimilaridade.deleteMany({ where: { itemId: item.id } });
 
@@ -119,6 +150,7 @@ export async function processarPesquisaSimilaridade(
         status: "sucesso",
       });
     } catch (err) {
+      console.error(`[PesquisaSimilaridade] Erro ao processar item ${item.id}:`, err);
       itensProcessados.push({
         itemId: item.id,
         descricao: item.descricao,

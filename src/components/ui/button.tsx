@@ -1,3 +1,4 @@
+import { isValidElement } from "react";
 import { Button as ButtonPrimitive } from "@base-ui/react/button";
 import { cva, type VariantProps } from "class-variance-authority";
 
@@ -44,12 +45,22 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  render,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  // Com `nativeButton={false}` o useButton do Base UI carimba role="button" no elemento
+  // renderizado; para navegação (render com href, ex.: <Link>) isso destruiria a
+  // semântica de link para leitores de tela — restaura role="link" nesses casos.
+  const renderizaLink =
+    isValidElement(render) && (render.props as { href?: unknown }).href != null;
+
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      render={render}
+      nativeButton={render ? false : undefined}
+      role={renderizaLink ? "link" : undefined}
       {...props}
     />
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { FileText, Globe } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,10 +8,17 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { TabelaSeriePrecos } from "@/components/cotacoes/TabelaSeriePrecos";
 import { EstrategiaOrquestrador } from "./EstrategiaOrquestrador";
 import { PesquisaSimilaridadeUploadForm } from "./PesquisaSimilaridadeUploadForm";
+import { PreencherCotacaoForm } from "./PreencherCotacaoForm";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import { getSerieByProcessoId } from "@/lib/fixtures/seriePrecos";
 
-export function ProcessoTabs({ processo }: { processo: ProcessoFixture }) {
+export function ProcessoTabs({
+  processo,
+  fontesSimilaridade,
+}: {
+  processo: ProcessoFixture;
+  fontesSimilaridade?: ReactNode;
+}) {
   const serie = getSerieByProcessoId(processo.id);
 
   return (
@@ -47,6 +55,8 @@ export function ProcessoTabs({ processo }: { processo: ProcessoFixture }) {
 
       <TabsContent value="similaridade" className="space-y-4">
         <PesquisaSimilaridadeUploadForm processoId={processo.id} />
+        <PreencherCotacaoForm processoId={processo.id} />
+        {fontesSimilaridade}
       </TabsContent>
 
       <TabsContent value="fontes">

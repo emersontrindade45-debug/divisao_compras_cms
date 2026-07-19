@@ -3,6 +3,7 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProcessoHeader } from "@/components/processos/ProcessoHeader";
 import { ProcessoTabs } from "@/components/processos/ProcessoTabs";
+import { FontesSimilaridadeList } from "@/components/processos/FontesSimilaridadeList";
 import { obterProcessoDetalhado } from "@/lib/actions/listar";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import type { StatusDominio } from "@/lib/domain/status";
@@ -49,7 +50,10 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
   return (
     <div className="space-y-6">
       <ProcessoHeader processo={processoMapeado} />
-      <ProcessoTabs processo={processoMapeado} />
+      <ProcessoTabs
+        processo={processoMapeado}
+        fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
+      />
     </div>
   );
 }

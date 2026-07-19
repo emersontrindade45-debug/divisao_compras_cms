@@ -11,10 +11,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function candidato(diasAtras: number, valor = 100): CandidatoSimilaridade {
+function candidato(diasAtras: number, valor = 100, fonteDescricao = "Cadeira"): CandidatoSimilaridade {
   return {
     tipoCandidato: "contratacao_publica",
-    fonteDescricao: "Cadeira",
+    fonteDescricao,
     fonteOrgaoOuId: "Org",
     valorUnitario: valor,
     dataReferencia: new Date(Date.now() - diasAtras * 24 * 60 * 60 * 1000),
@@ -64,18 +64,18 @@ describe("rankearCandidatos", () => {
         {
           candidato: candidato(10),
           scoreFinal: 0,
-          scoreDescricao: 80,
-          scoreEspecificacao: 60,
-          scoreUnidadeQuantidade: 40,
+          scoreDescricao: 90,
+          scoreEspecificacao: 85,
+          scoreUnidadeQuantidade: 80,
           adaptado: false,
-          justificativa: "Parcialmente similar",
+          justificativa: "Muito similar",
         },
       ]),
     };
 
     const resultado = await rankearCandidatos(itemTR, [candidato(10)], provedor);
 
-    expect(resultado[0]!.scoreFinal).toBe(63);
+    expect(resultado[0]!.scoreFinal).toBe(85.75);
   });
 
   it("ordena os resultados por score final decrescente", async () => {
@@ -85,11 +85,11 @@ describe("rankearCandidatos", () => {
         {
           candidato: candidato(10, 100),
           scoreFinal: 0,
-          scoreDescricao: 50,
-          scoreEspecificacao: 50,
-          scoreUnidadeQuantidade: 50,
+          scoreDescricao: 85,
+          scoreEspecificacao: 85,
+          scoreUnidadeQuantidade: 85,
           adaptado: false,
-          justificativa: "Médio",
+          justificativa: "Bom",
         },
         {
           candidato: candidato(20, 200),
@@ -110,6 +110,77 @@ describe("rankearCandidatos", () => {
     );
 
     expect(resultado[0]!.scoreFinal).toBe(100);
-    expect(resultado[1]!.scoreFinal).toBe(50);
+    expect(resultado[1]!.scoreFinal).toBe(85);
+  });
+
+  it("descarta candidato de categoria distinta mesmo quando a média ponderada passa do corte", async () => {
+    // scoreDescricao 50 = categoria errada; espec neutra + unidade alta rendem
+    // scoreFinal 76.5 (>= 70), mas a categoria errada não pode ser resgatada pela média.
+    const provedor: ProvedorIA = {
+      extrairEspecificacaoTR: vi.fn(),
+      rankearSimilaridade: vi.fn().mockResolvedValue([
+        {
+          candidato: candidato(10),
+          scoreFinal: 0,
+          scoreDescricao: 50,
+          scoreEspecificacao: 90,
+          scoreUnidadeQuantidade: 100,
+          adaptado: false,
+          justificativa: "Categoria diferente, mas unidade compatível",
+        },
+      ]),
+    };
+
+    const resultado = await rankearCandidatos(itemTR, [candidato(10)], provedor);
+
+    expect(resultado).toEqual([]);
+  });
+
+  it("envia à IA os candidatos ordenados por sobreposição lexical com o item", async () => {
+    const irrelevante = candidato(10, 100, "Grampeador de mesa");
+    const relevante = candidato(20, 200, "Cadeira giratória de escritório");
+    const provedor: ProvedorIA = {
+      extrairEspecificacaoTR: vi.fn(),
+      rankearSimilaridade: vi.fn().mockResolvedValue([]),
+    };
+
+    await rankearCandidatos(itemTR, [irrelevante, relevante], provedor);
+
+    expect(provedor.rankearSimilaridade).toHaveBeenCalledWith(itemTR, [relevante, irrelevante]);
+  });
+
+  it("descarta candidatos com score final abaixo do mínimo aceitável", async () => {
+    const provedor: ProvedorIA = {
+      extrairEspecificacaoTR: vi.fn(),
+      rankearSimilaridade: vi.fn().mockResolvedValue([
+        {
+          candidato: candidato(10, 100),
+          scoreFinal: 0,
+          scoreDescricao: 0,
+          scoreEspecificacao: 0,
+          scoreUnidadeQuantidade: 10,
+          adaptado: false,
+          justificativa: "Sem relação com o item (ex.: livro didático para uma caneta).",
+        },
+        {
+          candidato: candidato(20, 200),
+          scoreFinal: 0,
+          scoreDescricao: 90,
+          scoreEspecificacao: 80,
+          scoreUnidadeQuantidade: 100,
+          adaptado: false,
+          justificativa: "Muito similar",
+        },
+      ]),
+    };
+
+    const resultado = await rankearCandidatos(
+      itemTR,
+      [candidato(10, 100), candidato(20, 200)],
+      provedor,
+    );
+
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0]!.candidato.valorUnitario).toBe(200);
   });
 });

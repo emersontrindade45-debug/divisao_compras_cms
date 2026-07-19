@@ -5,10 +5,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { processarPesquisaSimilaridade } from "@/lib/actions/pesquisaSimilaridade";
+import { useElapsedSeconds } from "@/hooks/useElapsedSeconds";
 
 export function PesquisaSimilaridadeUploadForm({ processoId }: { processoId: string }) {
   const [trFile, setTrFile] = useState<File | null>(null);
   const [pending, startTransition] = useTransition();
+  const segundosDecorridos = useElapsedSeconds(pending);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,8 +20,9 @@ export function PesquisaSimilaridadeUploadForm({ processoId }: { processoId: str
     }
 
     startTransition(async () => {
-      const buffer = Buffer.from(await trFile.arrayBuffer());
-      const resultado = await processarPesquisaSimilaridade(processoId, buffer);
+      const formData = new FormData();
+      formData.set("trPdf", trFile);
+      const resultado = await processarPesquisaSimilaridade(processoId, formData);
       if (resultado.error) {
         toast.error(resultado.error);
         return;
@@ -61,8 +64,15 @@ export function PesquisaSimilaridadeUploadForm({ processoId }: { processoId: str
         />
       </div>
       <Button type="submit" disabled={pending} size="sm">
-        {pending ? "Processando..." : "Buscar contratos similares"}
+        {pending ? `Processando... (${segundosDecorridos}s)` : "Buscar contratos similares"}
       </Button>
+      {pending && (
+        <p className="text-xs text-muted-foreground">
+          Cada item é analisado individualmente pela IA — processos com muitos itens podem levar
+          alguns minutos. Não atualize a página (F5) enquanto isso, ou o processamento será
+          interrompido.
+        </p>
+      )}
     </form>
   );
 }

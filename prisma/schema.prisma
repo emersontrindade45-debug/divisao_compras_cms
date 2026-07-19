@@ -117,6 +117,7 @@ model Processo {
   responsavel             String
   status                  StatusProcesso    @default(pendente)
   dataAbertura            DateTime
+  planilhaOrigemUrl       String?
   createdAt               DateTime          @default(now())
   updatedAt               DateTime          @updatedAt
 

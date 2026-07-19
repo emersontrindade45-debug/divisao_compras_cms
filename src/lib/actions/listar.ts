@@ -63,6 +63,36 @@ export async function listarProcessosComSerie() {
   });
 }
 
+export async function obterFontesSimilaridade(processoId: string) {
+  await requireAuth();
+
+  return db.item.findMany({
+    where: { processoId },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      descricao: true,
+      unidade: true,
+      quantidade: true,
+      resultadosSimilaridade: {
+        orderBy: { scoreFinal: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          tipoCandidato: true,
+          fonteDescricao: true,
+          fonteOrgaoOuId: true,
+          fonteUrl: true,
+          valorUnitario: true,
+          dataReferencia: true,
+          scoreFinal: true,
+          justificativa: true,
+        },
+      },
+    },
+  });
+}
+
 export async function obterProcessoDetalhado(id: string) {
   await requireAuth();
 

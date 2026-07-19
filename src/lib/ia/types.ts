@@ -3,6 +3,8 @@ export interface ItemExtraidoTR {
   especificacaoTecnica: string;
   unidade: string;
   quantidade: number;
+  /** Termo curto para busca textual (substantivo-núcleo primeiro), gerado na extração do TR. */
+  termoBusca?: string;
 }
 
 export interface CandidatoSimilaridade {

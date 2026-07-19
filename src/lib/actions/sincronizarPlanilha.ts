@@ -58,7 +58,7 @@ export async function sincronizarPlanilha(
   try {
     const processo = await db.processo.upsert({
       where: { numero },
-      update: { objeto, quantidade: quantidadeTotal },
+      update: { objeto, quantidade: quantidadeTotal, planilhaOrigemUrl: url.trim() },
       create: {
         numero,
         objeto,
@@ -70,6 +70,7 @@ export async function sincronizarPlanilha(
         responsavel: "Importado da planilha",
         status: "pendente",
         dataAbertura: new Date(),
+        planilhaOrigemUrl: url.trim(),
       },
     });
 
