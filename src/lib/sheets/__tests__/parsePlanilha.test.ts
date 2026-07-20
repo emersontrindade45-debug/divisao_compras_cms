@@ -106,6 +106,56 @@ describe("parsePlanilha — com grupo/lote", () => {
   });
 });
 
+// Planilha com cabeçalhos alternativos: DESCRIÇÃO em vez de MATERIAL, sem coluna de mediana
+const csvDescricao = [
+  '"LIMITE INFERIOR","MEDIANA ESTIMADA","LIMITE SUPERIOR","No","QTDE","DESCRIÇÃO","PREÇO PÚBLICO I","PREÇO PÚBLICO II"',
+  '"500,00","1.000,00","1.500,00","1","5","Cadeira ergonômica","850,00","1.100,00"',
+  '"300,00","600,00","900,00","2","10","Mesa de escritório","550,00","700,00"',
+].join("\n");
+
+// Planilha simples: apenas MATERIAL + preços, sem estatísticas
+const csvSimples = [
+  '"MATERIAL","PREÇO 1","PREÇO 2","PREÇO 3"',
+  '"Caneta esferográfica","2,50","2,80","3,00"',
+  '"Papel A4 resma","25,00","27,00","26,50"',
+].join("\n");
+
+describe("parsePlanilha — cabeçalhos alternativos (DESCRIÇÃO)", () => {
+  const { itens } = parsePlanilha(parseCsv(csvDescricao));
+
+  it("reconhece DESCRIÇÃO como coluna de material", () => {
+    expect(itens).toHaveLength(2);
+    expect(itens[0]!.material).toContain("Cadeira");
+    expect(itens[1]!.material).toContain("Mesa");
+  });
+
+  it("detecta mediana pelo cabeçalho MEDIANA ESTIMADA", () => {
+    expect(itens[0]!.mediana).toBeCloseTo(1000, 2);
+    expect(itens[0]!.limiteInferior).toBeCloseTo(500, 2);
+    expect(itens[0]!.limiteSuperior).toBeCloseTo(1500, 2);
+  });
+
+  it("lê os preços corretamente", () => {
+    expect(itens[0]!.precos).toHaveLength(2);
+    expect(itens[0]!.precos.every((p) => p.incluido)).toBe(true);
+  });
+});
+
+describe("parsePlanilha — planilha simples (sem estatísticas)", () => {
+  const { itens } = parsePlanilha(parseCsv(csvSimples));
+
+  it("extrai itens mesmo sem colunas de mediana/limites", () => {
+    expect(itens).toHaveLength(2);
+    expect(itens[0]!.material).toContain("Caneta");
+    expect(itens[1]!.material).toContain("Papel");
+  });
+
+  it("inclui todos os preços quando não há limites definidos", () => {
+    expect(itens[0]!.precos).toHaveLength(3);
+    expect(itens[0]!.precos.every((p) => p.incluido)).toBe(true);
+  });
+});
+
 describe("googleSheets — helpers puros", () => {
   it("extrai o ID da planilha da URL", () => {
     expect(
