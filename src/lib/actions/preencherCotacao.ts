@@ -26,12 +26,14 @@ export async function preencherCotacao(
   if (!processo) {
     return { error: "Processo não encontrado." };
   }
-  if (!processo.planilhaOrigemUrl) {
+  const planilhaUrl = processo.planilhaCotacaoUrl || processo.planilhaOrigemUrl;
+  if (!planilhaUrl) {
     return {
-      error: "Este processo não tem planilha de origem sincronizada. Sincronize a planilha de cotação antes de preencher os preços.",
+      error:
+        "Este processo não tem planilha de cotação configurada. Informe o link da planilha de cotação ou sincronize a planilha de origem antes de preencher os preços.",
     };
   }
-  const spreadsheetId = extrairSpreadsheetId(processo.planilhaOrigemUrl);
+  const spreadsheetId = extrairSpreadsheetId(planilhaUrl);
   if (!spreadsheetId) {
     return { error: "Não foi possível identificar o ID da planilha de origem do processo." };
   }

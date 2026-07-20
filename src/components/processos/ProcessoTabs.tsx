@@ -9,15 +9,21 @@ import { TabelaSeriePrecos } from "@/components/cotacoes/TabelaSeriePrecos";
 import { EstrategiaOrquestrador } from "./EstrategiaOrquestrador";
 import { PesquisaSimilaridadeUploadForm } from "./PesquisaSimilaridadeUploadForm";
 import { PreencherCotacaoForm } from "./PreencherCotacaoForm";
+import { SincronizarPlanilhaProcessoForm } from "./SincronizarPlanilhaProcessoForm";
+import { PlanilhaCotacaoForm } from "./PlanilhaCotacaoForm";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import { getSerieByProcessoId } from "@/lib/fixtures/seriePrecos";
 
 export function ProcessoTabs({
   processo,
   fontesSimilaridade,
+  planilhaOrigemUrl,
+  planilhaCotacaoUrl,
 }: {
   processo: ProcessoFixture;
   fontesSimilaridade?: ReactNode;
+  planilhaOrigemUrl?: string;
+  planilhaCotacaoUrl?: string;
 }) {
   const serie = getSerieByProcessoId(processo.id);
 
@@ -54,6 +60,19 @@ export function ProcessoTabs({
       </TabsContent>
 
       <TabsContent value="similaridade" className="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Planilhas de cotação</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <SincronizarPlanilhaProcessoForm defaultUrl={planilhaOrigemUrl} />
+            <div className="border-t" />
+            <PlanilhaCotacaoForm
+              processoId={processo.id}
+              defaultUrl={planilhaCotacaoUrl}
+            />
+          </CardContent>
+        </Card>
         <PesquisaSimilaridadeUploadForm processoId={processo.id} />
         <PreencherCotacaoForm processoId={processo.id} />
         {fontesSimilaridade}

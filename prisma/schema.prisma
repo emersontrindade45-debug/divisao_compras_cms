@@ -118,6 +118,7 @@ model Processo {
   status                  StatusProcesso    @default(pendente)
   dataAbertura            DateTime
   planilhaOrigemUrl       String?
+  planilhaCotacaoUrl      String?
   createdAt               DateTime          @default(now())
   updatedAt               DateTime          @updatedAt
 

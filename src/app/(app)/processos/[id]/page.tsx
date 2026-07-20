@@ -53,6 +53,8 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
       <ProcessoTabs
         processo={processoMapeado}
         fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
+        planilhaOrigemUrl={processo.planilhaOrigemUrl ?? undefined}
+        planilhaCotacaoUrl={processo.planilhaCotacaoUrl ?? undefined}
       />
     </div>
   );
