@@ -276,8 +276,16 @@ export function parsePlanilha(rows: string[][]): PlanilhaParseResult {
     const mediana = medianaCol >= 0 ? parseNumberBR(row[medianaCol]) : NaN;
     const temMediana = Number.isFinite(mediana) && mediana > 0;
 
-    // Linha de dados: material não vazio + (mediana positiva OU ausência total de coluna de mediana)
-    const ehLinhaDeDados = material.length > 0 && (medianaCol < 0 || temMediana);
+    // Fallback: considera linha de dados se há inteiros positivos nas colunas
+    // de ITEM/LOTE/QTDE antes da coluna de material (ex.: planilha sem preços ainda)
+    const temInteiroAntesDoMaterial = !temMediana &&
+      Array.from({ length: materialCol }, (_, c) => c)
+        .filter((c) => !priceStartCols.includes(c))
+        .some((c) => isSmallInteger(row[c]));
+
+    // Linha de dados: material não vazio + (mediana positiva | inteiros de item/qtde | sem coluna de mediana)
+    const ehLinhaDeDados =
+      material.length > 0 && (temMediana || temInteiroAntesDoMaterial || medianaCol < 0);
 
     if (!ehLinhaDeDados) {
       const textoGrupo = (

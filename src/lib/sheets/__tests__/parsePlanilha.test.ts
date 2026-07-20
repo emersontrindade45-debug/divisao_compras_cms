@@ -156,6 +156,36 @@ describe("parsePlanilha — planilha simples (sem estatísticas)", () => {
   });
 });
 
+// Planilha com itens mas SEM preços pesquisados ainda (mediana e limites = 0,00)
+const csvSemPrecos = [
+  '"LIMITE INFERIOR","MEDIANA","LIMITE SUPERIOR","30% DA MEDIANA","ITEM","LOTE","QTDE.","MATERIAL","","",""',
+  '"0,00","0,00","0,00","0,00","1","1","12","Lavagem da cobertura de vidro","","",""',
+  '"0,00","0,00","0,00","0,00","2","1","6","Lavagem das fachadas do prédio","","",""',
+  '"0,00","0,00","0,00","0,00","3","1","4","Limpeza das calhas","","",""',
+].join("\n");
+
+describe("parsePlanilha — itens sem preços (mediana = 0)", () => {
+  const { itens } = parsePlanilha(parseCsv(csvSemPrecos));
+
+  it("importa itens mesmo sem preços pesquisados", () => {
+    expect(itens).toHaveLength(3);
+    expect(itens[0]!.material).toContain("Lavagem da cobertura");
+    expect(itens[1]!.material).toContain("Lavagem das fachadas");
+    expect(itens[2]!.material).toContain("Limpeza das calhas");
+  });
+
+  it("mantém mediana 0 e lista de preços vazia", () => {
+    expect(itens[0]!.mediana).toBe(0);
+    expect(itens[0]!.precos).toHaveLength(0);
+  });
+
+  it("extrai quantidade corretamente", () => {
+    expect(itens[0]!.quantidade).toBe(12);
+    expect(itens[1]!.quantidade).toBe(6);
+    expect(itens[2]!.quantidade).toBe(4);
+  });
+});
+
 describe("googleSheets — helpers puros", () => {
   it("extrai o ID da planilha da URL", () => {
     expect(
