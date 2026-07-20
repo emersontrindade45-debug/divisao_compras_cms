@@ -8,11 +8,13 @@ const itemExtraidoTRSchema = z.object({
   especificacaoTecnica: z.string(),
   unidade: z.string(),
   quantidade: z.number(),
+  termoBusca: z.string().optional(),
 });
 
 const itensExtraidosTRSchema = z.array(itemExtraidoTRSchema);
 
 const avaliacaoSimilaridadeSchema = z.object({
+  indice: z.number().optional(),
   scoreDescricao: z.number(),
   scoreEspecificacao: z.number(),
   scoreUnidadeQuantidade: z.number(),
@@ -29,35 +31,50 @@ const PROMPT_EXTRACAO = `Você é um analista de compras públicas. Leia o Termo
 e extraia cada item a ser cotado. Para cada item, retorne um objeto JSON com:
 - "descricao": descrição normalizada e objetiva do item
 - "especificacaoTecnica": características técnicas detalhadas (material, dimensão, voltagem, etc.)
-- "unidade": unidade de medida (ex.: "unidade", "caixa", "metro linear", "pacote")
+- "unidade": unidade de medida (ex.: "unidade", "caixa", "metro linear", "pacote", "serviço")
 - "quantidade": quantidade numérica
+- "termoBusca": termo curto (2 a 4 palavras) para busca textual em portais de compras públicas.
+  Comece SEMPRE pelo substantivo que nomeia o produto ou serviço (ex.: "lavagem", "cadeira"),
+  seguido de 1-3 qualificadores essenciais (ex.: "lavagem fachada vidro"). Não inclua marca,
+  quantidade, verbos genéricos ("fornecimento", "aquisição") nem artigos.
 
 Responda APENAS com um array JSON de objetos, sem texto adicional, sem markdown.`;
 
 function montarPromptRanking(itemTR: ItemExtraidoTR, candidatos: CandidatoSimilaridade[]): string {
+  const candidatosResumidos = candidatos.map((c) => ({
+    descricao: c.fonteDescricao,
+    unidade: c.unidade,
+    quantidade: c.quantidade,
+  }));
+
   return `Você é um analista de compras públicas avaliando se contratos públicos são similares a um item de
 Termo de Referência (TR), para servir de justificativa formal de preço público (IN SEGES/ME 65/2021).
+
+Sua tarefa é responder: "isto é o mesmo tipo de produto/serviço que o item do TR?" — como faria
+um comprador experiente, não um sistema de correspondência exata de texto. Contratos públicos
+raramente repetem a especificação do TR palavra por palavra — isso NÃO significa produtos diferentes.
+Identifique primeiro a CATEGORIA/NATUREZA (é o mesmo serviço? o mesmo tipo de material?); se a
+categoria bate, o item já é candidato válido mesmo com detalhes técnicos divergentes ou ausentes.
 
 ITEM DO TR:
 ${JSON.stringify(itemTR)}
 
-CANDIDATOS A CONTRATO PÚBLICO (avalie cada um independentemente):
-${JSON.stringify(candidatos)}
+CANDIDATOS (indexados de 0 a ${candidatos.length - 1}):
+${JSON.stringify(candidatosResumidos)}
 
-Para CADA candidato, avalie 3 parâmetros de 0 a 100:
-1. "scoreDescricao": quão parecida é a descrição do objeto do candidato com a do item do TR (semântica, não palavra-chave exata).
-2. "scoreEspecificacao": quão bem as características técnicas do candidato batem com a especificação técnica do TR.
-3. "scoreUnidadeQuantidade": se a unidade de medida e a ordem de grandeza da quantidade são compatíveis.
+Para CADA candidato, avalie 3 parâmetros de 0 a 100 e inclua o campo "indice" (0-based):
+1. "scoreDescricao": é o MESMO TIPO de produto/serviço? Pontue alto (70-100) quando a categoria/
+   função coincide. Pontue baixo (0-30) apenas quando for categoria completamente diferente.
+2. "scoreEspecificacao": quão compatíveis são as características técnicas disponíveis. NÃO penalize
+   abaixo de 50 por ausência de informação — penalize forte apenas quando houver característica
+   CONTRADITÓRIA explícita (ex.: TR pede lavagem interna e candidato especifica pintura externa).
+3. "scoreUnidadeQuantidade": se unidade e ordem de grandeza da quantidade são compatíveis.
 
-Se o candidato vier desmembrado (ex.: TR pede "1 conjunto" e o candidato é só uma parte, como "mesa"), ou a
-unidade não bate diretamente e precisar de conversão (ex.: metro linear vs. unidade), marque "adaptado": true
-e reduza "scoreUnidadeQuantidade" proporcionalmente à incerteza da conversão. Caso contrário "adaptado": false.
+"adaptado": true se precisar de conversão de unidade ou o candidato for só parte do conjunto do TR.
+"justificativa": 1-2 frases explicando o principal motivo do score para uso como justificativa formal.
 
-Preencha "justificativa" com 1-2 frases explicando o principal motivo do score, citando o parâmetro mais
-relevante e sua porcentagem — isso será usado como justificativa formal num processo administrativo.
-
-Responda APENAS com um array JSON, na mesma ordem dos candidatos, sem texto adicional, sem markdown, no formato:
-[{ "scoreDescricao": number, "scoreEspecificacao": number, "scoreUnidadeQuantidade": number, "adaptado": boolean, "justificativa": string }]`;
+Responda APENAS com um array JSON, na mesma ordem, sem markdown:
+[{ "indice": number, "scoreDescricao": number, "scoreEspecificacao": number, "scoreUnidadeQuantidade": number, "adaptado": boolean, "justificativa": string }]`;
 }
 
 const TAMANHO_TRECHO_DIAGNOSTICO = 500;
@@ -170,18 +187,27 @@ export class GeminiProvider implements ProvedorIA {
     );
 
     return candidatos.map((candidato, idx) => {
-      const avaliacao = avaliacoes[idx];
-      if (!avaliacao) {
-        throw new Error(`Resposta da IA não cobre o candidato ${idx}.`);
+      const avaliacao = avaliacoes[idx] as (typeof avaliacoes)[number] & { indice?: number };
+      const av = avaliacoes.find((a) => (a as typeof avaliacao).indice === idx) ?? avaliacao;
+      if (!av) {
+        return {
+          candidato,
+          scoreFinal: 0,
+          scoreDescricao: 0,
+          scoreEspecificacao: 0,
+          scoreUnidadeQuantidade: 0,
+          adaptado: false,
+          justificativa: "A IA não retornou avaliação para este candidato; requer revisão manual.",
+        };
       }
       return {
         candidato,
-        scoreFinal: 0, // calculado pelo orquestrador via calcularScoreFinal
-        scoreDescricao: avaliacao.scoreDescricao,
-        scoreEspecificacao: avaliacao.scoreEspecificacao,
-        scoreUnidadeQuantidade: avaliacao.scoreUnidadeQuantidade,
-        adaptado: avaliacao.adaptado,
-        justificativa: avaliacao.justificativa,
+        scoreFinal: 0,
+        scoreDescricao: av.scoreDescricao,
+        scoreEspecificacao: av.scoreEspecificacao,
+        scoreUnidadeQuantidade: av.scoreUnidadeQuantidade,
+        adaptado: av.adaptado,
+        justificativa: av.justificativa,
       };
     });
   }

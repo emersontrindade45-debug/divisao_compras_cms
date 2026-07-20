@@ -44,16 +44,20 @@ describe("filtrarPorPalavrasChave", () => {
     expect(filtrarPorPalavrasChave(candidatos, ["cadeira"])).toEqual([]);
   });
 
-  it("exige a palavra-núcleo (primeiro termo); os demais termos sozinhos não bastam", () => {
+  it("usa lógica OR: candidato passa se qualquer um dos termos bater", () => {
     const candidatos = [
       candidato("Caneta esferográfica azul"),
       candidato("Borracha azul escolar"),
+      candidato("Grampeador de mesa"),
     ];
 
+    // "azul" e "caneta" são termos válidos — ambos os dois primeiros candidatos passam
     const resultado = filtrarPorPalavrasChave(candidatos, ["caneta", "azul", "escrita"]);
 
-    expect(resultado).toHaveLength(1);
-    expect(resultado[0].fonteDescricao).toBe("Caneta esferográfica azul");
+    expect(resultado).toHaveLength(2);
+    expect(resultado.map((c) => c.fonteDescricao)).toContain("Caneta esferográfica azul");
+    expect(resultado.map((c) => c.fonteDescricao)).toContain("Borracha azul escolar");
+    expect(resultado.map((c) => c.fonteDescricao)).not.toContain("Grampeador de mesa");
   });
 
   it("casa o núcleo como palavra inteira, não como substring", () => {

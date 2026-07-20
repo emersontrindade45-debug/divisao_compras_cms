@@ -10,6 +10,7 @@ import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPub
 import { filtrarPorPalavrasChave } from "@/lib/similaridade/filtroPalavrasChave";
 import { resolverTermoBusca } from "@/lib/similaridade/extrairTermoBusca";
 import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorrencia";
+import { expandirTermosBusca } from "@/lib/similaridade/expandirTermosBusca";
 import type { ItemExtraidoTR } from "@/lib/ia/types";
 import type { ActionResult } from "./processos";
 
@@ -80,11 +81,11 @@ export async function processarPesquisaSimilaridade(
   // a Promise (não o resultado) para que itens concorrentes com o mesmo termo aguardem
   // a mesma busca em vez de disparar chamadas de rede duplicadas.
   const cacheCandidatosPorTermo = new Map<string, ReturnType<typeof buscarCandidatosPublicos>>();
-  function buscarCandidatosComCache(termo: string) {
-    const cacheKey = termo.toLowerCase();
+  function buscarCandidatosComCache(termos: string) {
+    const cacheKey = termos.toLowerCase();
     const cacheado = cacheCandidatosPorTermo.get(cacheKey);
     if (cacheado) return cacheado;
-    const resultado = buscarCandidatosPublicos(termo);
+    const resultado = buscarCandidatosPublicos(termos.split("|").filter(Boolean));
     cacheCandidatosPorTermo.set(cacheKey, resultado);
     return resultado;
   }
@@ -122,11 +123,11 @@ export async function processarPesquisaSimilaridade(
         palavrasChave: item.palavrasChave,
         termoBuscaIA: itemTR.termoBusca,
       });
-      const candidatosPublicos = await buscarCandidatosComCache(termoBusca);
-      // A busca textual do PNCP retorna editais inteiros (ex.: "material de expediente"
-      // completo); o filtro exige a palavra-núcleo do termo (primeiro token) em cada
-      // candidato antes de gastar tokens de IA com itens de outra categoria.
-      const candidatosFiltrados = filtrarPorPalavrasChave(candidatosPublicos, termoBusca.split(/\s+/));
+      // Expande para até 3 termos sinônimos para ampliar o universo de candidatos
+      const termosExpandidos = expandirTermosBusca(termoBusca);
+      const candidatosPublicos = await buscarCandidatosComCache(termosExpandidos.join("|"));
+      // Filtra itens irrelevantes com lógica OR: passa se qualquer termo aparecer na descrição
+      const candidatosFiltrados = filtrarPorPalavrasChave(candidatosPublicos, termosExpandidos.flatMap((t) => t.split(/\s+/)));
 
       const ranqueados = await rankearCandidatos(itemTR, candidatosFiltrados, provedor);
 

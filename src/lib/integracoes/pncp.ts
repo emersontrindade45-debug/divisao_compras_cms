@@ -4,7 +4,7 @@ import type { CandidatoSimilaridade } from "@/lib/ia/types";
 const PNCP_SEARCH_BASE_URL = "https://pncp.gov.br/api/search";
 const PNCP_ITENS_BASE_URL = "https://pncp.gov.br/pncp-api/v1";
 
-const TAMANHO_PAGINA = 20;
+const TAMANHO_PAGINA = 40;
 
 // CNPJ do próprio órgão — contratos da Câmara Municipal de Santos são excluídos
 // da pesquisa de similaridade para evitar que o próprio contrato sendo renovado
@@ -133,6 +133,7 @@ export async function buscarContratosPNCP(termo: string): Promise<CandidatoSimil
       : todos;
 
     if (processos.length === 0) return [];
+
     const itensPorProcesso: CandidatoSimilaridade[][] = [];
     for (let i = 0; i < processos.length; i += LOTE_BUSCA_ITENS) {
       const lote = processos.slice(i, i + LOTE_BUSCA_ITENS);
@@ -144,3 +145,28 @@ export async function buscarContratosPNCP(termo: string): Promise<CandidatoSimil
     return [];
   }
 }
+
+/**
+ * Busca com múltiplos termos em paralelo e deduplica os resultados pela fonteUrl.
+ * Aumenta a cobertura de candidatos para itens onde o PNCP usa terminologia variada
+ * (ex.: "lavagem" vs "limpeza" vs "higienização").
+ */
+export async function buscarContratosPNCPMultiTermo(
+  termos: string[],
+): Promise<CandidatoSimilaridade[]> {
+  const termosValidos = [...new Set(termos.map((t) => t.trim()).filter(Boolean))];
+  if (termosValidos.length === 0) return [];
+
+  const resultadosPorTermo = await Promise.all(termosValidos.map(buscarContratosPNCP));
+  const todos = resultadosPorTermo.flat();
+
+  // Deduplica por fonteUrl+fonteDescricao para não enviar o mesmo item duas vezes à IA
+  const vistos = new Set<string>();
+  return todos.filter((c) => {
+    const chave = `${c.fonteUrl ?? ""}|${c.fonteDescricao}`;
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+}
+

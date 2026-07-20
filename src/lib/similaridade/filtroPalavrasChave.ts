@@ -7,16 +7,18 @@ import { contemPalavra } from "./texto";
  * expediente" inteiro para uma busca por caneta). Sem este pré-filtro, a IA recebe
  * centenas de candidatos irrelevantes, o que desperdiça tokens e dilui o ranking.
  *
- * O primeiro termo é a palavra-núcleo do item (o substantivo que o nomeia) e é
- * obrigatório, casado como palavra inteira — OR de termos com substring deixava passar
- * qualquer item que compartilhasse um qualificador genérico ("azul", "escolar").
+ * Usa lógica OR: o candidato passa se a sua descrição contiver QUALQUER um dos termos
+ * fornecidos (palavra inteira). Isso evita rejeitar itens válidos que usam sinônimos
+ * (ex.: "limpeza" vs "lavagem") enquanto ainda filtra ruído de outras categorias.
  */
 export function filtrarPorPalavrasChave(
   candidatos: CandidatoSimilaridade[],
   palavrasChave: string[],
 ): CandidatoSimilaridade[] {
-  const nucleo = palavrasChave.find((t) => t.trim().length > 0);
-  if (!nucleo) return candidatos;
+  const termos = palavrasChave.map((t) => t.trim()).filter(Boolean);
+  if (termos.length === 0) return candidatos;
 
-  return candidatos.filter((candidato) => contemPalavra(candidato.fonteDescricao, nucleo));
+  return candidatos.filter((candidato) =>
+    termos.some((termo) => contemPalavra(candidato.fonteDescricao, termo)),
+  );
 }

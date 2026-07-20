@@ -57,7 +57,7 @@ describe("rankearCandidatos", () => {
     expect(resultado).toHaveLength(1);
   });
 
-  it("calcula o score final com os pesos 40/35/25", async () => {
+  it("calcula o score final com os pesos 55/28/17", async () => {
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([
@@ -75,7 +75,8 @@ describe("rankearCandidatos", () => {
 
     const resultado = await rankearCandidatos(itemTR, [candidato(10)], provedor);
 
-    expect(resultado[0]!.scoreFinal).toBe(85.75);
+    // 90*0.55 + 85*0.28 + 80*0.17 = 49.5 + 23.8 + 13.6 = 86.9
+    expect(resultado[0]!.scoreFinal).toBe(86.9);
   });
 
   it("ordena os resultados por score final decrescente", async () => {
@@ -113,9 +114,9 @@ describe("rankearCandidatos", () => {
     expect(resultado[1]!.scoreFinal).toBe(85);
   });
 
-  it("descarta candidato de categoria distinta mesmo quando a média ponderada passa do corte", async () => {
-    // scoreDescricao 50 = categoria errada; espec neutra + unidade alta rendem
-    // scoreFinal 76.5 (>= 70), mas a categoria errada não pode ser resgatada pela média.
+  it("descarta candidato de categoria distinta mesmo quando a média ponderada não passa do corte", async () => {
+    // scoreDescricao 50 < 70 (gate de categoria); scoreEspecificacao e unidade
+    // altos não resgatam: scoreFinal = 50*0.55 + 90*0.28 + 100*0.17 = 69.7 < 85.
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([
