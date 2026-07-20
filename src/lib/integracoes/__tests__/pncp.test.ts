@@ -59,6 +59,10 @@ describe("buscarContratosPNCP", () => {
       unidade: "unidade",
       quantidade: 50,
     });
+    // URL no formato correto do portal PNCP
+    expect(resultado[0]?.fonteUrl).toBe(
+      `https://pncp.gov.br/app/editais/${processo.orgao_cnpj}/${processo.ano}/${processo.numero_sequencial}`,
+    );
   });
 
   it("ordena a busca textual por relevância, não por data", async () => {
@@ -165,6 +169,48 @@ describe("buscarContratosPNCP", () => {
     await buscarContratosPNCP("caneta");
 
     expect(maxEmVoo).toBeLessThanOrEqual(5);
+  });
+
+  it("exclui contratos do próprio órgão (CNPJ configurado via ORGAO_CNPJ)", async () => {
+    const processoProprio = {
+      numero_controle_pncp: "proprio-1",
+      orgao_nome: "CAMARA MUNICIPAL DE SANTOS",
+      orgao_cnpj: "49203409000102",
+      ano: "2026",
+      numero_sequencial: "1",
+    };
+    const processoExterno = {
+      numero_controle_pncp: "externo-1",
+      orgao_nome: "Prefeitura de São Paulo",
+      orgao_cnpj: "46392130000180",
+      ano: "2026",
+      numero_sequencial: "99",
+    };
+    const item = {
+      descricao: "Lavagem de fachada",
+      valorUnitarioEstimado: 5000,
+      quantidade: 1,
+      unidadeMedida: "serviço",
+      dataAtualizacao: "2026-01-10T00:00:00Z",
+    };
+
+    const orig = process.env.ORGAO_CNPJ;
+    process.env.ORGAO_CNPJ = "49203409000102";
+
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/api/search/")) return mockBusca([processoProprio, processoExterno]);
+      if (url.includes("/itens")) return mockItens([item]);
+      throw new Error(`URL inesperada: ${url}`);
+    });
+
+    const resultado = await buscarContratosPNCP("lavagem fachada");
+
+    // Apenas o processo externo deve aparecer
+    expect(resultado.every((r) => r.fonteOrgaoOuId !== "CAMARA MUNICIPAL DE SANTOS")).toBe(true);
+    expect(resultado.some((r) => r.fonteOrgaoOuId === "Prefeitura de São Paulo")).toBe(true);
+
+    process.env.ORGAO_CNPJ = orig;
   });
 
   it("ignora itens sem valor unitário estimado", async () => {

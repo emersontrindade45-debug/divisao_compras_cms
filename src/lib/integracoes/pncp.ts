@@ -6,6 +6,11 @@ const PNCP_ITENS_BASE_URL = "https://pncp.gov.br/pncp-api/v1";
 
 const TAMANHO_PAGINA = 20;
 
+// CNPJ do próprio órgão — contratos da Câmara Municipal de Santos são excluídos
+// da pesquisa de similaridade para evitar que o próprio contrato sendo renovado
+// apareça como referência de preço. Configurável via variável de ambiente.
+const CNPJ_ORGAO_PROPRIO = process.env.ORGAO_CNPJ ?? "49203409000102";
+
 // O PNCP derruba conexões (ECONNRESET) ou responde 429 sob rajadas de requisições —
 // comum ao processar cotações com muitos itens, cada um exigindo ≥3 preços. Retry com
 // backoff absorve o throttling transitório; o lote limita a rajada de buscas de itens.
@@ -97,7 +102,7 @@ async function buscarItensDaCompra(processo: PNCPSearchItem): Promise<CandidatoS
         tipoCandidato: "contratacao_publica" as const,
         fonteDescricao: item.descricao,
         fonteOrgaoOuId: processo.orgao_nome,
-        fonteUrl: `https://pncp.gov.br/app/editais/${processo.numero_controle_pncp}`,
+        fonteUrl: `https://pncp.gov.br/app/editais/${processo.orgao_cnpj}/${processo.ano}/${processo.numero_sequencial}`,
         valorUnitario: item.valorUnitarioEstimado,
         dataReferencia: new Date(item.dataAtualizacao),
         unidade: item.unidadeMedida,
@@ -119,7 +124,15 @@ export async function buscarContratosPNCP(termo: string): Promise<CandidatoSimil
   if (!termo.trim()) return [];
 
   try {
-    const processos = await buscarPorTexto(termo);
+    const todos = await buscarPorTexto(termo);
+
+    // Exclui contratos do próprio órgão para evitar que o contrato sendo
+    // renovado apareça como referência de preço na pesquisa de similaridade.
+    const processos = CNPJ_ORGAO_PROPRIO
+      ? todos.filter((p) => p.orgao_cnpj !== CNPJ_ORGAO_PROPRIO)
+      : todos;
+
+    if (processos.length === 0) return [];
     const itensPorProcesso: CandidatoSimilaridade[][] = [];
     for (let i = 0; i < processos.length; i += LOTE_BUSCA_ITENS) {
       const lote = processos.slice(i, i + LOTE_BUSCA_ITENS);
