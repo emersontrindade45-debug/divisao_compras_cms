@@ -14,7 +14,13 @@ const STATUS_MAP: Record<string, StatusDominio> = {
 
 export default async function ProcessosPage() {
   const sheetsUrl = process.env.NEXT_PUBLIC_SHEETS_URL || undefined;
-  const processos = await listarProcessos();
+
+  let processos: Awaited<ReturnType<typeof listarProcessos>>;
+  try {
+    processos = await listarProcessos();
+  } catch {
+    processos = [];
+  }
 
   const processosMapeados: ProcessoFixture[] = processos.map((p) => ({
     id: p.id,

@@ -17,7 +17,23 @@ const STATUS_MAP: Record<string, StatusDominio> = {
 
 export default async function ProcessoDetalhePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const processo = await obterProcessoDetalhado(id);
+
+  let processo: Awaited<ReturnType<typeof obterProcessoDetalhado>>;
+  try {
+    processo = await obterProcessoDetalhado(id);
+  } catch {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
+        <AlertTriangle className="size-8 text-danger" aria-hidden />
+        <p className="text-sm text-muted-foreground">
+          Erro ao carregar o processo. Verifique a conexão com o banco de dados ou tente novamente.
+        </p>
+        <Button render={<Link href="/processos" />} variant="outline" size="sm">
+          Voltar para a lista
+        </Button>
+      </div>
+    );
+  }
 
   if (!processo) {
     return (

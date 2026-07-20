@@ -20,7 +20,18 @@ function scoreVariant(score: number): "default" | "secondary" | "destructive" {
 }
 
 export async function FontesSimilaridadeList({ processoId }: { processoId: string }) {
-  const itens = await obterFontesSimilaridade(processoId);
+  let itens: Awaited<ReturnType<typeof obterFontesSimilaridade>>;
+  try {
+    itens = await obterFontesSimilaridade(processoId);
+  } catch {
+    return (
+      <EmptyState
+        icon={ExternalLink}
+        title="Não foi possível carregar as fontes"
+        description="Ocorreu um erro ao buscar as fontes de similaridade. Tente recarregar a página."
+      />
+    );
+  }
   const itensComFontes = itens.filter((item) => item.resultadosSimilaridade.length > 0);
 
   if (itensComFontes.length === 0) {
