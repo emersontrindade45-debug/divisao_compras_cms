@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Send, Mail, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +16,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ScoreBadge } from "@/components/fornecedores/ScoreBadge";
-import { FORNECEDORES } from "@/lib/fixtures/fornecedores";
+import { criarCotacao } from "@/lib/actions/cotacoes";
 import { cn } from "@/lib/utils";
 
 const TEMPLATE_EMAIL = `Prezado(a) {responsavel},
@@ -33,9 +35,45 @@ Prazo para retorno: {prazo}
 Atenciosamente,
 Divisão de Compras — Câmara Municipal de Santos`;
 
-export function SelecaoFornecedoresForm() {
+const SELECT_CLASS =
+  "h-8 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus:ring-2 focus:ring-ring/50 w-full max-w-md";
+
+export interface FornecedorOption {
+  id: string;
+  razaoSocial: string;
+  cidade: string;
+  estado: string;
+  responsavelContato: string;
+  categoria: string[];
+  score: number;
+  taxaResposta: number;
+}
+
+export interface ProcessoOption {
+  id: string;
+  numero: string;
+  objeto: string;
+}
+
+interface SelecaoFornecedoresFormProps {
+  fornecedores: FornecedorOption[];
+  processos: ProcessoOption[];
+}
+
+export function SelecaoFornecedoresForm({
+  fornecedores,
+  processos,
+}: SelecaoFornecedoresFormProps) {
+  const router = useRouter();
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [previewAberto, setPreviewAberto] = useState(false);
+  const [processoId, setProcessoId] = useState("");
+  const [dataLimite, setDataLimite] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const [registrando, setRegistrando] = useState(false);
 
   const toggle = (id: string) => {
     setSelecionados((prev) => {
@@ -46,10 +84,75 @@ export function SelecaoFornecedoresForm() {
     });
   };
 
-  const ativos = FORNECEDORES.filter((f) => f.status === "ativo");
+  async function handleRegistrar() {
+    if (!processoId) {
+      toast.error("Selecione o processo da cotação.");
+      return;
+    }
+    if (selecionados.size < 3) {
+      toast.warning(
+        "A IN 65/2021 exige consulta a no mínimo 3 fornecedores na pesquisa direta (exceções requerem justificativa aprovada).",
+      );
+    }
+    setRegistrando(true);
+    const agora = new Date();
+    const limite = new Date(`${dataLimite}T23:59:59`);
+    let erros = 0;
+    for (const fornecedorId of selecionados) {
+      const result = await criarCotacao({
+        processoId,
+        fornecedorId,
+        dataEnvio: agora,
+        dataLimite: limite,
+      });
+      if (result.error) erros++;
+    }
+    setRegistrando(false);
+    if (erros > 0) {
+      toast.error(`${erros} cotação(ões) não puderam ser registradas.`);
+    } else {
+      toast.success(
+        `${selecionados.size} cotação(ões) registrada(s). O envio do e-mail é feito pela Câmara; o SLA será acompanhado aqui.`,
+      );
+      setSelecionados(new Set());
+      router.refresh();
+    }
+  }
 
   return (
     <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Processo e prazo</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Processo</label>
+            <select
+              className={SELECT_CLASS}
+              value={processoId}
+              onChange={(e) => setProcessoId(e.target.value)}
+            >
+              <option value="">Selecione o processo</option>
+              {processos.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.numero} — {p.objeto}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Prazo de resposta (SLA)</label>
+            <input
+              type="date"
+              className={SELECT_CLASS}
+              value={dataLimite}
+              onChange={(e) => setDataLimite(e.target.value)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <CardTitle className="text-base flex items-center gap-2">
@@ -72,7 +175,7 @@ export function SelecaoFornecedoresForm() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ativos.map((f) => {
+              {fornecedores.map((f) => {
                 const checked = selecionados.has(f.id);
                 return (
                   <TableRow
@@ -130,7 +233,7 @@ export function SelecaoFornecedoresForm() {
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Mail className="size-4 text-muted-foreground" />
-              Prévia do e-mail de cotação
+              Modelo do e-mail de cotação (envio feito pela Câmara)
             </CardTitle>
             <Button
               variant="ghost"
@@ -150,13 +253,13 @@ export function SelecaoFornecedoresForm() {
           )}
           <CardContent className={cn("flex items-center justify-between", previewAberto && "pt-0")}>
             <p className="text-sm text-muted-foreground">
-              {selecionados.size} e-mail{selecionados.size > 1 ? "s" : ""} será
-              {selecionados.size > 1 ? "ão" : ""} disparado{selecionados.size > 1 ? "s" : ""} após
-              confirmação.
+              {selecionados.size} cotação{selecionados.size > 1 ? "ões" : ""} será
+              {selecionados.size > 1 ? "ão" : ""} registrada{selecionados.size > 1 ? "s" : ""} com
+              controle de SLA e lembretes.
             </p>
-            <Button size="sm" className="gap-2">
+            <Button size="sm" className="gap-2" onClick={handleRegistrar} disabled={registrando}>
               <Send className="size-3.5" />
-              Disparar cotações
+              {registrando ? "Registrando…" : "Registrar cotações"}
             </Button>
           </CardContent>
         </Card>

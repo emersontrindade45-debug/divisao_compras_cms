@@ -215,6 +215,8 @@ async function main() {
   console.log("✓ Contratações públicas criadas");
 
   // ── Cotações ────────────────────────────────────────────────────────────────
+  const cotacoesExistentes = await prisma.cotacao.count();
+  if (cotacoesExistentes === 0) {
   const cot001 = await prisma.cotacao.create({ data: { processoId: proc001.id, fornecedorId: forn001.id, dataEnvio: new Date("2026-05-20"), dataLimite: new Date("2026-06-03"), status: "positiva", lembreteEnviado: false, valorProposto: 1250.0, observacao: "Proposta recebida dentro do prazo." } });
   await prisma.cotacao.create({ data: { processoId: proc001.id, fornecedorId: forn002.id, dataEnvio: new Date("2026-05-20"), dataLimite: new Date("2026-06-03"), status: "silenciosa", lembreteEnviado: true, observacao: "Lembrete enviado em 31/05. Sem resposta." } });
   const cot003 = await prisma.cotacao.create({ data: { processoId: proc001.id, fornecedorId: forn004.id, dataEnvio: new Date("2026-05-20"), dataLimite: new Date("2026-06-03"), status: "incompleta", lembreteEnviado: true, valorProposto: 980.0, observacao: "Proposta sem CNPJ do responsável." } });
@@ -235,8 +237,11 @@ async function main() {
     ],
   });
   console.log("✓ Propostas criadas: 4");
+  }
 
   // ── Itens e Séries de Preços ─────────────────────────────────────────────────
+  const itensExistentes = await prisma.item.count();
+  if (itensExistentes === 0) {
   const item001 = await prisma.item.create({ data: { processoId: proc001.id, descricao: "Cadeira ergonômica com encosto regulável e apoio lombar", unidade: "unidade", quantidade: 40, classificacao: "comum", caracteristicasTecnicas: "Encosto regulável, apoio lombar, certificação NR-17.", palavrasChave: ["cadeira", "ergonômica", "mobiliário"] } });
   const item003 = await prisma.item.create({ data: { processoId: proc003.id, descricao: "Kit de material de limpeza e higienização biodegradável", unidade: "kit", quantidade: 120, classificacao: "comum", caracteristicasTecnicas: "Kits com produtos biodegradáveis, registro ANVISA.", palavrasChave: ["limpeza", "higiene", "consumo"] } });
   const item005 = await prisma.item.create({ data: { processoId: proc005.id, descricao: "Notebook corporativo 16GB RAM SSD 512GB", unidade: "unidade", quantidade: 30, classificacao: "comum", caracteristicasTecnicas: "16GB RAM, SSD 512GB, garantia on-site 36 meses.", palavrasChave: ["notebook", "informática", "equipamento"] } });
@@ -266,9 +271,48 @@ async function main() {
 
   console.log("✓ Séries de preços e preços criados");
 
-  // suppress unused variable warnings for proc002, proc007
+  // ── Fontes e Evidências (vinculadas aos itens dos processos) ────────────────
+  const fontesExistentes = await prisma.fonte.count();
+  if (fontesExistentes === 0) {
+    const fonte001a = await prisma.fonte.create({ data: { itemId: item001.id, tipo: "contratacao_publica", descricao: "Pregão 045/2025 — TRE-SP", orgaoOuFornecedor: "TRE-SP", dataReferencia: new Date("2025-11-10"), valorUnitario: 1180.0, status: "incluido" } });
+    const fonte001b = await prisma.fonte.create({ data: { itemId: item001.id, tipo: "site_eletronico", descricao: "Consulta Painel de Preços — cadeira ergonômica", orgaoOuFornecedor: "Painel de Preços", dataReferencia: new Date("2026-06-10"), valorUnitario: 1250.0, status: "incluido" } });
+    const fonte001c = await prisma.fonte.create({ data: { itemId: item001.id, tipo: "fornecedor_direto", descricao: "Proposta Móveis Corporativos Santista", orgaoOuFornecedor: "Santos Office", dataReferencia: new Date("2026-05-28"), valorUnitario: 1250.0, status: "incluido" } });
+    const fonte003a = await prisma.fonte.create({ data: { itemId: item003.id, tipo: "contratacao_publica", descricao: "Pregão 062/2025 — SABESP", orgaoOuFornecedor: "SABESP", dataReferencia: new Date("2025-11-07"), valorUnitario: 92.0, status: "incluido" } });
+    const fonte005a = await prisma.fonte.create({ data: { itemId: item005.id, tipo: "contratacao_publica", descricao: "Pregão 089/2025 — TCE-SP", orgaoOuFornecedor: "TCE-SP", dataReferencia: new Date("2025-12-10"), valorUnitario: 4600.0, status: "incluido" } });
+
+    await prisma.evidencia.createMany({ data: [
+      { fonteId: fonte001a.id, arquivo: "extrato-pregao-045-2025-tre-sp.pdf", url: "https://paineldeprecos.gov.br/pregao-045-2025", dataHoraAcesso: new Date("2026-06-10T09:15:00-03:00"), descricao: "Extrato da ata do pregão com item e valor homologado." },
+      { fonteId: fonte001b.id, arquivo: "captura-painel-cadeira-20260610.png", url: "https://www.paineldeprecos.gov.br/analise-departamento?item=cadeira-ergonomica", dataHoraAcesso: new Date("2026-06-10T09:20:00-03:00"), descricao: "Captura de tela com data/hora do acesso." },
+      { fonteId: fonte001c.id, arquivo: "proposta-santos-office-20260528.pdf", dataHoraAcesso: new Date("2026-05-28T14:00:00-03:00"), descricao: "Proposta comercial recebida por e-mail." },
+      { fonteId: fonte003a.id, arquivo: "extrato-pregao-062-2025-sabesp.pdf", url: "https://paineldeprecos.gov.br/pregao-062-2025", dataHoraAcesso: new Date("2026-04-15T11:00:00-03:00"), descricao: "Extrato do pregão com valor unitário do kit." },
+      { fonteId: fonte005a.id, arquivo: "extrato-pregao-089-2025-tce-sp.pdf", url: "https://paineldeprecos.gov.br/pregao-089-2025", dataHoraAcesso: new Date("2026-06-05T10:30:00-03:00"), descricao: "Extrato do pregão com configuração e valor do notebook." },
+    ]});
+    console.log("✓ Fontes e evidências criadas");
+  }
+  }
+
+  // ── Capturas de sites (evidência vinculada ao processo) ─────────────────────
+  const capturasExistentes = await prisma.capturaEvidencia.count();
+  if (capturasExistentes === 0) {
+    const sitePainel = await prisma.site.findUnique({ where: { url: "https://www.paineldeprecos.gov.br" } });
+    const siteComprasnet = await prisma.site.findUnique({ where: { url: "https://www.comprasnet.gov.br" } });
+    const siteComprasGov = await prisma.site.findUnique({ where: { url: "https://www.compras.gov.br" } });
+    const siteBec = await prisma.site.findUnique({ where: { url: "https://www.bec.sp.gov.br" } });
+
+    if (sitePainel && siteComprasnet && siteComprasGov && siteBec) {
+      await prisma.capturaEvidencia.createMany({ data: [
+        { siteId: sitePainel.id, processoId: proc001.id, url: "https://www.paineldeprecos.gov.br/analise-departamento?item=cadeira-ergonomica", produto: "Cadeira ergonômica com encosto regulável NR-17", valorUnitario: 1250.0, dataHoraAcesso: new Date("2026-06-10T09:15:00-03:00"), evidencia: "captura-painel-cadeira-20260610.png" },
+        { siteId: siteComprasnet.id, processoId: proc001.id, url: "https://www.comprasnet.gov.br/sicaf/public/pregoEletronico/cadeira-ergonomica", produto: "Cadeira giratória ergonômica com apoio lombar", valorUnitario: 1180.0, dataHoraAcesso: new Date("2026-06-10T10:42:00-03:00"), evidencia: "captura-comprasnet-cadeira-20260610.png" },
+        { siteId: sitePainel.id, processoId: proc003.id, url: "https://www.paineldeprecos.gov.br/analise-departamento?item=kit-limpeza", produto: "Kit material de limpeza biodegradável 10 itens", valorUnitario: 87.5, dataHoraAcesso: new Date("2026-06-11T14:32:00-03:00"), evidencia: "captura-painel-limpeza-20260611.png" },
+        { siteId: siteComprasGov.id, processoId: proc005.id, url: "https://www.compras.gov.br/consulta/notebook-corporativo", produto: "Notebook corporativo 16GB RAM SSD 512GB", valorUnitario: 4850.0, dataHoraAcesso: new Date("2026-06-12T08:05:00-03:00"), evidencia: "captura-compras-notebook-20260612.png" },
+        { siteId: siteBec.id, processoId: proc007.id, url: "https://www.bec.sp.gov.br/item/papel-a4-fsc", produto: "Papel A4 75g/m² certificação FSC - resma 500 folhas", valorUnitario: 28.9, dataHoraAcesso: new Date("2026-06-13T11:20:00-03:00"), evidencia: "captura-bec-papel-20260613.png" },
+      ]});
+      console.log("✓ Capturas de sites criadas");
+    }
+  }
+
+  // suppress unused variable warnings for proc002
   void proc002;
-  void proc007;
 
   console.log("✅ Seed concluído com sucesso!");
 }

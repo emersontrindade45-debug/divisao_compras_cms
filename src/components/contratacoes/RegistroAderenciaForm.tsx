@@ -25,12 +25,17 @@ interface RegistroAderenciaFormProps {
   contratacao: ContratacaoFixture;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  onSave?: (dados: {
+    aderencia: AderenciaValor;
+    justificativa: string;
+  }) => Promise<{ error?: string }>;
 }
 
 export function RegistroAderenciaForm({
   contratacao,
   open,
   onOpenChange,
+  onSave,
 }: RegistroAderenciaFormProps) {
   const [aderencia, setAderencia] = useState<AderenciaValor | "">(
     contratacao.aderencia === "pendente" ? "" : contratacao.aderencia,
@@ -38,10 +43,11 @@ export function RegistroAderenciaForm({
   const [justificativa, setJustificativa] = useState(
     contratacao.justificativaAderencia ?? "",
   );
+  const [salvando, setSalvando] = useState(false);
 
   const justificativaObrigatoria = aderencia === "parcial" || aderencia === "nao-aderente";
 
-  function handleSalvar() {
+  async function handleSalvar() {
     if (!aderencia) {
       toast.error("Selecione a aderência antes de salvar.");
       return;
@@ -49,6 +55,15 @@ export function RegistroAderenciaForm({
     if (justificativaObrigatoria && !justificativa.trim()) {
       toast.error("A justificativa é obrigatória para aderência parcial ou não aderente.");
       return;
+    }
+    if (onSave) {
+      setSalvando(true);
+      const result = await onSave({ aderencia, justificativa });
+      setSalvando(false);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
     }
     onOpenChange(false);
     toast.success("Classificação de aderência registrada.");
@@ -113,7 +128,9 @@ export function RegistroAderenciaForm({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button onClick={handleSalvar}>Salvar</Button>
+          <Button onClick={handleSalvar} disabled={salvando}>
+            {salvando ? "Salvando…" : "Salvar"}
+          </Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>

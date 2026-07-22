@@ -102,8 +102,12 @@ export async function obterProcessoDetalhado(id: string) {
       itens: {
         include: {
           fontes: { include: { evidencias: true } },
-          seriePrecos: { include: { precos: true } },
+          seriePrecos: { include: { precos: { orderBy: { dataReferencia: "asc" } } } },
         },
+      },
+      capturas: {
+        include: { site: { select: { nome: true, lista: true } } },
+        orderBy: { dataHoraAcesso: "desc" },
       },
       cotacoes: {
         include: {

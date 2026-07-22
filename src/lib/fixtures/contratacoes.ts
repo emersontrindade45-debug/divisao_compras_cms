@@ -2,6 +2,8 @@ import type { StatusDominio } from "@/lib/domain/status";
 
 export interface ContratacaoFixture {
   id: string;
+  processoId?: string;
+  processoNumero?: string;
   numero: string;
   orgao: string;
   objeto: string;

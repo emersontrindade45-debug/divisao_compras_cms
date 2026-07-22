@@ -1,67 +1,55 @@
-"use client";
+import { SitesPageClient } from "@/components/sites/SitesPageClient";
+import { listarCapturas, listarSites } from "@/lib/actions/sites";
+import { listarProcessos } from "@/lib/actions/listar";
+import type { SiteFixture } from "@/lib/fixtures/sites";
+import type { CapturaRow } from "@/components/sites/CapturasTable";
 
-import { useState } from "react";
-import { SITES } from "@/lib/fixtures/sites";
-import { CAPTURAS } from "@/lib/fixtures/capturas";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { SitesTable } from "@/components/sites/SitesTable";
-import { CapturasTable } from "@/components/sites/CapturasTable";
-import { CapturaForm, type NovaCapturaData } from "@/components/sites/CapturaForm";
+export default async function SitesPage() {
+  const [sitesDb, capturasDb, processosDb] = await Promise.all([
+    listarSites(),
+    listarCapturas(),
+    listarProcessos(),
+  ]);
 
-export default function SitesPage() {
-  const [mostrarFormulario, setMostrarFormulario] = useState(false);
+  const sites: SiteFixture[] = sitesDb.map((s) => ({
+    id: s.id,
+    url: s.url,
+    nome: s.nome,
+    lista: s.lista,
+    motivo: s.motivo ?? undefined,
+    categoria: s.categoria,
+    isMarketplace: s.isMarketplace,
+  }));
 
-  function handleNovaCapturaSubmit(_data: NovaCapturaData) {
-    setMostrarFormulario(false);
-  }
+  const capturas: CapturaRow[] = capturasDb.map((c) => ({
+    id: c.id,
+    siteNome: c.site.nome,
+    processoId: c.processoId,
+    processoNumero: c.processo.numero,
+    processoObjeto: c.processo.objeto,
+    url: c.url,
+    produto: c.produto,
+    valorUnitario: Number(c.valorUnitario),
+    dataHoraAcesso: c.dataHoraAcesso.toISOString(),
+    evidencia: c.evidencia ?? undefined,
+  }));
+
+  const processos = processosDb.map((p) => ({
+    id: p.id,
+    numero: p.numero,
+    objeto: p.objeto,
+  }));
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Sites admissíveis</h1>
         <p className="text-sm text-muted-foreground">
-          Validação de sites com captura de data/hora e bloqueio de marketplaces.
+          Evidências de sites vinculadas a cada processo, com captura de data/hora e bloqueio de
+          marketplaces.
         </p>
       </div>
-
-      <Tabs defaultValue="sites">
-        <TabsList>
-          <TabsTrigger value="sites">Sites admissíveis</TabsTrigger>
-          <TabsTrigger value="capturas">Capturas registradas</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="sites" className="space-y-4 pt-2">
-          <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-            Somente sites da lista branca são admissíveis como fonte em pesquisa de preços. Sites
-            da lista cinza requerem ressalva registrada. Sites da lista vermelha e marketplaces
-            estão bloqueados conforme a IN SEGES/ME 65/2021.
-          </div>
-          <SitesTable sites={SITES} />
-        </TabsContent>
-
-        <TabsContent value="capturas" className="space-y-4 pt-2">
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant={mostrarFormulario ? "outline" : "default"}
-              onClick={() => setMostrarFormulario((prev) => !prev)}
-            >
-              {mostrarFormulario ? "Cancelar" : "Nova captura"}
-            </Button>
-          </div>
-
-          {mostrarFormulario && (
-            <CapturaForm
-              sites={SITES}
-              processoId="proc-001"
-              onSubmit={handleNovaCapturaSubmit}
-            />
-          )}
-
-          <CapturasTable capturas={CAPTURAS} sites={SITES} />
-        </TabsContent>
-      </Tabs>
+      <SitesPageClient sites={sites} capturas={capturas} processos={processos} />
     </div>
   );
 }

@@ -12,9 +12,27 @@ import { requireAuth } from "@/lib/auth/rbac";
 export default async function CotacoesPage() {
   await requireAuth();
 
-  const [cotacoesRaw, alertas, propostas] = await Promise.all([
+  const [cotacoesRaw, alertas, fornecedoresDb, processosDb, propostas] = await Promise.all([
     listarCotacoes(),
     buscarAlertas(),
+    db.fornecedor.findMany({
+      where: { status: "ativo" },
+      orderBy: { razaoSocial: "asc" },
+      select: {
+        id: true,
+        razaoSocial: true,
+        cidade: true,
+        estado: true,
+        responsavelContato: true,
+        categoria: true,
+        score: true,
+        taxaResposta: true,
+      },
+    }),
+    db.processo.findMany({
+      orderBy: { dataAbertura: "desc" },
+      select: { id: true, numero: true, objeto: true },
+    }),
     db.proposta.findMany({
       where: { statusGeral: { in: ["com_ressalva", "invalida"] } },
       include: {
@@ -96,7 +114,13 @@ export default async function CotacoesPage() {
         </TabsContent>
 
         <TabsContent value="nova">
-          <SelecaoFornecedoresForm />
+          <SelecaoFornecedoresForm
+            fornecedores={fornecedoresDb.map((f) => ({
+              ...f,
+              taxaResposta: Number(f.taxaResposta),
+            }))}
+            processos={processosDb}
+          />
         </TabsContent>
 
         <TabsContent value="propostas" className="space-y-4">

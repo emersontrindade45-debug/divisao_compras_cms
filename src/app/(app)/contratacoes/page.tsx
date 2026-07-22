@@ -1,102 +1,44 @@
-"use client";
-
-import { useState, useMemo } from "react";
-import { CONTRATACOES } from "@/lib/fixtures/contratacoes";
-import {
-  ContratacoesFilters,
-  type ContratacoesFilters as FiltersType,
-} from "@/components/contratacoes/ContratacoesFilters";
-import { ContratacoesTable } from "@/components/contratacoes/ContratacoesTable";
-import { ComparadorContratacoes } from "@/components/contratacoes/ComparadorContratacoes";
-import { RegistroAderenciaForm } from "@/components/contratacoes/RegistroAderenciaForm";
+import { ContratacoesPageClient } from "@/components/contratacoes/ContratacoesPageClient";
+import { listarContratacoes } from "@/lib/actions/contratacoes";
 import type { ContratacaoFixture } from "@/lib/fixtures/contratacoes";
+import type { StatusDominio } from "@/lib/domain/status";
 
-const modalidades = Array.from(new Set(CONTRATACOES.map((c) => c.modalidade))).sort((a, b) =>
-  a.localeCompare(b, "pt-BR"),
-);
+const ADERENCIA_MAP: Record<string, StatusDominio> = {
+  aderente: "aderente",
+  parcial: "parcial",
+  nao_aderente: "nao-aderente",
+};
 
-export default function ContratacoesPage() {
-  const [filtros, setFiltros] = useState<FiltersType>({
-    busca: "",
-    aderencia: "todos",
-    modalidade: "todos",
-    dataInicio: "",
-    dataFim: "",
-  });
+export default async function ContratacoesPage() {
+  const contratacoesDb = await listarContratacoes();
 
-  const [comparando, setComparando] = useState<ContratacaoFixture[] | null>(null);
-  const [classificando, setClassificando] = useState<ContratacaoFixture | null>(null);
-
-  const contratacoesFiltradas = useMemo(() => {
-    return CONTRATACOES.filter((c) => {
-      if (filtros.busca) {
-        const termo = filtros.busca.toLowerCase();
-        const matchObjeto = c.objeto.toLowerCase().includes(termo);
-        const matchOrgao = c.orgao.toLowerCase().includes(termo);
-        if (!matchObjeto && !matchOrgao) return false;
-      }
-
-      if (filtros.aderencia !== "todos" && c.aderencia !== filtros.aderencia) {
-        return false;
-      }
-
-      if (filtros.modalidade !== "todos" && c.modalidade !== filtros.modalidade) {
-        return false;
-      }
-
-      if (filtros.dataInicio && c.dataContratacao < filtros.dataInicio) {
-        return false;
-      }
-
-      if (filtros.dataFim && c.dataContratacao > filtros.dataFim) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [filtros]);
+  const contratacoes: ContratacaoFixture[] = contratacoesDb.map((c) => ({
+    id: c.id,
+    processoId: c.processoId,
+    processoNumero: c.processo.numero,
+    numero: c.numero,
+    orgao: c.orgao,
+    objeto: c.objeto,
+    modalidade: c.modalidade,
+    valorUnitario: Number(c.valorUnitario),
+    quantidade: c.quantidade,
+    unidade: c.unidade,
+    dataContratacao: c.dataContratacao.toISOString().slice(0, 10),
+    fonte: c.fonteUrl ?? "—",
+    aderencia: ADERENCIA_MAP[c.aderencia] ?? "pendente",
+    justificativaAderencia: c.justificativaAderencia ?? undefined,
+    palavrasChave: c.palavrasChave,
+  }));
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Contratações públicas similares</h1>
         <p className="text-sm text-muted-foreground">
-          Busca e classificação de aderência (fonte prioritária IN 65/2021).
+          Busca e classificação de aderência por processo (fonte prioritária IN 65/2021).
         </p>
       </div>
-
-      <ContratacoesFilters
-        busca={filtros.busca}
-        aderencia={filtros.aderencia}
-        modalidade={filtros.modalidade}
-        dataInicio={filtros.dataInicio}
-        dataFim={filtros.dataFim}
-        modalidades={modalidades}
-        onChange={setFiltros}
-      />
-
-      <ContratacoesTable
-        contratacoes={contratacoesFiltradas}
-        onCompare={(items) => setComparando(items)}
-        onClassificar={(item) => setClassificando(item)}
-      />
-
-      {comparando !== null && (
-        <ComparadorContratacoes
-          items={comparando}
-          onClose={() => setComparando(null)}
-        />
-      )}
-
-      {classificando !== null && (
-        <RegistroAderenciaForm
-          contratacao={classificando}
-          open
-          onOpenChange={(v) => {
-            if (!v) setClassificando(null);
-          }}
-        />
-      )}
+      <ContratacoesPageClient contratacoes={contratacoes} />
     </div>
   );
 }

@@ -6,8 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { SiteFixture } from "@/lib/fixtures/sites";
 
+export interface ProcessoOption {
+  id: string;
+  numero: string;
+  objeto: string;
+}
+
 export interface NovaCapturaData {
   siteId: string;
+  processoId: string;
   url: string;
   produto: string;
   valorUnitario: number;
@@ -17,15 +24,16 @@ export interface NovaCapturaData {
 
 interface CapturaFormProps {
   sites: SiteFixture[];
-  processoId: string;
-  onSubmit: (data: NovaCapturaData) => void;
+  processos: ProcessoOption[];
+  onSubmit: (data: NovaCapturaData) => void | Promise<void>;
 }
 
 const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus:ring-2 focus:ring-ring/50";
 
-export function CapturaForm({ sites, processoId: _processoId, onSubmit }: CapturaFormProps) {
+export function CapturaForm({ sites, processos, onSubmit }: CapturaFormProps) {
   const [siteId, setSiteId] = useState("");
+  const [processoId, setProcessoId] = useState("");
   const [url, setUrl] = useState("");
   const [produto, setProduto] = useState("");
   const [valorUnitario, setValorUnitario] = useState("");
@@ -33,29 +41,37 @@ export function CapturaForm({ sites, processoId: _processoId, onSubmit }: Captur
     () => new Date().toISOString().slice(0, 16),
   );
   const [evidencia, setEvidencia] = useState("");
+  const [enviando, setEnviando] = useState(false);
 
   const selectedSite = sites.find((s) => s.id === siteId);
   const isBloqueado =
     selectedSite !== undefined &&
     (selectedSite.isMarketplace || selectedSite.lista === "vermelha");
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!siteId || !url || !produto || !valorUnitario || !dataHoraAcesso) return;
-    onSubmit({
-      siteId,
-      url,
-      produto,
-      valorUnitario: parseFloat(valorUnitario),
-      dataHoraAcesso: new Date(dataHoraAcesso).toISOString(),
-      evidencia,
-    });
-    setSiteId("");
-    setUrl("");
-    setProduto("");
-    setValorUnitario("");
-    setDataHoraAcesso(new Date().toISOString().slice(0, 16));
-    setEvidencia("");
+    if (!siteId || !processoId || !url || !produto || !valorUnitario || !dataHoraAcesso) return;
+    setEnviando(true);
+    try {
+      await onSubmit({
+        siteId,
+        processoId,
+        url,
+        produto,
+        valorUnitario: parseFloat(valorUnitario),
+        dataHoraAcesso: new Date(dataHoraAcesso).toISOString(),
+        evidencia,
+      });
+      setSiteId("");
+      setProcessoId("");
+      setUrl("");
+      setProduto("");
+      setValorUnitario("");
+      setDataHoraAcesso(new Date().toISOString().slice(0, 16));
+      setEvidencia("");
+    } finally {
+      setEnviando(false);
+    }
   }
 
   return (
@@ -66,6 +82,23 @@ export function CapturaForm({ sites, processoId: _processoId, onSubmit }: Captur
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Processo</label>
+              <select
+                className={SELECT_CLASS}
+                value={processoId}
+                onChange={(e) => setProcessoId(e.target.value)}
+                required
+              >
+                <option value="">Selecione o processo em cotação</option>
+                {processos.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.numero} — {p.objeto}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Site</label>
               <select
@@ -148,8 +181,8 @@ export function CapturaForm({ sites, processoId: _processoId, onSubmit }: Captur
           )}
 
           <div className="flex justify-end">
-            <Button type="submit" disabled={isBloqueado} size="sm">
-              Registrar captura
+            <Button type="submit" disabled={isBloqueado || enviando} size="sm">
+              {enviando ? "Registrando…" : "Registrar captura"}
             </Button>
           </div>
         </form>

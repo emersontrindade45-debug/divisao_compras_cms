@@ -38,6 +38,23 @@ export function ContratacoesTable({ contratacoes, onCompare, onClassificar }: Co
       ),
     },
     {
+      accessorKey: "processoNumero",
+      header: "Processo",
+      cell: ({ row }) =>
+        row.original.processoId ? (
+          <a
+            href={`/processos/${row.original.processoId}`}
+            className="font-mono text-xs text-primary underline-offset-4 hover:underline"
+          >
+            {row.original.processoNumero}
+          </a>
+        ) : (
+          <span className="font-mono text-xs text-muted-foreground">
+            {row.original.processoNumero ?? "—"}
+          </span>
+        ),
+    },
+    {
       accessorKey: "numero",
       header: "Número",
       cell: ({ row }) => (

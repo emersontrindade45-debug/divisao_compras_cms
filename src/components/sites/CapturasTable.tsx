@@ -1,25 +1,46 @@
 "use client";
 
+import Link from "next/link";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table/DataTable";
-import type { CapturaFixture } from "@/lib/fixtures/capturas";
-import type { SiteFixture } from "@/lib/fixtures/sites";
 import { formatBRL, formatDataHora } from "@/lib/formatters";
 
-interface CapturasTableProps {
-  capturas: CapturaFixture[];
-  sites: SiteFixture[];
+export interface CapturaRow {
+  id: string;
+  siteNome: string;
+  processoId: string;
+  processoNumero: string;
+  processoObjeto: string;
+  url: string;
+  produto: string;
+  valorUnitario: number;
+  dataHoraAcesso: string;
+  evidencia?: string;
 }
 
-export function CapturasTable({ capturas, sites }: CapturasTableProps) {
-  const COLUNAS: ColumnDef<CapturaFixture>[] = [
+interface CapturasTableProps {
+  capturas: CapturaRow[];
+}
+
+export function CapturasTable({ capturas }: CapturasTableProps) {
+  const COLUNAS: ColumnDef<CapturaRow>[] = [
     {
-      id: "site",
+      accessorKey: "processoNumero",
+      header: "Processo",
+      cell: ({ row }) => (
+        <Link
+          href={`/processos/${row.original.processoId}`}
+          className="text-xs font-mono text-primary underline-offset-4 hover:underline"
+          title={row.original.processoObjeto}
+        >
+          {row.original.processoNumero}
+        </Link>
+      ),
+    },
+    {
+      accessorKey: "siteNome",
       header: "Site",
-      cell: ({ row }) => {
-        const site = sites.find((s) => s.id === row.original.siteId);
-        return <span className="text-xs font-medium">{site?.nome ?? row.original.siteId}</span>;
-      },
+      cell: ({ row }) => <span className="text-xs font-medium">{row.original.siteNome}</span>,
     },
     {
       accessorKey: "produto",
@@ -48,7 +69,9 @@ export function CapturasTable({ capturas, sites }: CapturasTableProps) {
       accessorKey: "evidencia",
       header: "Evidência",
       cell: ({ row }) => (
-        <span className="font-mono text-xs text-muted-foreground">{row.original.evidencia}</span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {row.original.evidencia ?? "—"}
+        </span>
       ),
     },
   ];

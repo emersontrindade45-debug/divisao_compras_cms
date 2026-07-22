@@ -1,122 +1,85 @@
-"use client";
+import { FornecedoresPageClient } from "@/components/fornecedores/FornecedoresPageClient";
+import { db } from "@/lib/db";
+import { requireAuth } from "@/lib/auth/rbac";
+import type {
+  FornecedorFixture,
+  HistoricoCotacaoFixture,
+} from "@/lib/fixtures/fornecedores";
 
-import { useState, useMemo } from "react";
-import { FORNECEDORES, HISTORICO_COTACOES } from "@/lib/fixtures/fornecedores";
-import {
-  FornecedoresFilters,
-  type FornecedoresFilters as FiltersType,
-} from "@/components/fornecedores/FornecedoresFilters";
-import { FornecedoresTable } from "@/components/fornecedores/FornecedoresTable";
-import { FornecedorHistorico } from "@/components/fornecedores/FornecedorHistorico";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import type { FornecedorFixture } from "@/lib/fixtures/fornecedores";
+const STATUS_RESPOSTA_MAP: Record<string, HistoricoCotacaoFixture["statusResposta"]> = {
+  respondido: "respondido",
+  nao_respondido: "nao-respondido",
+  recusado: "recusado",
+};
 
-const categorias = Array.from(
-  new Set(FORNECEDORES.flatMap((f) => f.categoria)),
-).sort((a, b) => a.localeCompare(b, "pt-BR"));
+const STATUS_COTACAO_MAP: Record<string, HistoricoCotacaoFixture["statusResposta"]> = {
+  positiva: "respondido",
+  incompleta: "respondido",
+  negativa: "recusado",
+  silenciosa: "nao-respondido",
+};
 
-const cidades = Array.from(new Set(FORNECEDORES.map((f) => f.cidade))).sort(
-  (a, b) => a.localeCompare(b, "pt-BR"),
-);
+export default async function FornecedoresPage() {
+  await requireAuth();
 
-export default function FornecedoresPage() {
-  const [filtros, setFiltros] = useState<FiltersType>({
-    busca: "",
-    categoria: "todos",
-    cidade: "todos",
-    status: "todos",
-    scoreMinimo: "",
+  const fornecedoresDb = await db.fornecedor.findMany({
+    include: {
+      historicoCotacoes: { orderBy: { data: "desc" } },
+      cotacoes: {
+        include: { processo: { select: { numero: true } } },
+        orderBy: { dataEnvio: "desc" },
+      },
+    },
+    orderBy: { razaoSocial: "asc" },
   });
 
-  const [selectedFornecedor, setSelectedFornecedor] = useState<FornecedorFixture | null>(null);
+  const fornecedores: FornecedorFixture[] = fornecedoresDb.map((f) => ({
+    id: f.id,
+    cnpj: f.cnpj,
+    razaoSocial: f.razaoSocial,
+    nomeFantasia: f.nomeFantasia ?? undefined,
+    categoria: f.categoria,
+    cidade: f.cidade,
+    estado: f.estado,
+    responsavelContato: f.responsavelContato,
+    email: f.email,
+    telefone: f.telefone ?? undefined,
+    score: f.score,
+    totalCotacoes: f.totalCotacoes,
+    totalRespostas: f.totalRespostas,
+    taxaResposta: Number(f.taxaResposta),
+    ultimaResposta: f.ultimaResposta?.toISOString().slice(0, 10),
+    status: f.status,
+  }));
 
-  const fornecedoresFiltrados = useMemo(() => {
-    return FORNECEDORES.filter((f) => {
-      if (filtros.busca) {
-        const termo = filtros.busca.toLowerCase();
-        const matchRazao = f.razaoSocial.toLowerCase().includes(termo);
-        const matchCnpj = f.cnpj.includes(termo);
-        if (!matchRazao && !matchCnpj) return false;
-      }
-
-      if (filtros.categoria !== "todos" && !f.categoria.includes(filtros.categoria)) {
-        return false;
-      }
-
-      if (filtros.cidade !== "todos" && f.cidade !== filtros.cidade) {
-        return false;
-      }
-
-      if (filtros.status !== "todos" && f.status !== filtros.status) {
-        return false;
-      }
-
-      if (filtros.scoreMinimo !== "" && f.score < Number(filtros.scoreMinimo)) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [filtros]);
-
-  const historicoSelecionado = useMemo(
-    () =>
-      selectedFornecedor
-        ? HISTORICO_COTACOES.filter((hc) => hc.fornecedorId === selectedFornecedor.id)
-        : [],
-    [selectedFornecedor],
-  );
+  const historico: HistoricoCotacaoFixture[] = fornecedoresDb.flatMap((f) => [
+    ...f.cotacoes.map((c) => ({
+      id: c.id,
+      fornecedorId: f.id,
+      processoNumero: c.processo.numero,
+      data: c.dataEnvio.toISOString().slice(0, 10),
+      statusResposta: STATUS_COTACAO_MAP[c.status] ?? ("nao-respondido" as const),
+      valorProposto: c.valorProposto ? Number(c.valorProposto) : undefined,
+    })),
+    ...f.historicoCotacoes.map((h) => ({
+      id: h.id,
+      fornecedorId: f.id,
+      processoNumero: h.processoNumero,
+      data: h.data.toISOString().slice(0, 10),
+      statusResposta: STATUS_RESPOSTA_MAP[h.statusResposta] ?? ("nao-respondido" as const),
+      valorProposto: h.valorProposto ? Number(h.valorProposto) : undefined,
+    })),
+  ]);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Fornecedores</h1>
         <p className="text-sm text-muted-foreground">
-          Cadastro vivo, score operacional e histórico de resposta.
+          Cadastro vivo, score operacional e histórico de resposta por processo.
         </p>
       </div>
-
-      <FornecedoresFilters
-        busca={filtros.busca}
-        categoria={filtros.categoria}
-        cidade={filtros.cidade}
-        status={filtros.status}
-        scoreMinimo={filtros.scoreMinimo}
-        categorias={categorias}
-        cidades={cidades}
-        onChange={setFiltros}
-      />
-
-      <FornecedoresTable
-        fornecedores={fornecedoresFiltrados}
-        onVerHistorico={setSelectedFornecedor}
-      />
-
-      <Sheet
-        open={selectedFornecedor !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelectedFornecedor(null);
-        }}
-      >
-        <SheetContent side="right" className="w-[480px] sm:w-[540px] overflow-y-auto">
-          <SheetHeader>
-            <SheetTitle>Histórico do fornecedor</SheetTitle>
-          </SheetHeader>
-          {selectedFornecedor !== null && (
-            <div className="mt-4">
-              <FornecedorHistorico
-                fornecedor={selectedFornecedor}
-                historico={historicoSelecionado}
-              />
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
+      <FornecedoresPageClient fornecedores={fornecedores} historico={historico} />
     </div>
   );
 }
