@@ -176,3 +176,90 @@ recursos sociais ou comerciais.
 - Quebrar o build em **milestones entregáveis**; core primeiro, iterar depois.
 - Testar cada milestone antes de avançar.
 - Lógica de conformidade (IN 65/2021) é a parte de maior risco — priorizar testes nela.
+- Antes de finalizar qualquer tarefa, responder à pergunta **"Como você confirma que isso está correto?"**:
+  - Descrever como a verificação será feita (ex.: rodar testes, lint, build, checar UI no navegador,
+    validar regra de negócio específica da IN 65/2021).
+  - Executar essa verificação automaticamente antes de reportar a tarefa como concluída.
+  - Só reportar sucesso após a verificação ter sido executada e ter passado; se não for possível
+    verificar (ex.: mudança de UI sem acesso ao navegador), declarar isso explicitamente em vez de
+    presumir sucesso.
+- **Sempre que o Claude cometer um erro, adicionar uma nova regra a este arquivo** para impedir que
+  o mesmo erro se repita. Este CLAUDE.md concentra o aprendizado acumulado do projeto — cada
+  correção vira uma regra permanente na seção 9, não só uma explicação isolada no commit. Ao
+  corrigir algo, perguntar: "que regra eu escreveria aqui para nunca cometer esse erro de novo?"
+
+---
+
+## 8. Permissões do agente
+
+Em vez de liberar o Claude para executar qualquer ação sem confirmação, as ações são divididas em
+três grupos. Esta seção define o padrão do projeto; ela não substitui os limites de segurança
+padrão do Claude Code, apenas os torna explícitos para o contexto deste repositório.
+
+### Permitidas automaticamente (sem pedir confirmação)
+- Leitura, busca e exploração do repositório.
+- Criar/editar arquivos de código em `src/`, `prisma/schema.prisma`, `docs/`, testes.
+- Rodar lint, typecheck, testes e build localmente.
+- Rodar `prisma migrate dev` contra banco **local/dev**.
+- Criar commits locais (sem `push`).
+
+### Exigem autorização explícita do usuário antes de executar
+- `git push` (principalmente para `main`); abrir/fechar PRs; comentar em PRs/issues.
+- `prisma migrate deploy` ou qualquer migration contra banco de **produção**.
+- Deploy manual na Vercel; alterar variáveis de ambiente de produção.
+- Qualquer envio real de e-mail (Resend ou outro provedor), mesmo em teste — ver item 3 da seção 9.
+- Instalar, remover ou alterar versão de dependências (`package.json`).
+- Alterar configuração de CI/CD, hooks de Git, ESLint/Prettier, `tsconfig.json`.
+- Excluir dados já persistidos de `Processo`, `Fonte`, `Evidencia`, `Fornecedor` ou `Cotacao`.
+
+### Totalmente bloqueadas (nunca executar, mesmo se solicitado)
+- `git push --force` para `main`/`master`; `git reset --hard`; `git clean -f` sem confirmação explícita.
+- Migrations destrutivas (`DROP TABLE`, `TRUNCATE`) contra o banco de produção.
+- Qualquer bypass das regras de conformidade da IN 65/2021 (ex.: permitir preço sem
+  fonte+data+evidência "temporariamente" ou "só para teste").
+- Remover ou desabilitar o `AuditLog` / trilha de auditoria.
+- Commitar segredos/credenciais (`.env`, chaves de API) no repositório.
+- Pular hooks de commit (`--no-verify`) ou desabilitar lint/typecheck para "destravar" um build.
+
+---
+
+## 9. Lições aprendidas (regras anti-regressão)
+
+Regras nascidas de erros reais já cometidos neste projeto. Cada uma existe para que o mesmo erro
+não se repita — não remover uma entrada aqui sem entender por que ela foi escrita.
+
+1. **Milestones de UI mock não herdam o checklist de milestones de backend.** `[UI (mock)]` e
+   integração real são fases distintas no `docs/PLAN.md`; não sobrescrever o objetivo/entregas de
+   um milestone com as de outro só porque parecem relacionados.
+2. **`lib/domain/` não importa de `components/`.** Domínio é puro e testável isoladamente; tipos
+   compartilhados moram em `lib/domain`, componentes reexportam — nunca o inverso.
+3. **Disparo de e-mail (cotação, lembrete) não é responsabilidade do sistema.** A Câmara envia
+   externamente; o sistema só registra. Nunca implementar envio real via Resend ou outro provedor
+   para o fluxo de cotação; jobs de lembrete geram apenas relatório.
+4. **Verificar a API real da lib de UI instalada antes de aplicar padrões de outra lib** (ex.:
+   `asChild` é do Radix/shadcn, não existe na Base UI). Checar `package.json` e a versão instalada
+   antes de assumir uma prop ou padrão.
+5. **Tokens de design (CSS variables) não podem se auto-referenciar.** Verificar no DOM/browser que
+   o valor resolvido é o esperado antes de considerar um token "conectado".
+6. **Enums do Prisma e valores de domínio/UI usam a mesma convenção de string** (hífen vs.
+   underscore etc.). Ao criar um enum novo, checar todos os pontos de comparação (`StatusBadge`,
+   filtros, testes) usam o mesmo formato.
+7. **Nunca adicionar `prisma migrate deploy` ao build command da Vercel** — trava o build por
+   conexão de DB bloqueada. Migrations de produção rodam sob demanda via rota administrativa
+   protegida (`/api/admin/migrate`), nunca durante o build.
+8. **Links de evidência para portais públicos (PNCP, Painel de Preços) são validados abrindo a URL
+   real gerada**, não só verificando que a request original teve sucesso — formato de URL errado
+   invalida a evidência.
+9. **Buscas de contratações/preços similares sempre excluem o CNPJ do próprio órgão
+   (`ORGAO_CNPJ`).** Um contrato não pode ser referência de preço para sua própria renovação.
+10. **Parsers de planilha toleram variação de nome de coluna e linhas com estatística zerada**
+    (pesquisa de preço ainda não feita). Nunca exigir nome exato de coluna ou valor > 0 como
+    pré-condição de linha válida.
+11. **Chamadas externas por item, em loop, rodam com concorrência limitada — nunca sequencial
+    puro.** Timeouts de função serverless somam retries/backoff por item; processamento serial
+    estoura o limite em produção.
+12. **Toda resposta de IA usada para decisão de negócio é validada com Zod antes de uso.** Nunca
+    confiar em JSON de modelo de IA sem parsing defensivo.
+13. **Ao expor uma entidade nova na UI, confirmar que a página lê do Prisma, não de fixtures
+    mock**, antes de considerar o módulo pronto. Migrar o backend não migra automaticamente as
+    telas que ainda importam fixtures.
