@@ -237,7 +237,7 @@ Build de produção sobe; E2E do fluxo principal passa; aplicação acessível n
 
 ---
 
-## M10 — Pesquisa por Similaridade (TR → Contratos → Fornecedores) `[CONFORMIDADE]`
+## M10 — Pesquisa por Similaridade (TR → Contratos → Fornecedores) `[CONFORMIDADE]` ✅ CONCLUÍDO (com ressalvas — ver M11)
 
 - **Branch:** `feat/pesquisa-similaridade`
 - **Design:** [docs/superpowers/specs/2026-06-15-pesquisa-similaridade-design.md](superpowers/specs/2026-06-15-pesquisa-similaridade-design.md)
@@ -245,32 +245,83 @@ Build de produção sobe; E2E do fluxo principal passa; aplicação acessível n
   similares com precisão suficiente para servir de justificativa formal — a partir do
   Termo de Referência (TR) e da planilha padrão que já é o registro mestre dos itens.
 
+> Checklist revisado em 2026-07-23 lendo o código, não só os commits — o texto abaixo ficou
+> desatualizado por meses em relação ao que já tinha sido entregue.
+
 ### Entregas
 
-- [ ] `lib/ia/`: client abstrato (Gemini Flash) com `extrairEspecificacaoTR()` e `rankearSimilaridade()`.
-- [ ] `lib/integracoes/pncp.ts` e `painelPrecos.ts`: clients tipados para as APIs públicas.
-- [ ] `lib/similaridade/`: orquestração do pipeline (extração → busca paralela → ranking),
+- [x] `lib/ia/`: client abstrato com `extrairEspecificacaoTR()` e `rankearSimilaridade()`.
+  **Ressalva:** `getProvedorIA()` (`src/lib/ia/index.ts`) usa `OpenAIProvider` em produção, não
+  `GeminiProvider` como planejado aqui; `GeminiProvider` existe no código mas não é instanciado.
+  Decisão formal disso vai para o M11.
+- [x] `lib/integracoes/pncp.ts` e `painelPrecos.ts`: clients tipados para as APIs públicas, com testes.
+- [x] `lib/similaridade/`: orquestração do pipeline (extração → busca paralela → ranking),
   reaproveitando `priceStats.ts` e `in65Rules.ts` sem duplicar regras de conformidade.
-- [ ] Ranking de similaridade com 3 parâmetros ponderados (descrição semântica 40%, especificação
-  técnica 35%, unidade/quantidade 25%) e corte de recência (>365 dias fora), com marcação de
-  candidatos "adaptados" (desmembramento/conversão de unidade).
-- [ ] Busca de fornecedores diretos por nicho + camadas geográficas (Baixada Santista → SP →
-  Sudeste → Sul → Centro-Oeste), priorizando base existente antes de buscar na internet.
+- [x] Ranking de similaridade com 3 parâmetros ponderados (descrição semântica 40%, especificação
+  técnica 35%, unidade/quantidade 25%) e corte de recência (>365 dias fora) — `scoreFinal.ts` e
+  `filtroRecencia.ts`.
+- [x] Busca de fornecedores diretos por nicho + camadas geográficas (Baixada Santista → SP →
+  Sudeste → Sul → Centro-Oeste) — implementada em `lib/domain/buscarFornecedorPorCamada.ts` e
+  `camadaGeografica.ts`, com testes. **Ressalva:** não é chamada por `pesquisaSimilaridade.ts` —
+  sem fallback automático de fornecedor dentro da aba de similaridade ainda. Vai para o M11.
 - [ ] Busca em sites eletrônicos restrita à lista branca já existente no módulo Sites, para itens
-  de uso comum.
-- [ ] Nova aba "Pesquisa por Similaridade" no detalhe do processo: upload de planilha + TR, caixa
+  de uso comum. **Não feito** — `lib/actions/sites.ts` só tem captura manual de evidência, nada
+  no pipeline de similaridade consulta sites automaticamente. Vai para o M11.
+- [x] Nova aba "Pesquisa por Similaridade" no detalhe do processo: upload de planilha + TR, caixa
   de diálogo de revisão por item, tabela resumo read-only pós-revisão.
-- [ ] Escrita de volta na planilha original (`lib/sheets/atualizarPlanilha()`), com credencial
-  Google (Service Account recomendado) a configurar no início da implementação.
-- [ ] Remoção do disparo automático de e-mail via Resend em `criarCotacao` (a Câmara envia por
+- [x] Escrita de volta na planilha original — `lib/sheets/preencherPrecosPublicos.ts`, via Service
+  Account real (`GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY`). Deixou de ser stub.
+- [x] Remoção do disparo automático de e-mail via Resend em `criarCotacao` (a Câmara envia por
   fora do sistema); mantém apenas o registro de cotação/SLA.
 
 ### Critério de aceite
 Para um TR + planilha de teste real, o sistema retorna candidatos a contrato público rankeados,
 com os 3 parâmetros detalhados; edição na caixa de diálogo reflete na planilha original; nenhum
-preço é promovido a `Fonte` sem ação manual do usuário.
+preço é promovido a `Fonte` sem ação manual do usuário. **Atendido**, com as duas ressalvas de
+fornecedor/sites documentadas acima.
 
 > **Commit final:** `feat: pesquisa de similaridade entre TR, contratos públicos e fornecedores`
+
+---
+
+## M11 — Fechamento de gaps & Prontidão para produção `[CONFORMIDADE / ENTREGA]`
+
+- **Branch:** `feat/fechamento-m10-producao`
+- **Objetivo:** Fechar as ressalvas deixadas pelo M10 e os gaps de prontidão para produção real
+  identificados numa auditoria do código (não só dos testes passando) — sem esses itens, o
+  sistema funciona mas tem lacunas silenciosas de cobertura e de observabilidade em produção.
+
+### Entregas
+
+- [x] Decidir e alinhar `lib/ia/` num único provedor: documentar formalmente por que
+  `OpenAIProvider` é o usado em produção (ou migrar para `GeminiProvider`, conforme o design
+  original) e remover o código morto do provedor não adotado. **Decisão:** manter
+  `OpenAIProvider` — é o que já roda em produção (`getProvedorIA()` hardcoded), tem a
+  dependência `openai` já instalada e testada, e não havia nenhum teste cobrindo
+  `GeminiProvider`. Removidos `src/lib/ia/geminiProvider.ts`, `src/lib/ia/geminiClient.ts`, o
+  export de `GeminiProvider` em `src/lib/ia/index.ts` e `GEMINI_API_KEY` do `.env.example`.
+  `ProvedorIA` (`types.ts`) foi mantida como interface própria, não removida, para permitir
+  trocar de provedor futuramente sem tocar em `lib/similaridade/`. **Ressalva:** a dependência
+  `@google/genai` (`package.json`) ficou órfã após a remoção — não foi removida aqui porque
+  alterar `package.json` exige autorização explícita do usuário (CLAUDE.md §8); fica pendente
+  de aprovação numa próxima iteração.
+- [ ] Integrar o fallback de fornecedores por camada geográfica (`buscarFornecedorPorCamada.ts`)
+  no pipeline de `pesquisaSimilaridade.ts` — ou descartar formalmente essa entrega do M10 com
+  justificativa registrada, se a decisão for não integrar.
+- [ ] Implementar a busca automática em sites da lista branca dentro do pipeline de similaridade
+  — ou descartar formalmente com justificativa, mesmo critério acima.
+- [ ] Monitoramento de erro em produção (Sentry ou equivalente), complementando o `error.tsx`
+  local que hoje só cobre a experiência do usuário, não a observabilidade da equipe.
+- [ ] Limpar `.env.example`: remover variáveis mortas (ex.: `RESEND_*`) e corrigir nomes que não
+  batem com o que o código lê de fato (ex.: variáveis `GOOGLE_SHEETS_*` documentadas com nomes
+  diferentes de `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY`, que é o que `googleAuth.ts` realmente usa).
+- [ ] Teste unitário para `src/lib/domain/alertas.ts` (único módulo de `lib/domain/` sem
+  cobertura correspondente).
+
+### Critério de aceite
+Cada ressalva do M10 está ou implementada ou formalmente descartada (com justificativa registrada
+neste arquivo); `.env.example` bate 1:1 com as variáveis lidas em `src/`; erros em produção geram
+alerta rastreável, não só uma tela de erro local; `pnpm test` cobre `alertas.ts`.
 
 ---
 
@@ -289,3 +340,4 @@ preço é promovido a `Fonte` sem ação manual do usuário.
 | M8 | `feat/emails-relatorios` | Backend | Resend, SLA, notificações, exportação |
 | M9 | `chore/deploy` | Entrega | E2E, hardening, deploy |
 | M10 | `feat/pesquisa-similaridade` | Conformidade | TR → contratos similares → fornecedores, via IA |
+| M11 | `feat/fechamento-m10-producao` | Conformidade/Entrega | Fecha ressalvas do M10 + observabilidade em produção |
