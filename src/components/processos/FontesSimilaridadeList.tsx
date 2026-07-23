@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/common/EmptyState";
+import { PromoverFonteButton } from "@/components/processos/PromoverFonteButton";
 import { obterFontesSimilaridade } from "@/lib/actions/listar";
 
 function formatarMoeda(valor: number): string {
@@ -58,6 +59,7 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
                   <TableHead>Data</TableHead>
                   <TableHead>Score</TableHead>
                   <TableHead>Fonte</TableHead>
+                  <TableHead>Ação</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -91,6 +93,12 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <PromoverFonteButton
+                        resultadoId={fonte.id}
+                        jaPromovido={fonte.promovidoParaFonte}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

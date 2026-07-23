@@ -67,8 +67,23 @@ export function TabelaSeriePrecos({ serie }: { serie: SeriePrecoFixture }) {
         ? serie.mediana
         : serie.menorValor;
 
+  // Uma série pode conter preços (ex.: candidatos promovidos para Fonte) antes de
+  // ter passado pela consolidação estatística — nesse estado os agregados ficam
+  // zerados. Evita apresentar "R$ 0,00" e CV verde como se fossem um resultado real.
+  const naoConsolidada = serie.totalPrecos === 0 && serie.precos.length > 0;
+
   return (
     <div className="space-y-4">
+      {naoConsolidada && (
+        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+          <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <span>
+            Série ainda não consolidada. Os preços abaixo já foram registrados, mas os valores
+            estatísticos (valor estimado, média, mediana e dispersão) só aparecem após a
+            consolidação.
+          </span>
+        </div>
+      )}
       <div className="flex flex-wrap items-start gap-3 sm:items-center">
         <div className="flex items-center gap-2">
           <TrendingUp className="size-4 text-muted-foreground" />

@@ -87,6 +87,7 @@ export async function obterFontesSimilaridade(processoId: string) {
           dataReferencia: true,
           scoreFinal: true,
           justificativa: true,
+          promovidoParaFonte: true,
         },
       },
     },
