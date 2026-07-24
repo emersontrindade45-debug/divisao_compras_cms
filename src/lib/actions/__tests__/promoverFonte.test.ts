@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => {
     evidencia: { create: vi.fn() },
     seriePreco: { findFirst: vi.fn(), create: vi.fn() },
     precoConsolidado: { create: vi.fn() },
-    resultadoSimilaridade: { update: vi.fn() },
+    resultadoSimilaridade: { updateMany: vi.fn() },
   };
   const db = {
     resultadoSimilaridade: { findUnique: vi.fn() },
@@ -65,7 +65,7 @@ describe("promoverResultadoSimilaridade", () => {
     mocks.tx.seriePreco.findFirst.mockResolvedValue(null);
     mocks.tx.seriePreco.create.mockResolvedValue({ id: "serie-nova" });
     mocks.tx.precoConsolidado.create.mockResolvedValue({ id: "preco-1" });
-    mocks.tx.resultadoSimilaridade.update.mockResolvedValue({});
+    mocks.tx.resultadoSimilaridade.updateMany.mockResolvedValue({ count: 1 });
     mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(resultadoBase());
   });
 
@@ -144,13 +144,27 @@ describe("promoverResultadoSimilaridade", () => {
     });
   });
 
-  it("marca o candidato como promovido", async () => {
+  it("marca o candidato como promovido com guarda atômica (updateMany condicional)", async () => {
     await promoverResultadoSimilaridade(RESULTADO_ID);
 
-    expect(mocks.tx.resultadoSimilaridade.update).toHaveBeenCalledWith({
-      where: { id: RESULTADO_ID },
+    // A guarda contra corrida exige `promovidoParaFonte: false` no where — só
+    // afeta a linha se nenhuma transação concorrente a promoveu antes.
+    expect(mocks.tx.resultadoSimilaridade.updateMany).toHaveBeenCalledWith({
+      where: { id: RESULTADO_ID, promovidoParaFonte: false },
       data: { promovidoParaFonte: true },
     });
+  });
+
+  it("aborta (rollback) e não audita quando outra transação promoveu antes (count === 0)", async () => {
+    // Corrida: a checagem inicial passou, mas o updateMany não encontra a linha
+    // ainda não promovida — sinal de promoção concorrente. Deve reverter tudo.
+    mocks.tx.resultadoSimilaridade.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await promoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.error).toBe("Este candidato já foi promovido");
+    expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
   it("registra auditoria da promoção", async () => {
