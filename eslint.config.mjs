@@ -13,6 +13,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    ".claude/worktrees/**",
   ]),
   // Disable ESLint rules that conflict with Prettier. Must be LAST.
   eslintConfigPrettier,

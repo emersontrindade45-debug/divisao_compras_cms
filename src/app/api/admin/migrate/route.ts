@@ -1,4 +1,5 @@
-import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
@@ -20,9 +21,19 @@ const execFileAsync = promisify(execFile);
 
 // Resolve o CLI do Prisma dentro de node_modules e o executa com o mesmo Node
 // do processo — evita depender de `npx`/`pnpm` estarem no PATH em runtime.
+//
+// Usa path.join, não require.resolve: o Turbopack traça require.resolve()
+// estaticamente (mesmo sob createRequire) e segue os requires internos do CLI
+// até o @prisma/dev, quebrando o build nos assets .wasm/.tar.gz dele —
+// serverExternalPackages não evita (vercel/next.js#65828).
+// O alvo é "build/index.js" porque em prisma@7.8.0 o export "." aponta para
+// "build/types.js", que não existe no pacote publicado.
 function resolvePrismaCli(): string {
-  const require = createRequire(import.meta.url);
-  return require.resolve("prisma");
+  const cli = join(process.cwd(), "node_modules", "prisma", "build", "index.js");
+  if (!existsSync(cli)) {
+    throw new Error(`CLI do Prisma não encontrado em ${cli}`);
+  }
+  return cli;
 }
 
 function isAuthorized(request: Request): boolean {

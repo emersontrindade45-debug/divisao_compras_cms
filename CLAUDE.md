@@ -270,3 +270,21 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     promover o mesmo candidato de similaridade duas vezes duplicava `Fonte`/`PrecoConsolidado` e
     distorcia a série de preços. Constraint nova acopla código + migration: só vale em produção
     após aplicar via `/api/admin/migrate` (ver item 7), senão a gravação quebra em runtime.
+15. **Configuração do Prisma 7 mora em `prisma.config.ts`, não no `schema.prisma`.** A propriedade
+    `directUrl` no bloco `datasource` foi **removida** no Prisma 7 (erro P1012). O split
+    pooled/direct funciona assim: `datasource.url` em `prisma.config.ts` vale **só para o CLI**
+    (`migrate deploy`/`status`) e aponta para `DIRECT_URL`; a app usa `DATABASE_URL` (pooled)
+    passado ao `PrismaPg` adapter em `src/lib/db.ts`. Os dois são independentes — não existe campo
+    `directUrl` em lugar nenhum no Prisma 7. Sempre conferir os tipos reais em
+    `node_modules/.pnpm/@prisma+config@*/.../dist/*.d.ts` antes de assumir um campo de config.
+16. **Nunca usar `require.resolve()` para localizar binários/CLIs em route handlers.** O Turbopack
+    faz análise estática de `require.resolve()` — mesmo dentro de `createRequire` — e segue os
+    requires internos do pacote alvo, quebrando o build em dependências opcionais com assets
+    exóticos (no caso do CLI do Prisma: `@prisma/dev` com `.wasm`/`.tar.gz`).
+    `serverExternalPackages` **não** evita isso (vercel/next.js#65828). Usar
+    `path.join(process.cwd(), "node_modules", ...)` + `existsSync`, que escapa do tracer.
+17. **Erros de build/lint em `.claude/worktrees/` são ruído de worktrees órfãos, não do código.**
+    Worktrees de agentes antigos ficam com `.next`/`node_modules` stale e entram na varredura de
+    ferramentas. Cada ferramenta precisa do ignore próprio (vitest e eslint são configs separados);
+    ao ver erro apontando para um caminho sob `.claude/worktrees/`, adicionar o ignore em vez de
+    investigar o código.
