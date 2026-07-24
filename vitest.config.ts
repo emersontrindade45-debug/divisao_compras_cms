@@ -8,7 +8,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    exclude: ["**/node_modules/**", "**/e2e/**", "**/*.spec.ts"],
+    // `.claude/worktrees/*` são checkouts completos dos agentes (com seus
+    // próprios testes e node_modules); rodar a suíte da raiz sem excluí-los
+    // varria esses arquivos e gerava falhas falsas por cópias duplicadas de libs.
+    exclude: ["**/node_modules/**", "**/e2e/**", "**/*.spec.ts", "**/.claude/**"],
   },
   resolve: {
     alias: {
