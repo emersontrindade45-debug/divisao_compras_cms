@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRole } from "@/lib/auth/rbac";
@@ -53,6 +54,9 @@ export async function promoverResultadoSimilaridade(
   try {
     fonteId = await db.$transaction(async (tx) => {
       // 1. Fonte — espelha os campos de fontes.ts:criarFonte.
+      //    `resultadoSimilaridadeId` vincula a Fonte ao candidato de origem e é
+      //    @unique no schema: defesa em profundidade contra promoção duplicada
+      //    do mesmo candidato (backstop de banco além da guarda atômica abaixo).
       const fonte = await tx.fonte.create({
         data: {
           itemId,
@@ -61,6 +65,7 @@ export async function promoverResultadoSimilaridade(
           orgaoOuFornecedor: resultado.fonteOrgaoOuId,
           dataReferencia: resultado.dataReferencia,
           valorUnitario: resultado.valorUnitario,
+          resultadoSimilaridadeId: resultado.id,
         },
       });
 
@@ -122,7 +127,12 @@ export async function promoverResultadoSimilaridade(
       return fonte.id;
     });
   } catch (erro) {
-    if (erro instanceof ResultadoJaPromovidoError) {
+    // P2002 = violação da constraint @unique de `resultadoSimilaridadeId`:
+    // backstop de banco quando duas transações concorrentes escapam da guarda
+    // atômica. Tratado como a mesma corrida, não como erro inesperado.
+    const violouUnicidade =
+      erro instanceof Prisma.PrismaClientKnownRequestError && erro.code === "P2002";
+    if (erro instanceof ResultadoJaPromovidoError || violouUnicidade) {
       return { error: "Este candidato já foi promovido" };
     }
     throw erro;

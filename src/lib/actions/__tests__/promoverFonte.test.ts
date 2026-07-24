@@ -27,6 +27,7 @@ vi.mock("@/lib/auth/rbac", () => ({ requireRole: mocks.requireRole }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 
+import { Prisma } from "@prisma/client";
 import { promoverResultadoSimilaridade } from "../promoverFonte";
 
 const RESULTADO_ID = "ckqut11d0000abcdefghijklm";
@@ -81,6 +82,8 @@ describe("promoverResultadoSimilaridade", () => {
         descricao: "Aquisição de cadeiras ergonômicas",
         orgaoOuFornecedor: "Prefeitura de Exemplo",
         valorUnitario: 850.5,
+        // Vínculo @unique com o candidato de origem (backstop de banco).
+        resultadoSimilaridadeId: RESULTADO_ID,
       }),
     });
     expect(mocks.tx.evidencia.create).toHaveBeenCalledWith({
@@ -165,6 +168,22 @@ describe("promoverResultadoSimilaridade", () => {
     expect(res.error).toBe("Este candidato já foi promovido");
     expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("trata P2002 (constraint @unique) como promoção concorrente, sem vazar erro cru", async () => {
+    // Backstop de banco: se duas transações escaparem da guarda atômica, o
+    // insert da segunda viola o @unique de resultadoSimilaridadeId (P2002).
+    mocks.tx.fonte.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "test",
+      }),
+    );
+
+    const res = await promoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.error).toBe("Este candidato já foi promovido");
+    expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
   });
 
   it("registra auditoria da promoção", async () => {

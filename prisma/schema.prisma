@@ -169,26 +169,33 @@ model ResultadoSimilaridade {
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
 
-  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item  Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  fonte Fonte?
 
   @@map("resultados_similaridade")
 }
 
 model Fonte {
-  id                String      @id @default(cuid())
-  itemId            String
-  tipo              TipoFonte
-  descricao         String
-  orgaoOuFornecedor String
-  dataReferencia    DateTime
-  valorUnitario     Decimal     @db.Decimal(12, 2)
-  status            StatusPreco @default(incluido)
-  motivoExclusao    String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  id                      String      @id @default(cuid())
+  itemId                  String
+  tipo                    TipoFonte
+  descricao               String
+  orgaoOuFornecedor       String
+  dataReferencia          DateTime
+  valorUnitario           Decimal     @db.Decimal(12, 2)
+  status                  StatusPreco @default(incluido)
+  motivoExclusao          String?
+  // Origem: preenchido só quando a Fonte nasce da promoção de um candidato de
+  // similaridade. @unique impede duas Fontes do mesmo candidato (backstop de
+  // banco contra promoção concorrente); nulo para Fontes de outros fluxos, e o
+  // Postgres permite múltiplos nulos.
+  resultadoSimilaridadeId String?     @unique
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
 
-  item       Item        @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  evidencias Evidencia[]
+  item                  Item                   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  resultadoSimilaridade ResultadoSimilaridade? @relation(fields: [resultadoSimilaridadeId], references: [id], onDelete: SetNull)
+  evidencias            Evidencia[]
 
   @@map("fontes")
 }

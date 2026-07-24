@@ -263,3 +263,10 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
 13. **Ao expor uma entidade nova na UI, confirmar que a página lê do Prisma, não de fixtures
     mock**, antes de considerar o módulo pronto. Migrar o backend não migra automaticamente as
     telas que ainda importam fixtures.
+14. **Guardas de idempotência/unicidade em server actions são atômicas** — update condicional
+    dentro da transação (`updateMany` com o estado esperado no `where`, abortando se `count === 0`)
+    e/ou constraint `@unique` no schema, nunca check-antes-de-escrever fora da transação. Duas
+    requisições concorrentes que leem o mesmo estado antes de gravar duplicam registros — ex.:
+    promover o mesmo candidato de similaridade duas vezes duplicava `Fonte`/`PrecoConsolidado` e
+    distorcia a série de preços. Constraint nova acopla código + migration: só vale em produção
+    após aplicar via `/api/admin/migrate` (ver item 7), senão a gravação quebra em runtime.
