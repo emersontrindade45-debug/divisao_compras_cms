@@ -443,6 +443,39 @@ fornecedor/sites documentadas acima.
   A correção acordada (SQL via `pg`, sem CLI empacotado) passou por `pnpm test`/`lint`/`typecheck`/
   `build`, todos verdes, e foi commitada em 2026-07-25.
 
+  > **DEPLOY CONFIRMADO (2026-07-25, 23:38 UTC): a rota nova está no ar.**
+  > `dpl_7r3Ke8JVbepAre1eu5RwMRV9s6GP`, `readyState: "READY"` **e** `alias` contendo
+  > `divisao-compras-cms.vercel.app` — os dois critérios da §9.21, não sondagem HTTP.
+  > `git ls-remote origin main` = `1d20de5…`, o commit verificado. `lambdaRuntimeStats`
+  > `{"nodejs":3}` (3 lambdas — sem o inchaço de §9.26). `get_runtime_errors` na última hora: zero.
+  >
+  > **Falta só executar o `GET`** — depende de `ADMIN_MIGRATE_SECRET`, que existe apenas na Vercel
+  > e não é acessível ao agente. Comando pronto para o usuário (PowerShell):
+  > `$s = "<segredo>"; curl.exe -s -H "Authorization: Bearer $s" https://divisao-compras-cms.vercel.app/api/admin/migrate`
+  > Resposta esperada: `total: 4` e `aplicadas` com as 4 migrations
+  > (`20260614155015_init`, `20260616003933_add_resultado_similaridade`,
+  > `20260617134642_add_planilha_origem_url`, `20260724115912_add_fonte_resultado_similaridade_unique`),
+  > `pendentes: []` e `orfas: []`. **É esse resultado que valida a hipótese ainda em aberto** — se o
+  > formato de `_prisma_migrations` derivado do contrato do Prisma bate com o banco real.
+  > Divergência aqui (ex.: `aplicadas` vazio num banco que tem as migrations) indica que a leitura
+  > da tabela precisa de ajuste, e é o sinal para **não** usar o `POST`.
+  > Nota: o 401 da rota é idêntico para "sem header" e "header errado" — não serve para inferir se
+  > o segredo está configurado.
+  >
+  > **RESOLVIDO em 2026-07-25 (~20h40): push feito.** `5250baa..1d20de5` — 13 commits publicados,
+  > incluindo a rota reescrita. O commit `1d20de5` foi verificado **isoladamente**, num worktree
+  > limpo com `pnpm install` próprio (não o `node_modules` do projeto): 311 testes (49 suítes),
+  > typecheck limpo, lint 0 erros, build completo. O isolamento importa porque o working tree tinha
+  > trabalho não commitado que não iria junto — verificar na mistura daria falso positivo (§9.28).
+  > Nota: um junction de `node_modules` apontando para fora da raiz **não** funciona — o Turbopack
+  > recusa com `Symlink [project]/node_modules is invalid, it points out of the filesystem root`.
+  > O worktree precisa de `pnpm install` + `pnpm prisma generate` próprios.
+  >
+  > **Correção de escopo sobre o `GET`:** ele **não é estritamente read-only**. `lerRegistros()`
+  > executa `CREATE TABLE IF NOT EXISTS "_prisma_migrations"` antes do `SELECT`, para que a rota
+  > funcione num banco novo. É idempotente e inofensivo num banco que já tem migrations aplicadas,
+  > mas descrevê-lo como "somente leitura" era impreciso.
+  >
   > **CAUSA RAIZ do item 3 (investigada em 2026-07-25, noite): produção está defasada.**
   > O deploy de produção é o commit `5250baa`; a rota nova nunca chegou lá. Verificado lendo o
   > código publicado (`git show 5250baa:src/app/api/admin/migrate/route.ts`): ainda é a versão do
@@ -500,6 +533,52 @@ alerta rastreável, não só uma tela de erro local; `pnpm test` cobre `alertas.
 
 ---
 
+## M12 — Arquitetura de informação & Layout `[UX]` ✅ CONCLUÍDO
+
+- **Branch:** `main` (fases commitadas individualmente)
+- **Início / Conclusão:** 2026-07-25
+- **Objetivo:** A aplicação funcionava, mas apresentava as etapas de um funil sequencial (o
+  "Fluxo operacional alvo" do PRD) como **8 itens de menu paralelos**, sem hierarquia. O
+  servidor não tinha como saber por onde começar nem quando a pesquisa já bastava.
+  Princípio adotado: **o processo é o centro; as fontes são etapas dele, não destinos irmãos.**
+
+### Entregas
+
+- [x] **Fase 0 — `lib/domain/conformidade.ts` + `filaTrabalho.ts`.** `avaliarConformidade()`
+  agrega as regras já existentes (`in65Rules`, `priceStats`) num retrato por processo: estado
+  das 4 etapas, checklist de conformidade e etapa atual. Nunca reimplementa regra — delega e
+  traduz `Violation` em item de checklist. Unificou o limiar de CV divergente em duas
+  constantes documentadas: `CV_PRE_ALERTA` (25, alerta antecipado) e `CV_ANALISE_CRITICA`
+  (30, regra R-06). **Validado por mutação:** suficiência `>=3 → >=2` quebra 3 testes; remover
+  a propagação do bloqueio R-02 quebra 2; remover o filtro de concluídos da fila quebra 1.
+- [x] **Fase 1 — Sidebar em blocos.** `NAV_GROUPS`: Operação (dashboard, processos, cotações),
+  Cadastros (fornecedores, sites), Consulta (contratações públicas, relatórios). "Guia de uso"
+  saiu do nav para o `UserMenu` — é ajuda, não destino de trabalho.
+- [x] **Fase 2 — `PageHeader` e `SELECT_CLASS` compartilhados.** O header estava duplicado nas
+  7 páginas; o `SELECT_CLASS`, em 6 componentes com variações de largura.
+- [x] **Fase 3 — Stepper de 4 etapas no detalhe do processo.** ① Estratégia ② Pesquisa de preços
+  ③ Validação ④ Consolidação, com estado derivado dos dados (nunca coluna nova — sem migration).
+  Similaridade + fontes + evidências se fundiram na etapa ②. A etapa ③ é conteúdo novo
+  (cotações, checklist de propostas, não-respondentes) sobre dados que `obterProcessoDetalhado`
+  já carregava e a tela não exibia. Deep-link `?etapa=`, com precedência validada por mutação.
+- [x] **Fase 4 — `ConformidadePanel`.** Checklist vivo da IN 65/2021 em aside sticky, cada linha
+  ligando à etapa onde a pendência se resolve. Alimentado só por `avaliarConformidade()`.
+- [x] **Fase 5 — Dashboard acionável.** MetricCards viram links para listas filtradas
+  (`processos/page.tsx` passou a ler `searchParams`, que a página ignorava embora
+  `listarProcessos` já aceitasse). O card "Resumo de processos" (redundante) deu lugar à fila
+  de trabalho ordenada por urgência.
+- [x] **Fase 6 — Limpeza.** Removidos `CotacoesTable`, `CotacoesFilters`, `MemoriaCalculo`
+  (órfãos). Botões "Lembrar"/"Ver" sem handler viraram indicador informativo. A aba "Memória de
+  cálculo" saiu do hard-code em `[0]` e lista todos os processos. Onboarding perdeu os checks
+  verdes falsos (`idx < 2`) e teve duas instruções obsoletas corrigidas.
+
+### Critério de aceite
+`pnpm lint`, `typecheck`, `test` (317 testes) e `build` verdes em cada fase.
+**Pendente de validação visual pelo usuário** — o agente não teve acesso a navegador nesta
+sessão (CLAUDE.md §7); a conferência de layout no browser é o único item não verificado.
+
+---
+
 ## Resumo das milestones
 
 | # | Branch | Fase | Entrega-chave |
@@ -516,3 +595,4 @@ alerta rastreável, não só uma tela de erro local; `pnpm test` cobre `alertas.
 | M9 | `chore/deploy` | Entrega | E2E, hardening, deploy |
 | M10 | `feat/pesquisa-similaridade` | Conformidade | TR → contratos similares → fornecedores, via IA |
 | M11 | `feat/fechamento-m10-producao` | Conformidade/Entrega | Fecha ressalvas do M10 + observabilidade em produção |
+| M12 | `main` | UX | Sidebar em blocos, stepper de etapas, painel de conformidade, dashboard acionável |
