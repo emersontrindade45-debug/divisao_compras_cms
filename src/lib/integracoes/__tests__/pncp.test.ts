@@ -1,11 +1,5 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { buscarContratosPNCP, __resetAvisoFallbackCnpj } from "../pncp";
-
-beforeEach(() => {
-  // A flag do aviso é estado de módulo e vaza entre testes se não for zerada:
-  // um caso que já disparou o warn faria o seguinte passar em falso.
-  __resetAvisoFallbackCnpj();
-});
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { buscarContratosPNCP } from "../pncp";
 
 afterEach(() => {
   vi.useRealTimers();

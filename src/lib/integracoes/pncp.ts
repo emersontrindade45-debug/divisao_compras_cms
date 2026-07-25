@@ -45,11 +45,6 @@ function cnpjOrgaoProprio(): string {
   return CNPJ_ORGAO_PADRAO;
 }
 
-/** Reseta a flag do aviso de fallback. Uso exclusivo em testes, para isolar os casos. */
-export function __resetAvisoFallbackCnpj(): void {
-  avisoFallbackCnpjEmitido = false;
-}
-
 /** Monta a URL do edital no portal PNCP: /app/editais/{cnpj}/{ano}/{sequencial}. */
 function montarUrlEdital(processo: PNCPSearchItem): string {
   return `https://pncp.gov.br/app/editais/${processo.orgao_cnpj}/${processo.ano}/${processo.numero_sequencial}`;
