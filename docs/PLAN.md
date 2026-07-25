@@ -324,8 +324,20 @@ fornecedor/sites documentadas acima.
   entra na estimativa sem fonte+data+evidência real. O módulo `sites/` mantém a captura manual com
   validação de lista branca/cinza/vermelha e bloqueio de marketplace, que é o comportamento
   correto.
-- [ ] Monitoramento de erro em produção (Sentry ou equivalente), complementando o `error.tsx`
-  local que hoje só cobre a experiência do usuário, não a observabilidade da equipe.
+- [x] Monitoramento de erro em produção (**Sentry**, commit `2902c9e`), complementando o `error.tsx`
+  local que só cobria a experiência do usuário, não a observabilidade da equipe. `@sentry/nextjs`
+  10.68.0. Arquivos: `src/instrumentation.ts` (`register()` por runtime + `onRequestError`, que
+  cobre Server Components, route handlers e server actions), `src/sentry.server.config.ts`,
+  `src/sentry.edge.config.ts` e `src/instrumentation-client.ts`. `SegmentError` passou a reportar
+  o erro e a exibir o `digest` — único elo entre a tela do usuário e o evento no Sentry.
+  **Inerte sem DSN**, verificado empiricamente nos dois estados: sem `SENTRY_DSN` nada é
+  inicializado e nada é enviado; com DSN o evento chega ao client com a mensagem preservada.
+  `withSentryConfig` **não** foi adicionado (justificativa no `next.config.ts`): serve a source
+  maps/releases e exigiria `SENTRY_AUTH_TOKEN` no build — acoplá-lo agora contrariaria a inércia.
+  Consequência aceita: stack trace de erro **de client** vem minificada até alguém configurar o
+  token; erro de servidor, o caso crítico, não depende de source map.
+  **Pendente do usuário:** criar o projeto no Sentry e definir `SENTRY_DSN` e
+  `NEXT_PUBLIC_SENTRY_DSN` na Vercel — até lá a integração fica dormente, sem risco.
 - [x] Limpar `.env.example` (2026-07-25). Removidas as **8 variáveis mortas** diagnosticadas
   (`RESEND_API_KEY`, `RESEND_FROM`, `EMAIL_RESPONSAVEL`, `BLOB_READ_WRITE_TOKEN`,
   `NEXT_PUBLIC_APP_URL`, `GOOGLE_SHEETS_PRIVATE_KEY`, `GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL`,
@@ -381,8 +393,12 @@ fornecedor/sites documentadas acima.
 > `pnpm lint` (0 erros — 2 warnings pré-existentes, alheios a estes arquivos), `pnpm typecheck`
 > (limpo) e `pnpm build` (compila e gera as 15 páginas estáticas).
 >
-> **Rota `/api/admin/migrate` commitada em `736dd06`** (local, **sem push**). `package.json` e
-> `pnpm-lock.yaml` seguem intactos — `@sentry/nextjs` **não** foi instalado.
+> **Rota `/api/admin/migrate` commitada em `736dd06`** (local, **sem push**).
+>
+> **`@sentry/nextjs` 10.68.0 instalado e integrado em `2902c9e`** — o `pnpm add` que havia quebrado
+> o ambiente rodou sem incidente depois do rebuild, confirmando que a árvore estava sã. Com isso o
+> **M11 fica com todas as entregas fechadas**; resta apenas ação do usuário (criar o projeto no
+> Sentry e definir os DSNs na Vercel).
 
 1. **Limpar `.env.example`** — diagnóstico já feito em 2026-07-25. São **8 variáveis documentadas
    que o código nunca lê**: `RESEND_API_KEY`, `RESEND_FROM`, `EMAIL_RESPONSAVEL` (órfãs da remoção
@@ -396,16 +412,15 @@ fornecedor/sites documentadas acima.
    configurar `NEXT_PUBLIC_APP_URL` e alertava sobre um crash de `RESEND_API_KEY=""` via
    `src/lib/email/client.ts` — módulo e dependência `resend` já não existem, então a instrução
    pedia variável morta e descrevia um crash impossível. Corrigido.
-2. **Monitoramento de erro em produção — Sentry.** **Dependência `@sentry/nextjs` AUTORIZADA pelo
-   usuário em 2026-07-25** (§8 satisfeito; não precisa perguntar de novo). Escolha explícita:
-   Sentry oficial, e não logger caseiro. **Ainda não instalado** — o `pnpm add` falhou na sessão
-   anterior e derrubou o ambiente; **o ambiente já foi restaurado**, então o `pnpm add
-   @sentry/nextjs` pode ser retomado normalmente (é a próxima ação desta pendência).
-   Desenho combinado: `instrumentation.ts` +
-   `instrumentation-client.ts`, passar o `error` hoje ignorado em `src/app/error.tsx` (que recebe
-   só `reset`) e em `src/app/(app)/processos/error.tsx`, e **ficar inerte sem `SENTRY_DSN`** — sem
-   DSN não pode quebrar build nem runtime. Documentar `SENTRY_DSN` no `.env.example`.
-   Depende de: criar projeto no Sentry e definir `SENTRY_DSN` na Vercel (ação do usuário).
+2. **Monitoramento de erro em produção — Sentry. FEITO em 2026-07-25** (commit `2902c9e`).
+   `@sentry/nextjs` 10.68.0 instalado (autorização do usuário registrada; §8 satisfeito) e o
+   desenho combinado implementado por inteiro: `instrumentation.ts` + `instrumentation-client.ts`,
+   o `error` antes ignorado agora é reportado nos dois boundaries, e a integração fica **inerte
+   sem `SENTRY_DSN`** — confirmado por build verde sem DSN e sem auth token. Detalhes na entrega
+   correspondente acima.
+   **Resta só a ação do usuário:** criar o projeto no Sentry e definir `SENTRY_DSN` e
+   `NEXT_PUBLIC_SENTRY_DSN` na Vercel (+ redeploy, §9.32). Sem isso a integração fica dormente e
+   nada quebra.
 
 ### Fora do M11 — pendências abertas em 2026-07-25
 

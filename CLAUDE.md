@@ -451,7 +451,18 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     dá certo. Regra geral: quando existir uma forma de **exercitar** a capacidade, exercitá-la — um
     indicador indireto pode estar ausente com o sistema perfeitamente saudável, e tratar isso como
     falha custa um reboot e uma sessão inteira de diagnóstico na direção errada.
-38. **Teste que passa pode estar passando pelo motivo errado — a mutação é que diz qual.** O teste
+38. **Pacote com `exports` condicional tem APIs diferentes por runtime — conferir no entry point
+    que o app realmente usa, não em `node -e`.** Ao integrar `@sentry/nextjs`, um teste rápido em
+    CJS mostrou `captureException` como função; o mesmo import via `tsx` (ESM) devolveu
+    `undefined`, e o pacote expunha só 30 exports. Nenhum dos dois era o ambiente real: o
+    `exports["."]` do pacote ramifica em `browser`, `node`, `edge` e `import`, e o caminho `edge` —
+    escolhido pelo `tsx` por ser runtime genérico — de fato não exporta `captureException`, mas os
+    entry points `index.client.js` e `index.server.js`, que o Next usa, exportam. Ler o mapa
+    `exports` do `package.json` e carregar o arquivo concreto de cada condição antes de concluir
+    que uma API "não existe". Corolário: `pnpm build` verde **não** teria pego uma chamada
+    inexistente em código de client — bundler resolve pela condição `browser`, e o erro só
+    apareceria no navegador (§9.23, §9.30).
+39. **Teste que passa pode estar passando pelo motivo errado — a mutação é que diz qual.** O teste
     de rollback das migrations (2026-07-25) verificava que nada era confirmado quando o SQL falhava,
     e passava; mas a falha era programada no **primeiro** comando da transação, então não havia
     nada encenado para vazar — desativar o ROLLBACK inteiro não quebrava o teste. Só um caso que
