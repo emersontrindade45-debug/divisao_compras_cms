@@ -379,3 +379,25 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     isolamento real (copiar apenas os caminhos do glob para um diretório limpo e rodar o comando
     de lá), ou a alternativa arquitetural — executar o SQL das migrations via `pg`, sem subprocesso
     nem CLI empacotado — passa a ser mais barata que continuar iterando.
+30. **"Deploy verde" não significa "aplicação funcionando" — exercitar o fluxo real é a única
+    prova.** Durante horas esta sessão tratou a produção como saudável porque o build estava
+    `READY` e `/login` respondia `200`. Ambos eram verdade e ambos eram irrelevantes: a
+    `DATABASE_URL` de produção apontava para `localhost:5432`, e **toda** query falhava com P1001
+    (`Can't reach database server`). A página de login renderiza sem tocar no banco — só o `POST`
+    do formulário revela o erro. Antes de declarar um deploy saudável, exercitar pelo menos um
+    caminho que atravesse o banco (login real, uma listagem autenticada), não só um `GET` de página
+    pública. `get_runtime_errors` da Vercel expõe isso em segundos e deveria ser consultado ao
+    primeiro sinal de problema em produção, não depois de esgotar hipóteses.
+31. **Migration aplicada com sucesso não prova que a app tem o banco certo — são caminhos
+    independentes.** `prisma migrate deploy` roda da máquina do dev com `DIRECT_URL`; a aplicação
+    usa `DATABASE_URL` dentro da função serverless. Nesta sessão o `Database schema is up to date!`
+    convivia com uma app que não alcançava banco nenhum, porque as duas variáveis apontavam para
+    lugares diferentes (Supabase vs. localhost). Ao configurar um ambiente novo, conferir as duas
+    **e** validar cada uma pelo seu próprio caminho: migration pelo CLI, `DATABASE_URL` por uma
+    query real vinda da aplicação publicada.
+32. **Na Vercel, `DATABASE_URL` de app serverless usa o Transaction pooler (porta 6543), não a
+    conexão direta (5432).** Funções abrem e fecham conexão a cada invocação; sem pooler o Postgres
+    esgota o limite. A conexão direta fica reservada para `DIRECT_URL` (CLI de migrations, que
+    precisa de DDL e sessão estável). Variável de ambiente nova ou editada **só passa a valer após
+    redeploy** — editar no painel não afeta funções já publicadas, e o campo aparecer vazio ao
+    reabrir é comportamento normal de variável marcada como Sensitive, não perda do valor.
