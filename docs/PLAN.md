@@ -364,6 +364,25 @@ fornecedor/sites documentadas acima.
 
 ### Próximos passos (retomar por aqui)
 
+> **ESTADO EM 2026-07-25 (fim da sessão) — LER PRIMEIRO.**
+>
+> **Antes de qualquer comando: o ambiente local está quebrado e exige REINICIAR O COMPUTADOR.**
+> Um `pnpm add @sentry/nextjs` falhou com `EACCES` no meio e deixou `node_modules` inconsistente:
+> os shims de `vitest` e `next` sumiram de `node_modules/.bin`, então **`pnpm test`, `pnpm build` e
+> `pnpm typecheck` não rodam**. Causa: Modo Dev está ativo no registro, mas o privilégio
+> `SeCreateSymbolicLink` não está no token da sessão (`whoami /priv` não lista). Reabrir o editor
+> **não basta** — só reiniciar a máquina. Depois do reboot, rodar `pnpm install` para recriar os
+> shims e confirmar com `ls node_modules/.bin | grep vitest`.
+> `package.json` e `pnpm-lock.yaml` estão **intactos** (verificado com `git status`) — nenhuma
+> dependência foi alterada, `@sentry/nextjs` **não** chegou a ser instalado.
+>
+> **Trabalho não commitado no working tree** (rota `/api/admin/migrate` reescrita, item 3 abaixo):
+> `src/lib/migrations/aplicar.ts` (novo), `src/lib/migrations/__tests__/aplicar.test.ts` (novo, 18
+> testes), `src/app/api/admin/migrate/route.ts` (reescrito) e `next.config.ts` (globs removidos).
+> Não foi commitado de propósito: a suíte não pôde ser executada depois da quebra do ambiente, e
+> commitar sem verificação seria o erro da §9.23. **Primeira ação após o `pnpm install`:** rodar
+> `pnpm test`, `pnpm lint`, `pnpm typecheck` e `pnpm build`; se passarem, commitar.
+
 1. **Limpar `.env.example`** — diagnóstico já feito em 2026-07-25. São **8 variáveis documentadas
    que o código nunca lê**: `RESEND_API_KEY`, `RESEND_FROM`, `EMAIL_RESPONSAVEL` (órfãs da remoção
    do módulo de e-mail — ver §9.3), `BLOB_READ_WRITE_TOKEN`, `NEXT_PUBLIC_APP_URL`,
@@ -372,19 +391,41 @@ fornecedor/sites documentadas acima.
    `e2e/auth.setup.ts`, fora de `src/`. As lidas de fato são: `ADMIN_MIGRATE_SECRET`,
    `AUTH_SECRET`, `CRON_SECRET`, `DATABASE_URL`, `DIRECT_URL`,
    `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY`, `NEXT_PUBLIC_SHEETS_URL`, `OPENAI_API_KEY` e `ORGAO_CNPJ`.
-2. **Monitoramento de erro em produção (Sentry ou equivalente)** — exige instalar dependência,
-   o que precisa de autorização explícita do usuário (CLAUDE.md §8).
+   **FEITO em 2026-07-25** (commit `c96efb3`). Achado extra no mesmo commit: `AGENTS.md` mandava
+   configurar `NEXT_PUBLIC_APP_URL` e alertava sobre um crash de `RESEND_API_KEY=""` via
+   `src/lib/email/client.ts` — módulo e dependência `resend` já não existem, então a instrução
+   pedia variável morta e descrevia um crash impossível. Corrigido.
+2. **Monitoramento de erro em produção — Sentry.** **Dependência `@sentry/nextjs` AUTORIZADA pelo
+   usuário em 2026-07-25** (§8 satisfeito; não precisa perguntar de novo). Escolha explícita:
+   Sentry oficial, e não logger caseiro. **Ainda não instalado** — o `pnpm add` falhou por causa
+   da quebra de ambiente descrita no aviso acima. Desenho combinado: `instrumentation.ts` +
+   `instrumentation-client.ts`, passar o `error` hoje ignorado em `src/app/error.tsx` (que recebe
+   só `reset`) e em `src/app/(app)/processos/error.tsx`, e **ficar inerte sem `SENTRY_DSN`** — sem
+   DSN não pode quebrar build nem runtime. Documentar `SENTRY_DSN` no `.env.example`.
+   Depende de: criar projeto no Sentry e definir `SENTRY_DSN` na Vercel (ação do usuário).
 
 ### Fora do M11 — pendências abertas em 2026-07-25
 
-- **Rota `/api/admin/migrate` continua quebrada** com `Cannot find module 'effect'` (dependência
-  transitiva de `@prisma/config` que ficou fora do bundle). Três ciclos de correção de tracing
-  falharam — ver §9.18, §9.26, §9.28 e §9.29. **Não tentar uma quarta variação de glob.** O plano
-  acordado é executar o SQL das migrations via `pg`: ler `prisma/migrations/*/migration.sql`,
-  comparar com a tabela `_prisma_migrations` e aplicar o pendente em transação, sem subprocesso
-  nem CLI empacotado. Não bloqueia nada — o canal manual funciona (editar `DIRECT_URL` no `.env`
-  local, rodar `pnpm prisma migrate deploy`, reverter), e foi assim que a migration pendente foi
-  aplicada em 2026-07-25.
+- **Rota `/api/admin/migrate` — reescrita em 2026-07-25, NÃO COMMITADA, NÃO VERIFICADA.**
+  A correção acordada (SQL via `pg`, sem CLI empacotado) **está escrita** no working tree; o que
+  falta é rodar a suíte e commitar — ver o aviso no topo de "Próximos passos".
+  Arquivos: `src/lib/migrations/aplicar.ts` (lógica pura), `.../\_\_tests\_\_/aplicar.test.ts`
+  (18 testes), `src/app/api/admin/migrate/route.ts` (reescrito), `next.config.ts`.
+  Decisões tomadas: **uma transação por migration** (escolha do usuário — mesmo comportamento de
+  `prisma migrate deploy`, mantém os dois canais intercambiáveis); para na primeira falha; usa
+  `DIRECT_URL` (DDL exige sessão estável), com `DATABASE_URL` como fallback; `GET` = status
+  read-only, `POST` = aplica. Os 8 globs de tracing do CLI em `next.config.ts` viraram **um**
+  (`./prisma/migrations/**`) — some a causa raiz de §9.26 e §9.28.
+  **Cobertura validada por mutação** (§9.35): remover o `break` da falha quebra 1 teste; desativar
+  o ROLLBACK no executor fake **não quebrava nada** até ser adicionado o caso que falha no `INSERT`
+  (com falha no primeiro comando nada chega a ser encenado, e o teste passava por motivo errado).
+  **Pendência de verificação real:** o formato de `_prisma_migrations` foi derivado do contrato do
+  Prisma, **sem conferir contra o banco de produção** — o `.env` local aponta para localhost e não
+  se traz credencial de produção para a sessão. Por §9.23 e §9.31, tratar como **hipótese não
+  verificada** até rodar o `GET` (read-only, seguro) contra produção e comparar a lista de
+  aplicadas com o que o `migrate status` manual reporta. Só depois disso usar o `POST`.
+  Não bloqueia nada — o canal manual segue funcionando (editar `DIRECT_URL` no `.env` local, rodar
+  `pnpm prisma migrate deploy`, reverter), e foi assim que a migration pendente foi aplicada.
 - **Senha do banco Supabase precisa ser rotacionada** — foi exposta durante a sessão de
   2026-07-25 e chegou a passar por dois arquivos versionados antes de ser removida. Verificado que
   **nunca entrou em nenhum commit** (`git log --all -S`), mas a credencial está comprometida.

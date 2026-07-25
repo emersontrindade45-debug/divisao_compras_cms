@@ -423,3 +423,23 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     agente e para revisor: ao afirmar que algo é necessário, dizer **qual experimento** confirma —
     mutação (quebrar a regra e ver o teste falhar), remoção (tirar o código e ver o que quebra) ou
     execução isolada. Teste que passa não prova que protege; só a mutação prova.
+36. **Antes de qualquer comando que reescreva `node_modules`, checar o privilégio de symlink —
+    neste PC ele falha e deixa o ambiente inutilizável.** `pnpm add`/`install` que aborta no meio
+    com `EACCES` remove os shims de `node_modules/.bin` (`vitest`, `next` sumiram), e a partir daí
+    **`pnpm test`, `pnpm build` e `pnpm typecheck` param de rodar** — ou seja, some justamente a
+    capacidade de verificar o trabalho já feito. Diagnóstico em um comando, **antes** de instalar:
+    `whoami /priv | Select-String SeCreateSymbolicLink`. Se não listar a linha, o token da sessão
+    não tem o privilégio (mesmo com Modo Dev = 1 no registro) e **só reiniciar o computador
+    resolve** — reabrir o editor não basta, e `pnpm install` de novo também não. Existe memória
+    do projeto sobre isso desde 2026-07-24; ela foi consultada só **depois** de o install quebrar,
+    o que é o erro a não repetir: memória de ambiente serve para prevenir, não para explicar o
+    estrago. Corolário: se o ambiente já estiver quebrado, **não commitar** trabalho pendente —
+    sem suíte executável não há verificação, e commitar assim é o erro da §9.23. Registrar o
+    estado no `docs/PLAN.md` e parar.
+37. **Teste que passa pode estar passando pelo motivo errado — a mutação é que diz qual.** O teste
+    de rollback desta sessão (migrations) verificava que nada era confirmado quando o SQL falhava,
+    e passava; mas a falha era programada no **primeiro** comando da transação, então não havia
+    nada encenado para vazar — desativar o ROLLBACK inteiro não quebrava o teste. Só um caso que
+    falha em um comando **posterior** (o `INSERT`, com o DDL já executado) exercita de fato a
+    garantia. Ao testar atomicidade/rollback/cleanup, colocar a falha **no meio** da sequência,
+    nunca no primeiro passo, e confirmar por mutação que o teste detecta a garantia removida.
