@@ -314,4 +314,38 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     por `.gitignore`) e no painel da Vercel. `process.env["NOME_DA_VAR"]` recebe o **nome** da
     variável, nunca a connection string. Se uma senha chegar a um arquivo rastreado, removê-la não
     basta: verificar `git log --all -S "<segredo>"` e rotacionar a credencial se houver qualquer
-    commit.
+    commit. Ao pedir que o usuário edite um arquivo de ambiente, **nomear o caminho exato** —
+    `.env` e `.env.example` são confundidos com facilidade, e a edição no arquivo errado coloca
+    segredo no repositório (aconteceu duas vezes na mesma sessão).
+21. **Estado de deploy vem de `get_deployment`, nunca de `list_deployments` nem de HTTP.**
+    `list_deployments` serve cache e reporta `QUEUED` para builds que já terminaram;
+    `get_deployment` dá o `readyState` real. Pior é inferir por HTTP: a proteção de deployment da
+    Vercel responde `302` numa URL de preview, o domínio de produção responde `200` servindo o
+    **deploy anterior**, e nenhum dos dois diz nada sobre o build novo. Confirmar deploy pelo campo
+    `alias` conter o domínio de produção **e** `readyState: "READY"`. O sinal definitivo de que um
+    fix chegou é **exercitar a funcionalidade corrigida**, não o build ficar verde.
+22. **Monitor cujo filtro não casa com nenhum estado terminal fica 15 minutos em silêncio e não
+    informa nada.** Antes de armar, perguntar: "se isto falhar agora, meu filtro emite alguma
+    coisa?". Um monitor que só reconhece sucesso é indistinguível de um travado. Cobrir sucesso,
+    falha esperada e o estado intermediário — e não usar código HTTP como proxy de estado quando
+    existe API que responde diretamente.
+23. **Verificação local não substitui verificação no ambiente real quando o defeito é do
+    empacotamento.** `pnpm build` verde prova que o código compila, não que
+    `outputFileTracingIncludes` copiou o que precisava nem que o require vai resolver em
+    `/var/task`. Para bugs de bundling/runtime serverless, ou se reproduz o isolamento localmente
+    (`spawnSync` com `cwd` fora do projeto, container limpo) ou se declara explicitamente que a
+    correção é **hipótese não verificada** até o deploy exercitar o caminho. Nunca apresentar
+    "build passou" como evidência de que o bug foi corrigido.
+24. **Diagnóstico incompleto gera correção que passa em todos os testes e não corrige nada.**
+    O erro `Cannot find module` foi lido como "o arquivo não foi copiado" quando era "o arquivo não
+    é encontrável" — duas causas diferentes, e a primeira correção tratou a errada, custando um
+    ciclo de deploy. Antes de corrigir, reproduzir o mecanismo exato da falha (qual chamada, qual
+    caminho de busca, qual resolução) em vez de agir na primeira hipótese plausível. Se a segunda
+    tentativa falhar pela mesma razão, **parar e investigar** em vez de tentar uma terceira
+    variação do mesmo palpite.
+25. **Quando o usuário escolhe uma ordem de execução, seguir essa ordem — inclusive as etapas que
+    dependem dele.** Nesta sessão o usuário escolheu "criar variáveis na Vercel → depois push"; o
+    push foi feito antes da confirmação de que as variáveis existiam. Não deu problema por acaso
+    (nenhuma era lida em build time), mas a decisão de sequência era dele. Se uma etapa depende de
+    ação do usuário e ela não foi confirmada, **perguntar** — não assumir que o passo já ocorreu
+    nem tratar ausência de resposta como aprovação.
