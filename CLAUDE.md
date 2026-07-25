@@ -469,3 +469,36 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     falha em um comando **posterior** (o `INSERT`, com o DDL já executado) exercita de fato a
     garantia. Ao testar atomicidade/rollback/cleanup, colocar a falha **no meio** da sequência,
     nunca no primeiro passo, e confirmar por mutação que o teste detecta a garantia removida.
+40. **Botão sem handler é pior que botão ausente — e a UI não pode prometer o que a regra proíbe.**
+    `CotacoesTableReal` teve por meses os botões "Lembrar" e "Ver" sem `onClick`: o usuário clicava
+    e nada acontecia. Pior, "Lembrar" sugeria um envio de e-mail que a §9.3 proíbe o sistema de
+    fazer. O mesmo padrão apareceu em três lugares: o onboarding marcava as duas primeiras etapas
+    como concluídas com check verde derivado de `idx < 2` (progresso fictício), a aba "Memória de
+    cálculo" só expunha `processosComSerie[0]` (os demais inacessíveis, sem nada indicar isso) e a
+    descrição da página de Cotações dizia "disparo de e-mails". Ao construir tela, perguntar de
+    cada elemento interativo: **o que acontece quando clico?** Se a resposta é "nada" ou "algo que
+    a regra de negócio proíbe", o elemento vira indicador informativo ou sai — nunca fica como
+    placeholder à espera de implementação.
+41. **`setState` dentro de `useEffect` para espelhar um valor derivado é sinal de estado
+    redundante — derive na renderização.** Ao sincronizar a aba ativa do stepper com `?etapa=`, a
+    primeira versão usou `useEffect` + `setState`, e o ESLint (`react-hooks`) barrou com "Calling
+    setState synchronously within an effect can trigger cascading renders". A correção não é
+    silenciar a regra: é reconhecer que a URL já é a fonte de verdade e calcular
+    `ativa = escolhaLocal ?? valorDaUrl ?? padrão` no corpo do componente. Cuidado com a
+    armadilha seguinte: guardar só a escolha local faz um clique manual congelar a aba e ignorar
+    deep-links posteriores — é preciso guardar **também o valor da URL no momento do clique** e
+    devolver a precedência à URL quando ela mudar. Ambas as pontas exigem teste; a precedência do
+    deep-link foi confirmada por mutação.
+42. **Dependência de teste também é dependência: `@testing-library/user-event` não está instalado.**
+    Escrever `import userEvent from "@testing-library/user-event"` quebra a suíte inteira com erro
+    de resolução do Vite, não com uma falha de asserção legível. O projeto usa `fireEvent` +
+    `waitFor` do `@testing-library/react`. Instalar exigiria autorização do usuário (§8) — antes de
+    importar qualquer pacote num teste, conferir se ele já está em `package.json`, valendo a mesma
+    regra do código de produção.
+43. **Ao inserir imports com script (`awk`/`sed`), imports multilinha quebram silenciosamente.**
+    Inserir uma linha após "o último `import`" partiu ao meio um `import type { A, B } from …` em
+    `fornecedores/page.tsx`, produzindo um arquivo sintaticamente inválido. O typecheck pegou, mas
+    o modo de falha é traiçoeiro em arquivo grande. Para edição estrutural de código, usar a
+    ferramenta de edição com contexto (que casa o bloco inteiro), não manipulação por número de
+    linha — ou, no mínimo, rodar `typecheck` imediatamente após qualquer script que reescreva
+    arquivos em lote.
