@@ -288,14 +288,20 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     ferramentas. Cada ferramenta precisa do ignore próprio (vitest e eslint são configs separados);
     ao ver erro apontando para um caminho sob `.claude/worktrees/`, adicionar o ignore em vez de
     investigar o código.
-18. **Globs de `outputFileTracingIncludes` apontam para `node_modules/.pnpm/`, não para
-    `node_modules/<pkg>`, quando a dependência é transitiva.** O pnpm só cria symlink no topo para
-    dependências diretas do projeto; transitivas ficam isoladas no store. `@prisma/engines` é
-    dependência do pacote `prisma` (não do `package.json` daqui), então
-    `./node_modules/@prisma/engines/**` **não casa com nada** — o glob falha em silêncio, o build
-    passa e a função serverless quebra só em runtime com `Cannot find module '@prisma/engines'`.
-    Antes de confiar num glob de tracing, rodar `ls` no caminho exato: se não existir localmente,
-    não vai existir no bundle. Usar `./node_modules/.pnpm/@prisma+engines@*/node_modules/...`.
+18. **Copiar arquivos para o bundle ≠ torná-los resolvíveis: com pnpm, dependência transitiva
+    exige `NODE_PATH`, não só `outputFileTracingIncludes`.** O pnpm só cria symlink em
+    `node_modules/<pkg>` para dependências **diretas**; transitivas vivem apenas em
+    `.pnpm/<pkg>@<versão>[_hash]/node_modules`. `@prisma/engines` é dependência do pacote `prisma`,
+    não do `package.json` daqui — logo `./node_modules/@prisma/engines/**` não casa com nada e o
+    glob falha em silêncio. Mas **corrigir só o glob não resolve**: o CLI faz
+    `require("@prisma/engines")` (resolução por nome, que sobe a árvore de `node_modules`) e o
+    bundle da Vercel não recria os symlinks — os arquivos chegam num caminho que o Node nunca
+    consulta. A rota `/api/admin/migrate` resolve exportando `NODE_PATH` com os diretórios
+    `.pnpm/@prisma+*/node_modules` para o subprocesso, descobertos em runtime via `readdirSync`
+    (o sufixo de hash de peer-deps no nome do diretório não é previsível — não hardcodar).
+    Regra geral: ao empacotar um binário/CLI, perguntar **onde o require vai procurar**, não só
+    se o arquivo foi copiado; e validar a resolução localmente com `spawnSync` + `cwd` fora do
+    projeto antes de gastar um ciclo de deploy.
 19. **Migration nova só está "pronta" depois de aplicada em produção, não depois do merge.**
     Código e migration sobem em tempos diferentes: o deploy leva o código, mas o banco só muda por
     ação explícita (`/api/admin/migrate` ou `migrate deploy` — ver itens 7 e 14). Um schema com

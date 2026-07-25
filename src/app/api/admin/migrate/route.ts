@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
@@ -43,13 +43,38 @@ function isAuthorized(request: Request): boolean {
   return request.headers.get("authorization") === `Bearer ${secret}`;
 }
 
+// O CLI faz `require("@prisma/engines")` — resolução por nome, que sobe a
+// árvore de node_modules. Com pnpm, @prisma/engines é dependência transitiva e
+// só existe sob .pnpm/<pkg>@<versão>[_hash]/node_modules; o bundle da Vercel
+// não recria os symlinks, então /var/task/node_modules/@prisma/ tem apenas as
+// dependências diretas (client, adapter-pg) e o require falha.
+// Incluir os arquivos via outputFileTracingIncludes não basta: eles chegam num
+// caminho que o algoritmo de resolução do Node nunca consulta. NODE_PATH torna
+// esses diretórios pesquisáveis. Descoberto em runtime (readdirSync) porque o
+// sufixo de hash de peer-deps no nome do diretório não é previsível.
+function pnpmModulePaths(): string[] {
+  const pnpmDir = join(process.cwd(), "node_modules", ".pnpm");
+  if (!existsSync(pnpmDir)) return [];
+  try {
+    return readdirSync(pnpmDir)
+      .filter((entry) => entry.startsWith("@prisma+") || entry.startsWith("prisma@"))
+      .map((entry) => join(pnpmDir, entry, "node_modules"))
+      .filter((dir) => existsSync(dir));
+  } catch {
+    return [];
+  }
+}
+
 async function runPrisma(args: string[]) {
   const cli = resolvePrismaCli();
+  const nodePath = [...pnpmModulePaths(), process.env.NODE_PATH]
+    .filter(Boolean)
+    .join(delimiter);
   const { stdout, stderr } = await execFileAsync(
     process.execPath,
     [cli, ...args],
     {
-      env: process.env,
+      env: { ...process.env, NODE_PATH: nodePath },
       // Migrations grandes podem demorar; teto generoso mas finito.
       timeout: 120_000,
       maxBuffer: 10 * 1024 * 1024,
