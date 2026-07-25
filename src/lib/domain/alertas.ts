@@ -37,6 +37,13 @@ export interface AlertaInput {
     fornecedorNome: string;
   }>;
   itensComDispersao: Array<{
+    /**
+     * Identidade da série de preço que gerou o alerta. Um Item pode ter mais de
+     * uma SeriePreco (`Item.seriePrecos` é 1-N, sem `@unique` em `itemId`), então
+     * é o id da série — não o do item nem a descrição — que identifica a linha.
+     */
+    seriePrecoId: string;
+    itemId: string;
     processoId: string;
     processoNumero: string;
     itemDescricao: string;
@@ -90,7 +97,11 @@ export function gerarAlertas(input: AlertaInput): Alerta[] {
 
   for (const i of input.itensComDispersao) {
     alertas.push({
-      id: `dispersao-${i.processoId}-${i.itemDescricao}`,
+      // O id é a chave de dispensa do alerta na UI: precisa ser único por linha.
+      // `itemDescricao` é texto livre e colide entre itens homônimos do mesmo
+      // processo, o que fazia dispensar um alerta esconder o outro — suprimindo
+      // da tela um item que exige análise crítica pela IN 65/2021.
+      id: `dispersao-${i.seriePrecoId}`,
       tipo: "dispersao_preco",
       severidade: "aviso",
       mensagem: `Item "${i.itemDescricao}" (proc. ${i.processoNumero}) com CV de ${i.coeficienteVariacao.toFixed(1)}% — exige análise crítica.`,

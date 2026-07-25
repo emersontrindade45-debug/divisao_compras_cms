@@ -183,6 +183,8 @@ describe("gerarAlertas - dispersão de preço", () => {
     ...inputVazio(),
     itensComDispersao: [
       {
+        seriePrecoId: "serie1",
+        itemId: "item1",
         processoId: "proc3",
         processoNumero: "2026/003",
         itemDescricao: "Papel A4 75g",
@@ -197,9 +199,10 @@ describe("gerarAlertas - dispersão de preço", () => {
     expect(alerta.severidade).toBe("aviso");
   });
 
-  it("compõe o id com processoId e descrição do item", () => {
+  it("compõe o id a partir do id da série de preço, não de texto livre", () => {
     const [alerta] = gerarAlertas(input);
-    expect(alerta.id).toBe("dispersao-proc3-Papel A4 75g");
+    expect(alerta.id).toBe("dispersao-serie1");
+    expect(alerta.id).not.toContain("Papel A4 75g");
   });
 
   it("preenche href e vínculo com o processo, sem cotacaoId", () => {
@@ -220,6 +223,8 @@ describe("gerarAlertas - dispersão de preço", () => {
       ...inputVazio(),
       itensComDispersao: [
         {
+          seriePrecoId: "serie2",
+          itemId: "item2",
           processoId: "proc3",
           processoNumero: "2026/003",
           itemDescricao: "Toner",
@@ -234,6 +239,66 @@ describe("gerarAlertas - dispersão de preço", () => {
     const [alerta] = gerarAlertas(input);
     expect(alerta.mensagem).toContain("exige análise crítica");
     expect(alerta.mensagem).toContain('"Papel A4 75g"');
+  });
+
+  // Regressão: o id do alerta é a chave de dispensa em AlertasBanner. Quando era
+  // derivado de `itemDescricao` (texto livre, sem unicidade no schema), dois itens
+  // homônimos do mesmo processo colidiam e dispensar um escondia o outro —
+  // suprimindo da tela um item que exige análise crítica pela IN 65/2021.
+  it("gera ids distintos para itens homônimos do mesmo processo", () => {
+    const alertas = gerarAlertas({
+      ...inputVazio(),
+      itensComDispersao: [
+        {
+          seriePrecoId: "serie-a",
+          itemId: "item-a",
+          processoId: "proc7",
+          processoNumero: "2026/007",
+          itemDescricao: "Papel A4 75g",
+          coeficienteVariacao: 30,
+        },
+        {
+          seriePrecoId: "serie-b",
+          itemId: "item-b",
+          processoId: "proc7",
+          processoNumero: "2026/007",
+          itemDescricao: "Papel A4 75g",
+          coeficienteVariacao: 45,
+        },
+      ],
+    });
+
+    expect(alertas).toHaveLength(2);
+    expect(new Set(alertas.map((a) => a.id)).size).toBe(2);
+  });
+
+  // Um Item pode ter mais de uma SeriePreco (relação 1-N no schema), então o id
+  // do item também não basta como identidade da linha de alerta.
+  it("gera ids distintos para séries diferentes do mesmo item", () => {
+    const alertas = gerarAlertas({
+      ...inputVazio(),
+      itensComDispersao: [
+        {
+          seriePrecoId: "serie-x",
+          itemId: "item-unico",
+          processoId: "proc8",
+          processoNumero: "2026/008",
+          itemDescricao: "Cadeira",
+          coeficienteVariacao: 28,
+        },
+        {
+          seriePrecoId: "serie-y",
+          itemId: "item-unico",
+          processoId: "proc8",
+          processoNumero: "2026/008",
+          itemDescricao: "Cadeira",
+          coeficienteVariacao: 61,
+        },
+      ],
+    });
+
+    expect(alertas).toHaveLength(2);
+    expect(new Set(alertas.map((a) => a.id)).size).toBe(2);
   });
 });
 
@@ -273,6 +338,8 @@ describe("gerarAlertas - ordenação por severidade", () => {
     ],
     itensComDispersao: [
       {
+        seriePrecoId: "serie6",
+        itemId: "item6",
         processoId: "proc6",
         processoNumero: "2026/006",
         itemDescricao: "Cadeira",
