@@ -1,39 +1,41 @@
-import { existsSync, readdirSync } from "node:fs";
-import { delimiter, join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { join } from "node:path";
+import { Client } from "pg";
 import { NextResponse } from "next/server";
+import {
+  DDL_TABELA_MIGRATIONS,
+  aplicarPendentes,
+  calcularPendentes,
+  detectarOrfas,
+  lerMigrationsLocais,
+  type ExecutorSql,
+  type RegistroMigration,
+} from "@/lib/migrations/aplicar";
 
 // Aplicação de migrations de produção sob demanda (CLAUDE.md §9.7).
 // Nunca rodar migrations no build da Vercel — trava o build por conexão de DB
 // bloqueada. Esta rota protegida é o canal oficial: chamada manual e explícita.
 //
-//   GET  /api/admin/migrate  → prisma migrate status  (somente leitura)
-//   POST /api/admin/migrate  → prisma migrate deploy   (aplica pendentes)
+//   GET  /api/admin/migrate  → status (somente leitura)
+//   POST /api/admin/migrate  → aplica as pendentes
 //
 // Proteção: header `Authorization: Bearer <ADMIN_MIGRATE_SECRET>`.
-// Runtime Node (o CLI do Prisma não roda em edge) e sempre dinâmica.
+//
+// O SQL é executado direto via `pg`, sem o CLI do Prisma: empacotar o CLI numa
+// função serverless custou três ciclos de deploy sem nunca funcionar
+// (§9.18, §9.26, §9.28, §9.29). `pg` já é dependência direta do projeto.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const execFileAsync = promisify(execFile);
-
-// Resolve o CLI do Prisma dentro de node_modules e o executa com o mesmo Node
-// do processo — evita depender de `npx`/`pnpm` estarem no PATH em runtime.
-//
-// Usa path.join, não require.resolve: o Turbopack traça require.resolve()
-// estaticamente (mesmo sob createRequire) e segue os requires internos do CLI
-// até o @prisma/dev, quebrando o build nos assets .wasm/.tar.gz dele —
-// serverExternalPackages não evita (vercel/next.js#65828).
-// O alvo é "build/index.js" porque em prisma@7.8.0 o export "." aponta para
-// "build/types.js", que não existe no pacote publicado.
-function resolvePrismaCli(): string {
-  const cli = join(process.cwd(), "node_modules", "prisma", "build", "index.js");
-  if (!existsSync(cli)) {
-    throw new Error(`CLI do Prisma não encontrado em ${cli}`);
+// Migrations exigem DDL e sessão estável, então usam a conexão direta — o mesmo
+// alvo que o CLI usava via prisma.config.ts. O pooler (DATABASE_URL) só entra
+// como fallback para ambientes onde as duas apontam para o mesmo lugar (dev).
+function connectionString(): string {
+  const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error("DIRECT_URL (ou DATABASE_URL) não configurada");
   }
-  return cli;
+  return url;
 }
 
 function isAuthorized(request: Request): boolean {
@@ -43,44 +45,46 @@ function isAuthorized(request: Request): boolean {
   return request.headers.get("authorization") === `Bearer ${secret}`;
 }
 
-// O CLI faz `require("@prisma/engines")` — resolução por nome, que sobe a
-// árvore de node_modules. Com pnpm, @prisma/engines é dependência transitiva e
-// só existe sob .pnpm/<pkg>@<versão>[_hash]/node_modules; o bundle da Vercel
-// não recria os symlinks, então /var/task/node_modules/@prisma/ tem apenas as
-// dependências diretas (client, adapter-pg) e o require falha.
-// Incluir os arquivos via outputFileTracingIncludes não basta: eles chegam num
-// caminho que o algoritmo de resolução do Node nunca consulta. NODE_PATH torna
-// esses diretórios pesquisáveis. Descoberto em runtime (readdirSync) porque o
-// sufixo de hash de peer-deps no nome do diretório não é previsível.
-function pnpmModulePaths(): string[] {
-  const pnpmDir = join(process.cwd(), "node_modules", ".pnpm");
-  if (!existsSync(pnpmDir)) return [];
+const diretorioMigrations = () => join(process.cwd(), "prisma", "migrations");
+
+/** Abre conexão, roda `fn` e garante o fechamento. */
+async function comConexao<T>(fn: (client: Client) => Promise<T>): Promise<T> {
+  const client = new Client({ connectionString: connectionString() });
+  await client.connect();
   try {
-    return readdirSync(pnpmDir)
-      .filter((entry) => entry.startsWith("@prisma+") || entry.startsWith("prisma@"))
-      .map((entry) => join(pnpmDir, entry, "node_modules"))
-      .filter((dir) => existsSync(dir));
-  } catch {
-    return [];
+    return await fn(client);
+  } finally {
+    await client.end();
   }
 }
 
-async function runPrisma(args: string[]) {
-  const cli = resolvePrismaCli();
-  const nodePath = [...pnpmModulePaths(), process.env.NODE_PATH]
-    .filter(Boolean)
-    .join(delimiter);
-  const { stdout, stderr } = await execFileAsync(
-    process.execPath,
-    [cli, ...args],
-    {
-      env: { ...process.env, NODE_PATH: nodePath },
-      // Migrations grandes podem demorar; teto generoso mas finito.
-      timeout: 120_000,
-      maxBuffer: 10 * 1024 * 1024,
+function criarExecutor(client: Client): ExecutorSql {
+  return {
+    async executar(sql, valores) {
+      await client.query(sql, valores as unknown[] | undefined);
     },
+    async emTransacao(fn) {
+      await client.query("BEGIN");
+      try {
+        await fn();
+        await client.query("COMMIT");
+      } catch (erro) {
+        await client.query("ROLLBACK");
+        throw erro;
+      }
+    },
+  };
+}
+
+async function lerRegistros(client: Client): Promise<RegistroMigration[]> {
+  // A tabela pode não existir num banco novo — criá-la aqui torna a rota
+  // utilizável no primeiro deploy, e o IF NOT EXISTS a mantém idempotente.
+  await client.query(DDL_TABELA_MIGRATIONS);
+  const { rows } = await client.query<RegistroMigration>(
+    `SELECT "migration_name", "finished_at", "rolled_back_at"
+       FROM "_prisma_migrations"`,
   );
-  return { stdout, stderr };
+  return rows;
 }
 
 export async function GET(request: Request) {
@@ -89,25 +93,33 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { stdout, stderr } = await runPrisma(["migrate", "status"]);
+    const locais = lerMigrationsLocais(diretorioMigrations());
+    const resultado = await comConexao(async (client) => {
+      const registros = await lerRegistros(client);
+      return {
+        pendentes: calcularPendentes(locais, registros).map((m) => m.nome),
+        orfas: detectarOrfas(locais, registros),
+        aplicadas: registros
+          .filter((r) => r.finished_at !== null && r.rolled_back_at === null)
+          .map((r) => r.migration_name)
+          .sort(),
+      };
+    });
+
     return NextResponse.json({
-      comando: "migrate status",
-      stdout,
-      stderr,
+      comando: "status",
+      ...resultado,
+      total: locais.length,
       executadoEm: new Date().toISOString(),
     });
   } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; message?: string };
-    // `migrate status` sai com código ≠ 0 quando há migrations pendentes —
-    // isso é informação, não falha da rota.
     return NextResponse.json(
       {
-        comando: "migrate status",
-        stdout: err.stdout ?? "",
-        stderr: err.stderr ?? err.message ?? "",
+        comando: "status",
+        erro: error instanceof Error ? error.message : String(error),
         executadoEm: new Date().toISOString(),
       },
-      { status: 200 },
+      { status: 500 },
     );
   }
 }
@@ -118,22 +130,31 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { stdout, stderr } = await runPrisma(["migrate", "deploy"]);
-    return NextResponse.json({
-      ok: true,
-      comando: "migrate deploy",
-      stdout,
-      stderr,
-      executadoEm: new Date().toISOString(),
+    const locais = lerMigrationsLocais(diretorioMigrations());
+    const { pendentes, resultados } = await comConexao(async (client) => {
+      const registros = await lerRegistros(client);
+      const pendentes = calcularPendentes(locais, registros);
+      const resultados = await aplicarPendentes(pendentes, criarExecutor(client));
+      return { pendentes, resultados };
     });
+
+    const falhou = resultados.some((r) => !r.aplicada);
+    return NextResponse.json(
+      {
+        ok: !falhou,
+        comando: "deploy",
+        pendentesAntes: pendentes.map((m) => m.nome),
+        resultados,
+        executadoEm: new Date().toISOString(),
+      },
+      { status: falhou ? 500 : 200 },
+    );
   } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; message?: string };
     return NextResponse.json(
       {
         ok: false,
-        comando: "migrate deploy",
-        stdout: err.stdout ?? "",
-        stderr: err.stderr ?? err.message ?? "",
+        comando: "deploy",
+        erro: error instanceof Error ? error.message : String(error),
         executadoEm: new Date().toISOString(),
       },
       { status: 500 },
