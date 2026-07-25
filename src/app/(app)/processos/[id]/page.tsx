@@ -4,11 +4,13 @@ import { Button } from "@/components/ui/button";
 import { ProcessoHeader } from "@/components/processos/ProcessoHeader";
 import {
   ProcessoTabs,
+  type CotacaoResumo,
   type EvidenciaResumo,
   type FonteResumo,
 } from "@/components/processos/ProcessoTabs";
 import { FontesSimilaridadeList } from "@/components/processos/FontesSimilaridadeList";
 import { obterProcessoDetalhado } from "@/lib/actions/listar";
+import { avaliarConformidade } from "@/lib/domain/conformidade";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import type { SeriePrecoFixture, TipoFonte } from "@/lib/fixtures/seriePrecos";
 import type { StatusDominio } from "@/lib/domain/status";
@@ -128,13 +130,55 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
       }
     : undefined;
 
+  const cotacoes: CotacaoResumo[] = processo.cotacoes.map((c) => ({
+    id: c.id,
+    fornecedorRazaoSocial: c.fornecedor.razaoSocial,
+    dataEnvio: c.dataEnvio.toISOString(),
+    dataLimite: c.dataLimite.toISOString(),
+    status: c.status,
+    valorProposto: c.valorProposto ? Number(c.valorProposto) : undefined,
+    propostaStatus: c.proposta?.statusGeral,
+  }));
+
+  const conformidade = avaliarConformidade({
+    temItens: processo.itens.length > 0,
+    fontes: processo.itens.flatMap((item) =>
+      item.fontes.map((f) => ({
+        id: f.id,
+        tipo: f.tipo,
+        status: f.status,
+        dataReferencia: f.dataReferencia,
+        totalEvidencias: f.evidencias.length,
+      })),
+    ),
+    capturas: processo.capturas.length,
+    // Candidatos de similaridade ainda não promovidos não vêm nesta query;
+    // as fontes já promovidas contam pelo array acima.
+    resultadosSimilaridade: 0,
+    cotacoes: processo.cotacoes.map((c) => ({
+      id: c.id,
+      status: c.status,
+      temProposta: c.proposta !== null,
+      propostaStatus: c.proposta?.statusGeral,
+    })),
+    serie: serieDb
+      ? {
+          precosIncluidos: serieDb.precosIncluidos,
+          valorEstimado: Number(serieDb.valorEstimado),
+          coeficienteVariacao: Number(serieDb.coeficienteVariacao),
+        }
+      : undefined,
+  });
+
   return (
     <div className="space-y-6">
       <ProcessoHeader processo={processoMapeado} />
       <ProcessoTabs
         processo={processoMapeado}
+        conformidade={conformidade}
         fontes={fontes}
         evidencias={evidencias}
+        cotacoes={cotacoes}
         serie={serie}
         fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
       />

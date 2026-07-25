@@ -1,13 +1,26 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, Globe, Users } from "lucide-react";
+import { Building2, Check, Globe, Users } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+/** Quantas fontes já foram registradas por rota de busca. */
+export interface ProgressoEstrategia {
+  contratacoes: number;
+  sites: number;
+  fornecedores: number;
+}
 
 interface EstrategiaOrquestradorProps {
   classificacao: "comum" | "especifico";
   objeto: string;
+  /** Quando informado, marca como cumprida cada rota que já tem registro. */
+  progresso?: ProgressoEstrategia;
 }
+
+type RotaBusca = keyof ProgressoEstrategia;
 
 interface EtapaEstrategia {
   numero: number;
+  rota: RotaBusca;
   titulo: string;
   descricao: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -19,6 +32,7 @@ function getEtapas(classificacao: "comum" | "especifico"): EtapaEstrategia[] {
     return [
       {
         numero: 1,
+        rota: "contratacoes",
         titulo: "Contratações públicas similares",
         descricao:
           "Consulte o Painel de Preços e o Comprasnet para identificar contratos com objeto idêntico ou similar celebrados nos últimos 12 meses.",
@@ -27,6 +41,7 @@ function getEtapas(classificacao: "comum" | "especifico"): EtapaEstrategia[] {
       },
       {
         numero: 2,
+        rota: "sites",
         titulo: "Sites eletrônicos admissíveis",
         descricao:
           "Pesquise em sites da lista branca (portais governamentais). Registre URL, data e hora de acesso e salve evidência da consulta.",
@@ -34,6 +49,7 @@ function getEtapas(classificacao: "comum" | "especifico"): EtapaEstrategia[] {
       },
       {
         numero: 3,
+        rota: "fornecedores",
         titulo: "Fornecedores diretos",
         descricao:
           "Consulte ao menos 3 fornecedores cadastrados. Registre todos os contatos realizados, incluindo os que não responderam.",
@@ -45,6 +61,7 @@ function getEtapas(classificacao: "comum" | "especifico"): EtapaEstrategia[] {
   return [
     {
       numero: 1,
+      rota: "contratacoes",
       titulo: "Contratações públicas similares",
       descricao:
         "Consulte o Painel de Preços e o Comprasnet para identificar contratos com objeto idêntico ou similar celebrados nos últimos 12 meses.",
@@ -53,6 +70,7 @@ function getEtapas(classificacao: "comum" | "especifico"): EtapaEstrategia[] {
     },
     {
       numero: 2,
+      rota: "fornecedores",
       titulo: "Fornecedores diretos",
       descricao:
         "Para itens específicos, priorize a consulta direta a fornecedores qualificados. Consulte ao menos 3 e registre todos os contatos.",
@@ -60,6 +78,7 @@ function getEtapas(classificacao: "comum" | "especifico"): EtapaEstrategia[] {
     },
     {
       numero: 3,
+      rota: "sites",
       titulo: "Sites eletrônicos admissíveis",
       descricao:
         "Use sites como complemento. Para itens específicos, sites tendem a ter menor aderência — justifique a utilização quando necessário.",
@@ -68,7 +87,11 @@ function getEtapas(classificacao: "comum" | "especifico"): EtapaEstrategia[] {
   ];
 }
 
-export function EstrategiaOrquestrador({ classificacao, objeto }: EstrategiaOrquestradorProps) {
+export function EstrategiaOrquestrador({
+  classificacao,
+  objeto,
+  progresso,
+}: EstrategiaOrquestradorProps) {
   const etapas = getEtapas(classificacao);
   const labelClassificacao = classificacao === "comum" ? "Item comum" : "Item específico";
 
@@ -86,11 +109,25 @@ export function EstrategiaOrquestrador({ classificacao, objeto }: EstrategiaOrqu
       <CardContent className="space-y-4">
         {etapas.map((etapa) => {
           const Icon = etapa.icon;
+          const registros = progresso?.[etapa.rota] ?? 0;
+          const cumprida = progresso !== undefined && registros > 0;
           return (
             <div key={etapa.numero} className="flex gap-3">
               <div className="flex flex-col items-center">
-                <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                  {etapa.numero}
+                <div
+                  className={cn(
+                    "flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                    cumprida
+                      ? "bg-success text-success-foreground"
+                      : "bg-primary text-primary-foreground",
+                  )}
+                  title={
+                    cumprida
+                      ? `${registros} registro(s) nesta rota de busca`
+                      : "Sem registro nesta rota ainda"
+                  }
+                >
+                  {cumprida ? <Check className="size-3.5" aria-hidden /> : etapa.numero}
                 </div>
                 {etapa.numero < etapas.length && (
                   <div className="mt-1 w-px grow bg-border" />

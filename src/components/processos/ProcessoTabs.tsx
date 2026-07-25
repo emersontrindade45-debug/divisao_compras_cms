@@ -1,90 +1,105 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { FileText, Globe } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { EmptyState } from "@/components/common/EmptyState";
-import { EvidenciaPanel } from "@/components/common/EvidenciaPanel";
-import { TabelaSeriePrecos } from "@/components/cotacoes/TabelaSeriePrecos";
 import { EstrategiaOrquestrador } from "./EstrategiaOrquestrador";
-import { PesquisaSimilaridadeUploadForm } from "./PesquisaSimilaridadeUploadForm";
-import { PreencherCotacaoForm } from "./PreencherCotacaoForm";
+import { ProcessoStepper } from "./ProcessoStepper";
+import { EtapaPesquisa } from "./EtapaPesquisa";
+import { EtapaValidacao, type CotacaoResumo } from "./EtapaValidacao";
+import { EtapaConsolidacao } from "./EtapaConsolidacao";
+import type { ConformidadeProcesso, EtapaId } from "@/lib/domain/conformidade";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import type { SeriePrecoFixture } from "@/lib/fixtures/seriePrecos";
-import { formatBRL, formatDate } from "@/lib/formatters";
-import { cn } from "@/lib/utils";
 
-export interface FonteResumo {
-  id: string;
-  itemDescricao: string;
-  tipo: "contratacao_publica" | "site_eletronico" | "fornecedor_direto";
-  descricao: string;
-  orgaoOuFornecedor: string;
-  dataReferencia: string;
-  valorUnitario: number;
-  status: "incluido" | "excluido";
-  motivoExclusao?: string;
-  totalEvidencias: number;
+export type { FonteResumo, EvidenciaResumo } from "./EtapaPesquisa";
+export type { CotacaoResumo } from "./EtapaValidacao";
+
+import type { EvidenciaResumo, FonteResumo } from "./EtapaPesquisa";
+
+const ETAPAS_VALIDAS: readonly EtapaId[] = [
+  "estrategia",
+  "pesquisa",
+  "validacao",
+  "consolidacao",
+];
+
+function parseEtapa(valor: string | null): EtapaId | undefined {
+  return ETAPAS_VALIDAS.find((e) => e === valor);
 }
 
-export interface EvidenciaResumo {
-  id: string;
-  nomeArquivo: string;
-  dataHoraAcesso: string;
-  url?: string;
-  observacoes?: string;
-}
-
-const TIPO_FONTE_LABEL: Record<FonteResumo["tipo"], string> = {
-  contratacao_publica: "Contratação pública",
-  site_eletronico: "Site eletrônico",
-  fornecedor_direto: "Fornecedor direto",
-};
-
-const TIPO_FONTE_BADGE: Record<FonteResumo["tipo"], string> = {
-  contratacao_publica: "bg-primary/10 text-primary border-primary/20",
-  site_eletronico:
-    "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800",
-  fornecedor_direto: "bg-muted text-muted-foreground",
-};
-
+/**
+ * Detalhe do processo organizado como as 4 etapas do fluxo da IN 65/2021.
+ *
+ * A etapa inicial vem de `?etapa=` (deep-link usado pelo painel de conformidade
+ * e pela fila do dashboard) ou, na ausência dela, da etapa que a conformidade
+ * indica como a atual — o servidor cai direto onde há trabalho a fazer.
+ */
 export function ProcessoTabs({
   processo,
+  conformidade,
   fontes = [],
   evidencias = [],
+  cotacoes = [],
   serie,
   fontesSimilaridade,
 }: {
   processo: ProcessoFixture;
+  conformidade: ConformidadeProcesso;
   fontes?: FonteResumo[];
   evidencias?: EvidenciaResumo[];
+  cotacoes?: CotacaoResumo[];
   serie?: SeriePrecoFixture;
   fontesSimilaridade?: ReactNode;
 }) {
+  const searchParams = useSearchParams();
+  const etapaDaUrl = parseEtapa(searchParams.get("etapa"));
+
+  // A aba ativa vem da URL quando há `?etapa=` (deep-link do painel de
+  // conformidade e da fila do dashboard) e, na falta dela, da etapa que a
+  // conformidade aponta como atual. `escolha` cobre a troca manual de aba, que
+  // usa history.replaceState e por isso não re-renderiza via App Router.
+  //
+  // `origem` guarda o valor da URL no momento do clique: quando a URL muda
+  // depois disso (novo deep-link), ela volta a mandar — sem isso, um clique
+  // manual congelaria a aba para o resto da sessão.
+  const [escolha, setEscolha] = useState<{ etapa: EtapaId; origem?: EtapaId }>();
+  const ativa =
+    escolha && escolha.origem === etapaDaUrl
+      ? escolha.etapa
+      : (etapaDaUrl ?? conformidade.etapaAtual);
+
+  function handleChange(valor: EtapaId) {
+    setEscolha({ etapa: valor, origem: etapaDaUrl });
+    // Mantém a URL compartilhável sem disparar navegação do App Router.
+    const url = new URL(window.location.href);
+    url.searchParams.set("etapa", valor);
+    window.history.replaceState(null, "", url);
+  }
+
+  const progresso = {
+    contratacoes: fontes.filter(
+      (f) => f.tipo === "contratacao_publica" && f.status === "incluido",
+    ).length,
+    sites: fontes.filter((f) => f.tipo === "site_eletronico" && f.status === "incluido")
+      .length,
+    fornecedores: cotacoes.length,
+  };
+
   return (
-    <Tabs defaultValue="estrategia" className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="estrategia">Estratégia</TabsTrigger>
-        <TabsTrigger value="similaridade">Pesquisa por Similaridade</TabsTrigger>
-        <TabsTrigger value="fontes">Fontes ({fontes.length})</TabsTrigger>
-        <TabsTrigger value="evidencias">Evidências ({evidencias.length})</TabsTrigger>
-        <TabsTrigger value="serie">Série de preços</TabsTrigger>
-      </TabsList>
+    <Tabs
+      value={ativa}
+      onValueChange={(valor) => handleChange(valor as EtapaId)}
+      className="space-y-4"
+    >
+      <ProcessoStepper etapas={conformidade.etapas} />
 
       <TabsContent value="estrategia" className="space-y-4">
         <EstrategiaOrquestrador
           classificacao={processo.classificacao}
           objeto={processo.objeto}
+          progresso={progresso}
         />
         <Card>
           <CardHeader>
@@ -103,113 +118,21 @@ export function ProcessoTabs({
         </Card>
       </TabsContent>
 
-      <TabsContent value="similaridade" className="space-y-4">
-        <PesquisaSimilaridadeUploadForm processoId={processo.id} />
-        <PreencherCotacaoForm processoId={processo.id} />
-        {fontesSimilaridade}
+      <TabsContent value="pesquisa">
+        <EtapaPesquisa
+          processoId={processo.id}
+          fontes={fontes}
+          evidencias={evidencias}
+          fontesSimilaridade={fontesSimilaridade}
+        />
       </TabsContent>
 
-      <TabsContent value="fontes">
-        {fontes.length === 0 ? (
-          <EmptyState
-            icon={Globe}
-            title="Nenhuma fonte registrada ainda"
-            description="Promova resultados da Pesquisa por Similaridade ou registre fontes pelas telas de contratações, sites e cotações."
-          />
-        ) : (
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Descrição</TableHead>
-                    <TableHead>Órgão / Fornecedor</TableHead>
-                    <TableHead>Data ref.</TableHead>
-                    <TableHead className="text-right">Valor unit.</TableHead>
-                    <TableHead>Evidências</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {fontes.map((f) => (
-                    <TableRow key={f.id} className={cn(f.status === "excluido" && "opacity-50")}>
-                      <TableCell className="text-xs max-w-40 truncate" title={f.itemDescricao}>
-                        {f.itemDescricao}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={cn("text-xs", TIPO_FONTE_BADGE[f.tipo])}>
-                          {TIPO_FONTE_LABEL[f.tipo]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm max-w-48 truncate" title={f.descricao}>
-                        {f.descricao}
-                      </TableCell>
-                      <TableCell className="text-sm">{f.orgaoOuFornecedor}</TableCell>
-                      <TableCell className="tabular-nums text-sm text-muted-foreground">
-                        {formatDate(f.dataReferencia)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-sm font-medium">
-                        {formatBRL(f.valorUnitario)}
-                      </TableCell>
-                      <TableCell className="text-center tabular-nums text-sm">
-                        {f.totalEvidencias}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          className={cn(
-                            "text-xs",
-                            f.status === "incluido"
-                              ? "bg-success text-success-foreground border-transparent"
-                              : "bg-muted text-muted-foreground border-transparent",
-                          )}
-                          title={f.motivoExclusao}
-                        >
-                          {f.status === "incluido" ? "Incluído" : "Excluído"}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        )}
+      <TabsContent value="validacao">
+        <EtapaValidacao cotacoes={cotacoes} />
       </TabsContent>
 
-      <TabsContent value="evidencias">
-        {evidencias.length === 0 ? (
-          <EmptyState
-            icon={FileText}
-            title="Nenhuma evidência registrada ainda"
-            description="Evidências com data/hora de acesso são anexadas às fontes e às capturas de sites deste processo."
-          />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {evidencias.map((e) => (
-              <EvidenciaPanel
-                key={e.id}
-                nomeArquivo={e.nomeArquivo}
-                dataHoraAcesso={e.dataHoraAcesso}
-                url={e.url}
-                observacoes={e.observacoes}
-              />
-            ))}
-          </div>
-        )}
-      </TabsContent>
-
-      <TabsContent value="serie">
-        {serie ? (
-          <TabelaSeriePrecos serie={serie} />
-        ) : (
-          <EmptyState
-            icon={FileText}
-            title="Nenhum preço registrado ainda"
-            description="A série de preços é consolidada a partir das fontes com evidência válida."
-          />
-        )}
+      <TabsContent value="consolidacao">
+        <EtapaConsolidacao processoId={processo.id} serie={serie} />
       </TabsContent>
     </Tabs>
   );
