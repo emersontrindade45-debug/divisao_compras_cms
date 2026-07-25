@@ -326,9 +326,18 @@ fornecedor/sites documentadas acima.
   correto.
 - [ ] Monitoramento de erro em produção (Sentry ou equivalente), complementando o `error.tsx`
   local que hoje só cobre a experiência do usuário, não a observabilidade da equipe.
-- [ ] Limpar `.env.example`: remover variáveis mortas (ex.: `RESEND_*`) e corrigir nomes que não
-  batem com o que o código lê de fato (ex.: variáveis `GOOGLE_SHEETS_*` documentadas com nomes
-  diferentes de `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY`, que é o que `googleAuth.ts` realmente usa).
+- [x] Limpar `.env.example` (2026-07-25). Removidas as **8 variáveis mortas** diagnosticadas
+  (`RESEND_API_KEY`, `RESEND_FROM`, `EMAIL_RESPONSAVEL`, `BLOB_READ_WRITE_TOKEN`,
+  `NEXT_PUBLIC_APP_URL`, `GOOGLE_SHEETS_PRIVATE_KEY`, `GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL`,
+  `GOOGLE_SHEETS_PLANILHA_MODELO_ID`). O arquivo agora bate 1:1 com as 9 variáveis lidas em
+  `src/`/`prisma.config.ts` mais as 2 de E2E, verificado por enumeração exaustiva de
+  `process.env.*` no repositório — não pela lista do diagnóstico anterior.
+  **Achado adicional:** `AGENTS.md` mandava configurar `NEXT_PUBLIC_APP_URL` e alertava que
+  `RESEND_API_KEY=""` quebrava o build via `src/lib/email/client.ts` — módulo e dependência
+  `resend` não existem mais (removidos com o §9.3), então o alerta descrevia um crash impossível
+  e pedia variável que ninguém lê. Corrigido no mesmo commit. Os `docs/superpowers/plans/*`
+  citam as variáveis antigas e foram **deixados como estão**: são registro histórico de
+  milestones concluídas, não instruções vigentes.
 - [x] Teste unitário para `src/lib/domain/alertas.ts` (único módulo de `lib/domain/` sem
   cobertura correspondente). **29 testes**, cobrindo as quatro categorias de alerta, as fronteiras
   de `diasRestantes` (-1/0/1/2), a ordenação por severidade e as strings exigidas pela IN 65/2021.
