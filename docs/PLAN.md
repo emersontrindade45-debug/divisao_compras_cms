@@ -305,11 +305,25 @@ fornecedor/sites documentadas acima.
   `@google/genai` (`package.json`) ficou órfã após a remoção — não foi removida aqui porque
   alterar `package.json` exige autorização explícita do usuário (CLAUDE.md §8); fica pendente
   de aprovação numa próxima iteração.
-- [ ] Integrar o fallback de fornecedores por camada geográfica (`buscarFornecedorPorCamada.ts`)
-  no pipeline de `pesquisaSimilaridade.ts` — ou descartar formalmente essa entrega do M10 com
-  justificativa registrada, se a decisão for não integrar.
-- [ ] Implementar a busca automática em sites da lista branca dentro do pipeline de similaridade
-  — ou descartar formalmente com justificativa, mesmo critério acima.
+- [x] **DESCARTADO** — Integrar o fallback de fornecedores por camada geográfica
+  (`buscarFornecedorPorCamada.ts`) no pipeline de `pesquisaSimilaridade.ts`.
+  **Justificativa (decisão de 2026-07-25):** a aba "Pesquisa por Similaridade" tem escopo
+  deliberado de **contratações públicas similares** — a fonte prioritária da IN 65/2021. Misturar
+  fornecedores diretos no mesmo pipeline confunde a hierarquia de fontes que o sistema existe para
+  orientar (CLAUDE.md §1) e enfraquece a rastreabilidade: cada fonte tem exigências probatórias
+  próprias (fornecedor direto exige ≥3 consultados e registro dos silentes). O módulo
+  `fornecedores/` e o fluxo de cotações já cobrem essa via, com as guardas de conformidade certas.
+  `buscarFornecedorPorCamada.ts` e `camadaGeografica.ts` **permanecem no código** — são testados e
+  seguem disponíveis para o módulo de fornecedores; não são código morto.
+- [x] **DESCARTADO** — Implementar a busca automática em sites da lista branca dentro do pipeline
+  de similaridade.
+  **Justificativa (decisão de 2026-07-25):** mesma razão acima, somada a um requisito de
+  conformidade incompatível com automação: evidência de site exige **captura de data/hora de
+  acesso** e arquivo armazenado (CLAUDE.md §1). Uma busca automática que só coleta preços produz
+  registro sem valor probatório, e gerar evidência sintética violaria a regra de que nenhum preço
+  entra na estimativa sem fonte+data+evidência real. O módulo `sites/` mantém a captura manual com
+  validação de lista branca/cinza/vermelha e bloqueio de marketplace, que é o comportamento
+  correto.
 - [ ] Monitoramento de erro em produção (Sentry ou equivalente), complementando o `error.tsx`
   local que hoje só cobre a experiência do usuário, não a observabilidade da equipe.
 - [ ] Limpar `.env.example`: remover variáveis mortas (ex.: `RESEND_*`) e corrigir nomes que não
