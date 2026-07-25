@@ -423,21 +423,36 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     agente e para revisor: ao afirmar que algo é necessário, dizer **qual experimento** confirma —
     mutação (quebrar a regra e ver o teste falhar), remoção (tirar o código e ver o que quebra) ou
     execução isolada. Teste que passa não prova que protege; só a mutação prova.
-36. **Antes de qualquer comando que reescreva `node_modules`, checar o privilégio de symlink —
-    neste PC ele falha e deixa o ambiente inutilizável.** `pnpm add`/`install` que aborta no meio
-    com `EACCES` remove os shims de `node_modules/.bin` (`vitest`, `next` sumiram), e a partir daí
-    **`pnpm test`, `pnpm build` e `pnpm typecheck` param de rodar** — ou seja, some justamente a
-    capacidade de verificar o trabalho já feito. Diagnóstico em um comando, **antes** de instalar:
-    `whoami /priv | Select-String SeCreateSymbolicLink`. Se não listar a linha, o token da sessão
-    não tem o privilégio (mesmo com Modo Dev = 1 no registro) e **só reiniciar o computador
-    resolve** — reabrir o editor não basta, e `pnpm install` de novo também não. Existe memória
-    do projeto sobre isso desde 2026-07-24; ela foi consultada só **depois** de o install quebrar,
-    o que é o erro a não repetir: memória de ambiente serve para prevenir, não para explicar o
-    estrago. Corolário: se o ambiente já estiver quebrado, **não commitar** trabalho pendente —
-    sem suíte executável não há verificação, e commitar assim é o erro da §9.23. Registrar o
+36. **`pnpm add`/`install` que aborta no meio deixa `node_modules` em cirurgia — a correção é
+    refazer a árvore, não reparar link por link.** O pnpm renomeia pacotes para
+    `node_modules/.ignored_<pkg>` durante o install e os restaura no fim; se o processo morre antes,
+    eles **ficam** lá e somem do topo. Foi assim que `vitest` e `next` desapareceram de
+    `node_modules/.bin` e `pnpm test`/`build`/`typecheck` pararam de rodar — some justamente a
+    capacidade de verificar o trabalho já feito. Rodar `pnpm install` de novo **não conserta**: ele
+    tropeça em reparse points órfãos (`mode la---`, 0 bytes, alvo inexistente), quase sempre
+    binários de outra plataforma (`lightningcss-linux-x64-gnu`, `@img/sharp-libvips-linux-x64`), e
+    remover um só revela o próximo. Correção: `Remove-Item node_modules -Recurse -Force` +
+    `pnpm install` + **`pnpm prisma generate`** (o client gerado vive em `node_modules`; sem ele
+    2 suítes falham com `Cannot find module '.prisma/client/default'`, o que parece bug de código
+    e não é). Seguro porque `node_modules` é gitignored e derivável do lockfile — confirmar com
+    `git ls-files node_modules` (0) antes. Corolário mantido: com o ambiente quebrado, **não
+    commitar** trabalho pendente — sem suíte executável não há verificação (§9.23); registrar o
     estado no `docs/PLAN.md` e parar.
-37. **Teste que passa pode estar passando pelo motivo errado — a mutação é que diz qual.** O teste
-    de rollback desta sessão (migrations) verificava que nada era confirmado quando o SQL falhava,
+37. **Testar a capacidade, não um proxy dela — `whoami /priv` dá falso negativo neste PC.**
+    A §9.36 mandava, antes de instalar, rodar
+    `whoami /priv | Select-String SeCreateSymbolicLink` e, se viesse vazio, **reiniciar o
+    computador**. O teste está errado e o remédio era desnecessário: a conta é administradora mas o
+    processo roda **sem elevação**, e o UAC marca `BUILTIN\Administradores` como *"Grupo usado
+    apenas para negar"* — como `SeCreateSymbolicLink` é concedido por esse grupo, ele **nunca**
+    aparece no token, por mais reboots que se dê (em 2026-07-25 a máquina foi reiniciada e o output
+    seguiu vazio). Enquanto isso symlinks funcionavam normalmente, porque o **Modo de
+    Desenvolvedor** os libera pela flag `SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE`, que não
+    passa pelo privilégio. Diagnóstico correto é criar um symlink de teste em `$env:TEMP` e ver se
+    dá certo. Regra geral: quando existir uma forma de **exercitar** a capacidade, exercitá-la — um
+    indicador indireto pode estar ausente com o sistema perfeitamente saudável, e tratar isso como
+    falha custa um reboot e uma sessão inteira de diagnóstico na direção errada.
+38. **Teste que passa pode estar passando pelo motivo errado — a mutação é que diz qual.** O teste
+    de rollback das migrations (2026-07-25) verificava que nada era confirmado quando o SQL falhava,
     e passava; mas a falha era programada no **primeiro** comando da transação, então não havia
     nada encenado para vazar — desativar o ROLLBACK inteiro não quebrava o teste. Só um caso que
     falha em um comando **posterior** (o `INSERT`, com o DDL já executado) exercita de fato a

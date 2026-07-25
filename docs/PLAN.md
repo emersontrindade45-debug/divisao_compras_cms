@@ -364,24 +364,25 @@ fornecedor/sites documentadas acima.
 
 ### Próximos passos (retomar por aqui)
 
-> **ESTADO EM 2026-07-25 (fim da sessão) — LER PRIMEIRO.**
+> **ESTADO EM 2026-07-25 (sessão da noite) — ambiente RESTAURADO, migrations COMMITADAS.**
 >
-> **Antes de qualquer comando: o ambiente local está quebrado e exige REINICIAR O COMPUTADOR.**
-> Um `pnpm add @sentry/nextjs` falhou com `EACCES` no meio e deixou `node_modules` inconsistente:
-> os shims de `vitest` e `next` sumiram de `node_modules/.bin`, então **`pnpm test`, `pnpm build` e
-> `pnpm typecheck` não rodam**. Causa: Modo Dev está ativo no registro, mas o privilégio
-> `SeCreateSymbolicLink` não está no token da sessão (`whoami /priv` não lista). Reabrir o editor
-> **não basta** — só reiniciar a máquina. Depois do reboot, rodar `pnpm install` para recriar os
-> shims e confirmar com `ls node_modules/.bin | grep vitest`.
-> `package.json` e `pnpm-lock.yaml` estão **intactos** (verificado com `git status`) — nenhuma
-> dependência foi alterada, `@sentry/nextjs` **não** chegou a ser instalado.
+> **O ambiente local voltou a funcionar** — sem reboot e sem elevação. O aviso anterior aqui
+> prescrevia "reiniciar o computador" com base num diagnóstico errado: `whoami /priv` **nunca** vai
+> listar `SeCreateSymbolicLink` neste PC (conta admin + processo não elevado ⇒ UAC marca
+> `BUILTIN\Administradores` como "usado apenas para negar"), embora symlinks funcionem normalmente
+> via Modo de Desenvolvedor. A máquina chegou a ser reiniciada e o output seguiu vazio.
+> Causa real do `EACCES`: o `pnpm add @sentry/nextjs` abortado deixou 30 pacotes em
+> `node_modules/.ignored_*` (entre eles `next` e `vitest`) e reparse points órfãos apontando para
+> binários de Linux. Corrigido com `Remove-Item node_modules -Recurse -Force` + `pnpm install` +
+> `pnpm prisma generate`. Lições reescritas: **§9.36** (rebuild da árvore) e **§9.37** (testar a
+> capacidade, não o proxy).
 >
-> **Trabalho não commitado no working tree** (rota `/api/admin/migrate` reescrita, item 3 abaixo):
-> `src/lib/migrations/aplicar.ts` (novo), `src/lib/migrations/__tests__/aplicar.test.ts` (novo, 18
-> testes), `src/app/api/admin/migrate/route.ts` (reescrito) e `next.config.ts` (globs removidos).
-> Não foi commitado de propósito: a suíte não pôde ser executada depois da quebra do ambiente, e
-> commitar sem verificação seria o erro da §9.23. **Primeira ação após o `pnpm install`:** rodar
-> `pnpm test`, `pnpm lint`, `pnpm typecheck` e `pnpm build`; se passarem, commitar.
+> **Verificação completa executada e verde:** `pnpm test` (44 suítes, **255 testes**),
+> `pnpm lint` (0 erros — 2 warnings pré-existentes, alheios a estes arquivos), `pnpm typecheck`
+> (limpo) e `pnpm build` (compila e gera as 15 páginas estáticas).
+>
+> **Rota `/api/admin/migrate` commitada em `736dd06`** (local, **sem push**). `package.json` e
+> `pnpm-lock.yaml` seguem intactos — `@sentry/nextjs` **não** foi instalado.
 
 1. **Limpar `.env.example`** — diagnóstico já feito em 2026-07-25. São **8 variáveis documentadas
    que o código nunca lê**: `RESEND_API_KEY`, `RESEND_FROM`, `EMAIL_RESPONSAVEL` (órfãs da remoção
@@ -397,8 +398,10 @@ fornecedor/sites documentadas acima.
    pedia variável morta e descrevia um crash impossível. Corrigido.
 2. **Monitoramento de erro em produção — Sentry.** **Dependência `@sentry/nextjs` AUTORIZADA pelo
    usuário em 2026-07-25** (§8 satisfeito; não precisa perguntar de novo). Escolha explícita:
-   Sentry oficial, e não logger caseiro. **Ainda não instalado** — o `pnpm add` falhou por causa
-   da quebra de ambiente descrita no aviso acima. Desenho combinado: `instrumentation.ts` +
+   Sentry oficial, e não logger caseiro. **Ainda não instalado** — o `pnpm add` falhou na sessão
+   anterior e derrubou o ambiente; **o ambiente já foi restaurado**, então o `pnpm add
+   @sentry/nextjs` pode ser retomado normalmente (é a próxima ação desta pendência).
+   Desenho combinado: `instrumentation.ts` +
    `instrumentation-client.ts`, passar o `error` hoje ignorado em `src/app/error.tsx` (que recebe
    só `reset`) e em `src/app/(app)/processos/error.tsx`, e **ficar inerte sem `SENTRY_DSN`** — sem
    DSN não pode quebrar build nem runtime. Documentar `SENTRY_DSN` no `.env.example`.
@@ -406,9 +409,9 @@ fornecedor/sites documentadas acima.
 
 ### Fora do M11 — pendências abertas em 2026-07-25
 
-- **Rota `/api/admin/migrate` — reescrita em 2026-07-25, NÃO COMMITADA, NÃO VERIFICADA.**
-  A correção acordada (SQL via `pg`, sem CLI empacotado) **está escrita** no working tree; o que
-  falta é rodar a suíte e commitar — ver o aviso no topo de "Próximos passos".
+- **Rota `/api/admin/migrate` — reescrita, VERIFICADA e COMMITADA (`736dd06`, local, sem push).**
+  A correção acordada (SQL via `pg`, sem CLI empacotado) passou por `pnpm test`/`lint`/`typecheck`/
+  `build`, todos verdes, e foi commitada em 2026-07-25.
   Arquivos: `src/lib/migrations/aplicar.ts` (lógica pura), `.../\_\_tests\_\_/aplicar.test.ts`
   (18 testes), `src/app/api/admin/migrate/route.ts` (reescrito), `next.config.ts`.
   Decisões tomadas: **uma transação por migration** (escolha do usuário — mesmo comportamento de
