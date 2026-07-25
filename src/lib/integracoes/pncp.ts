@@ -13,6 +13,26 @@ const MAX_TENTATIVAS = 3;
 const BACKOFF_BASE_MS = 1000;
 const LOTE_BUSCA_ITENS = 5;
 
+// CNPJ da Câmara Municipal de Santos. Um contrato do próprio órgão não pode servir de
+// referência de preço para sua própria renovação/prorrogação (IN 65/2021), então ele é
+// excluído das buscas de similaridade. O fallback é intencional e não deve virar erro:
+// a regra de conformidade precisa valer mesmo sem ORGAO_CNPJ definido no ambiente.
+const CNPJ_ORGAO_PADRAO = "49203409000102";
+
+/** Remove máscara (pontos, barra, hífen) para comparar CNPJs vindos de formatos diferentes. */
+function normalizarCnpj(cnpj: string | null | undefined): string {
+  return (cnpj ?? "").replace(/\D/g, "");
+}
+
+function cnpjOrgaoProprio(): string {
+  return normalizarCnpj(process.env.ORGAO_CNPJ) || CNPJ_ORGAO_PADRAO;
+}
+
+/** Monta a URL do edital no portal PNCP: /app/editais/{cnpj}/{ano}/{sequencial}. */
+function montarUrlEdital(processo: PNCPSearchItem): string {
+  return `https://pncp.gov.br/app/editais/${processo.orgao_cnpj}/${processo.ano}/${processo.numero_sequencial}`;
+}
+
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -77,7 +97,12 @@ async function buscarPorTexto(termo: string): Promise<PNCPSearchItem[]> {
   }
 
   const body = (await res.json()) as { items?: PNCPSearchItem[] };
-  return body.items ?? [];
+  const itens = body.items ?? [];
+
+  // Exclusão do próprio órgão aplicada aqui (e não no chamador) para que qualquer
+  // consumidor futuro da busca textual herde a regra automaticamente.
+  const proprio = cnpjOrgaoProprio();
+  return itens.filter((item) => normalizarCnpj(item.orgao_cnpj) !== proprio);
 }
 
 async function buscarItensDaCompra(processo: PNCPSearchItem): Promise<CandidatoSimilaridade[]> {
@@ -97,7 +122,7 @@ async function buscarItensDaCompra(processo: PNCPSearchItem): Promise<CandidatoS
         tipoCandidato: "contratacao_publica" as const,
         fonteDescricao: item.descricao,
         fonteOrgaoOuId: processo.orgao_nome,
-        fonteUrl: `https://pncp.gov.br/app/editais/${processo.numero_controle_pncp}`,
+        fonteUrl: montarUrlEdital(processo),
         valorUnitario: item.valorUnitarioEstimado,
         dataReferencia: new Date(item.dataAtualizacao),
         unidade: item.unidadeMedida,

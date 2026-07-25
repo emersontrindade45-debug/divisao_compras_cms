@@ -198,3 +198,95 @@ describe("buscarContratosPNCP", () => {
     expect(resultado).toEqual([]);
   });
 });
+
+// Testes de conformidade (CLAUDE.md §9.8 e §9.9). Devem falhar se as regras forem removidas.
+describe("conformidade da evidência PNCP", () => {
+  const CNPJ_PROPRIO = "49203409000102";
+
+  function processoDe(orgaoCnpj: string, nome = "Órgão Externo") {
+    return {
+      numero_controle_pncp: "12345678000199-1-000123/2026",
+      orgao_nome: nome,
+      orgao_cnpj: orgaoCnpj,
+      ano: "2026",
+      numero_sequencial: "123",
+    };
+  }
+
+  const itemPadrao = {
+    descricao: "Cadeira de escritório",
+    valorUnitarioEstimado: 250.5,
+    quantidade: 50,
+    unidadeMedida: "unidade",
+    dataAtualizacao: "2026-01-10T00:00:00Z",
+  };
+
+  function mockPncp(processos: unknown[]) {
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/api/search/")) return mockBusca(processos);
+      if (url.includes("/itens")) return mockItens([itemPadrao]);
+      throw new Error(`URL inesperada: ${url}`);
+    });
+  }
+
+  it("gera a URL do edital no formato /app/editais/{cnpj}/{ano}/{sequencial}", async () => {
+    mockPncp([processoDe("12345678000199")]);
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    // Formato exato: o portal PNCP retorna erro para /app/editais/{numero_controle_pncp},
+    // e link inválido invalida a evidência para instrução processual.
+    expect(resultado[0]?.fonteUrl).toBe("https://pncp.gov.br/app/editais/12345678000199/2026/123");
+  });
+
+  it("exclui contratações do próprio órgão dos candidatos de similaridade", async () => {
+    mockPncp([processoDe(CNPJ_PROPRIO, "Câmara Municipal de Santos")]);
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toEqual([]);
+  });
+
+  it("exclui o próprio órgão mesmo quando a API devolve o CNPJ com máscara", async () => {
+    mockPncp([processoDe("49.203.409/0001-02", "Câmara Municipal de Santos")]);
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toEqual([]);
+  });
+
+  it("respeita ORGAO_CNPJ do ambiente, com ou sem máscara", async () => {
+    vi.stubEnv("ORGAO_CNPJ", "12.345.678/0001-99");
+    mockPncp([processoDe("12345678000199")]);
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toEqual([]);
+    vi.unstubAllEnvs();
+  });
+
+  it("mantém contratações de outros órgãos no resultado", async () => {
+    mockPncp([processoDe("12345678000199", "Prefeitura de Outra Cidade")]);
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0]).toMatchObject({
+      fonteOrgaoOuId: "Prefeitura de Outra Cidade",
+      valorUnitario: 250.5,
+    });
+  });
+
+  it("filtra apenas o próprio órgão quando o resultado mistura órgãos", async () => {
+    mockPncp([
+      processoDe("12345678000199", "Prefeitura A"),
+      processoDe(CNPJ_PROPRIO, "Câmara Municipal de Santos"),
+      processoDe("98765432000188", "Prefeitura B"),
+    ]);
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado.map((c) => c.fonteOrgaoOuId)).toEqual(["Prefeitura A", "Prefeitura B"]);
+  });
+});
