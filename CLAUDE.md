@@ -288,3 +288,24 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     ferramentas. Cada ferramenta precisa do ignore próprio (vitest e eslint são configs separados);
     ao ver erro apontando para um caminho sob `.claude/worktrees/`, adicionar o ignore em vez de
     investigar o código.
+18. **Globs de `outputFileTracingIncludes` apontam para `node_modules/.pnpm/`, não para
+    `node_modules/<pkg>`, quando a dependência é transitiva.** O pnpm só cria symlink no topo para
+    dependências diretas do projeto; transitivas ficam isoladas no store. `@prisma/engines` é
+    dependência do pacote `prisma` (não do `package.json` daqui), então
+    `./node_modules/@prisma/engines/**` **não casa com nada** — o glob falha em silêncio, o build
+    passa e a função serverless quebra só em runtime com `Cannot find module '@prisma/engines'`.
+    Antes de confiar num glob de tracing, rodar `ls` no caminho exato: se não existir localmente,
+    não vai existir no bundle. Usar `./node_modules/.pnpm/@prisma+engines@*/node_modules/...`.
+19. **Migration nova só está "pronta" depois de aplicada em produção, não depois do merge.**
+    Código e migration sobem em tempos diferentes: o deploy leva o código, mas o banco só muda por
+    ação explícita (`/api/admin/migrate` ou `migrate deploy` — ver itens 7 e 14). Um schema com
+    coluna nova em produção sem a migration aplicada quebra a gravação em runtime, silenciosamente,
+    até alguém exercitar o fluxo. Ao terminar uma tarefa que inclui migration, rodar
+    `migrate status` contra produção e confirmar `Database schema is up to date!` antes de dar a
+    entrega por concluída.
+20. **Credencial de produção nunca entra em arquivo versionado, nem "só para testar".**
+    `prisma.config.ts` e `.env.example` vão para o git — o valor real mora só no `.env` (coberto
+    por `.gitignore`) e no painel da Vercel. `process.env["NOME_DA_VAR"]` recebe o **nome** da
+    variável, nunca a connection string. Se uma senha chegar a um arquivo rastreado, removê-la não
+    basta: verificar `git log --all -S "<segredo>"` e rotacionar a credencial se houver qualquer
+    commit.
