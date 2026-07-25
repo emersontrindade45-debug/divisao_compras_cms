@@ -343,6 +343,25 @@ fornecedor/sites documentadas acima.
   `"CV de 42.6%"` em UI pt-BR, onde o esperado seria `42,6%`. Dois testes fixam o formato atual;
   corrigir para `toLocaleString("pt-BR")` fará ambos falharem, sinalizando o ponto a atualizar.
 
+- [x] **Regressão descoberta em 2026-07-25 e corrigida no mesmo dia:** as lições §9.8 (formato da
+  URL de evidência do PNCP) e §9.9 (excluir o CNPJ do próprio órgão das buscas de similaridade)
+  estavam **documentadas no CLAUDE.md mas nunca implementadas na `main`** — ficaram no commit
+  `d781a16` (PR #9, branch do Cursor Agent), que foi deployado como preview e nunca mesclado.
+  Em produção: toda evidência de contratação similar apontava para link inválido, e em processos
+  de prorrogação o contrato sendo renovado podia servir de referência de preço para si mesmo.
+  Reimplementadas na `main` atual (o commit órfão não era mesclável — trazia de volta o
+  `GeminiProvider` removido no M11). URL validada abrindo o link real no portal, conforme a §9.8
+  exige; CNPJ `49203409000102` confirmado como o da Câmara Municipal de Santos.
+
+### Pendências conhecidas (não bloqueantes)
+
+- **Formatação do CV em pt-BR:** `alertas.ts` usa `toFixed(1)`, gerando `"CV de 42.6%"` onde a UI
+  pt-BR esperaria `42,6%`. Dois testes fixam o formato atual e sinalizarão o ponto exato quando
+  for corrigido para `toLocaleString("pt-BR")`.
+- **Worktrees não herdam `.env`** (é gitignored), então `pnpm build` falha neles em "collecting
+  page data" com `DATABASE_URL environment variable is not set`. Contornável com variável dummy
+  inline; vale decidir se o build deve ser resiliente a isso ou se basta documentar.
+
 ### Critério de aceite
 Cada ressalva do M10 está ou implementada ou formalmente descartada (com justificativa registrada
 neste arquivo); `.env.example` bate 1:1 com as variáveis lidas em `src/`; erros em produção geram
