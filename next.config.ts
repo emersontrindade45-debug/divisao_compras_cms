@@ -21,4 +21,17 @@ const nextConfig: NextConfig = {
   },
 };
 
+// `withSentryConfig` NÃO é usado aqui, e isso é deliberado.
+//
+// O wrapper serve a upload de source maps e criação de releases — não à captura
+// de erros, que funciona apenas com `src/instrumentation.ts`. Em troca, ele exige
+// `SENTRY_AUTH_TOKEN` e os slugs de org/projeto no build, que ainda não existem
+// (o projeto no Sentry é ação pendente do usuário). Adicioná-lo agora acoplaria o
+// build da Vercel a credenciais ausentes, contrariando o requisito de que a
+// integração seja inerte sem configuração.
+//
+// Consequência aceita: stack traces de erro de client virão minificadas até que
+// alguém configure o token. Erros de servidor (o caso crítico aqui) não dependem
+// de source map. Ao criar o projeto no Sentry, avaliar envolver o config com
+// `withSentryConfig` para ganhar as stack traces legíveis.
 export default nextConfig;
