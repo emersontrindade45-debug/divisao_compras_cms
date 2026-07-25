@@ -1,9 +1,16 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { buscarContratosPNCP } from "../pncp";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { buscarContratosPNCP, __resetAvisoFallbackCnpj } from "../pncp";
+
+beforeEach(() => {
+  // A flag do aviso é estado de módulo e vaza entre testes se não for zerada:
+  // um caso que já disparou o warn faria o seguinte passar em falso.
+  __resetAvisoFallbackCnpj();
+});
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 function mockBusca(items: unknown[]) {
@@ -276,6 +283,44 @@ describe("conformidade da evidência PNCP", () => {
       fonteOrgaoOuId: "Prefeitura de Outra Cidade",
       valorUnitario: 250.5,
     });
+  });
+
+  it("avisa uma única vez quando cai no CNPJ padrão por falta de ORGAO_CNPJ", async () => {
+    // Módulo recarregado do zero: a flag de aviso deste caso não depende de nada
+    // que os testes anteriores tenham disparado.
+    vi.resetModules();
+    vi.stubEnv("ORGAO_CNPJ", "");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockPncp([processoDe("12345678000199", "Prefeitura A")]);
+
+    const { buscarContratosPNCP: buscar } = await import("../pncp");
+    await buscar("cadeira");
+    await buscar("mesa");
+    await buscar("armário");
+
+    const avisos = warnSpy.mock.calls.filter((args) => String(args[0]).includes("ORGAO_CNPJ"));
+    expect(avisos).toHaveLength(1);
+
+    // O log precisa explicar a consequência, não só a variável faltando.
+    const mensagem = String(avisos[0]?.[0]);
+    expect(mensagem).toContain(CNPJ_PROPRIO);
+    expect(mensagem).toContain("IN 65/2021");
+  });
+
+  it("não avisa quando ORGAO_CNPJ está definida", async () => {
+    vi.resetModules();
+    vi.stubEnv("ORGAO_CNPJ", "12.345.678/0001-99");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockPncp([processoDe("12345678000199", "Prefeitura A")]);
+
+    const { buscarContratosPNCP: buscar } = await import("../pncp");
+    const resultado = await buscar("cadeira");
+
+    // Confirma que o caminho do fallback realmente não foi tomado: o CNPJ do
+    // ambiente é o que filtra, e nenhum aviso foi emitido.
+    expect(resultado).toEqual([]);
+    const avisos = warnSpy.mock.calls.filter((args) => String(args[0]).includes("ORGAO_CNPJ"));
+    expect(avisos).toHaveLength(0);
   });
 
   it("filtra apenas o próprio órgão quando o resultado mistura órgãos", async () => {

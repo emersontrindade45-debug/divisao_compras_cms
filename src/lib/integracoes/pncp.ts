@@ -19,13 +19,35 @@ const LOTE_BUSCA_ITENS = 5;
 // a regra de conformidade precisa valer mesmo sem ORGAO_CNPJ definido no ambiente.
 const CNPJ_ORGAO_PADRAO = "49203409000102";
 
+// Flag de módulo: o aviso do fallback sai uma única vez por processo. cnpjOrgaoProprio()
+// é chamada a cada busca (uma por item da cotação), e repetir o alerta afogaria o log.
+let avisoFallbackCnpjEmitido = false;
+
 /** Remove máscara (pontos, barra, hífen) para comparar CNPJs vindos de formatos diferentes. */
 function normalizarCnpj(cnpj: string | null | undefined): string {
   return (cnpj ?? "").replace(/\D/g, "");
 }
 
 function cnpjOrgaoProprio(): string {
-  return normalizarCnpj(process.env.ORGAO_CNPJ) || CNPJ_ORGAO_PADRAO;
+  const configurado = normalizarCnpj(process.env.ORGAO_CNPJ);
+  if (configurado) return configurado;
+
+  if (!avisoFallbackCnpjEmitido) {
+    avisoFallbackCnpjEmitido = true;
+    console.warn(
+      `[PNCP] ORGAO_CNPJ não está definida no ambiente. Usando o CNPJ padrão ${CNPJ_ORGAO_PADRAO} ` +
+        "(Câmara Municipal de Santos) para excluir contratações do próprio órgão das buscas de " +
+        "similaridade, conforme a IN 65/2021. Se esta instalação pertence a outro órgão, os " +
+        "contratos DELE continuarão aparecendo como candidatos de preço — defina ORGAO_CNPJ para " +
+        "corrigir a exclusão.",
+    );
+  }
+  return CNPJ_ORGAO_PADRAO;
+}
+
+/** Reseta a flag do aviso de fallback. Uso exclusivo em testes, para isolar os casos. */
+export function __resetAvisoFallbackCnpj(): void {
+  avisoFallbackCnpjEmitido = false;
 }
 
 /** Monta a URL do edital no portal PNCP: /app/editais/{cnpj}/{ano}/{sequencial}. */
