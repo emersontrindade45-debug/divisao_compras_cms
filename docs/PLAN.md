@@ -399,6 +399,21 @@ fornecedor/sites documentadas acima.
 > o ambiente rodou sem incidente depois do rebuild, confirmando que a árvore estava sã. Com isso o
 > **M11 fica com todas as entregas fechadas**; resta apenas ação do usuário (criar o projeto no
 > Sentry e definir os DSNs na Vercel).
+>
+> **BLOQUEIO ATIVO PARA O PUSH (2026-07-25, ~20h30): o build não passa.**
+> `pnpm build` falha em `src/app/(app)/processos/[id]/page.tsx:134`: `ProcessoTabs` passou a exigir
+> a prop `conformidade` (`ConformidadeProcesso`), e nem a página nem
+> `src/components/processos/__tests__/ProcessoTabs.test.tsx` a passam. É trabalho **em andamento do
+> usuário** — ligação do agregador de conformidade (`b607853`) à UI, junto com os componentes ainda
+> não rastreados `ProcessoStepper.tsx`, `EtapaPesquisa.tsx`, `EtapaValidacao.tsx` e
+> `EtapaConsolidacao.tsx`. **Não corrigir por conta:** de onde a `conformidade` deve vir na página
+> é decisão de desenho, não erro mecânico.
+> Enquanto isso não fechar, **não há push** — subir com o build quebrado derrubaria a produção, que
+> hoje está saudável.
+>
+> Já corrigido nesta sessão (`73b35ce` + commits do usuário): `PageHeader` usado sem import em 6
+> páginas e imports fora do topo em `CapturaForm.tsx` (usava `cn()` em escopo de módulo — o
+> Turbopack não resolve nessa ordem, embora o `tsc` aceite por hoisting).
 
 1. **Limpar `.env.example`** — diagnóstico já feito em 2026-07-25. São **8 variáveis documentadas
    que o código nunca lê**: `RESEND_API_KEY`, `RESEND_FROM`, `EMAIL_RESPONSAVEL` (órfãs da remoção
@@ -427,6 +442,24 @@ fornecedor/sites documentadas acima.
 - **Rota `/api/admin/migrate` — reescrita, VERIFICADA e COMMITADA (`736dd06`, local, sem push).**
   A correção acordada (SQL via `pg`, sem CLI empacotado) passou por `pnpm test`/`lint`/`typecheck`/
   `build`, todos verdes, e foi commitada em 2026-07-25.
+
+  > **CAUSA RAIZ do item 3 (investigada em 2026-07-25, noite): produção está defasada.**
+  > O deploy de produção é o commit `5250baa`; a rota nova nunca chegou lá. Verificado lendo o
+  > código publicado (`git show 5250baa:src/app/api/admin/migrate/route.ts`): ainda é a versão do
+  > CLI, com `spawnSync`/`NODE_PATH`/`existsSync`. **Rodar o `GET` contra produção hoje testaria a
+  > implementação antiga** e não responderia à pergunta do item 3 (validar o formato de
+  > `_prisma_migrations` da implementação nova). A ordem correta é: push → deploy → só então o
+  > `GET`. O 401 que a rota retorna hoje **não** distingue "segredo ausente" de "header errado" —
+  > é fail-closed nos dois casos —, então não serve para inferir se `ADMIN_MIGRATE_SECRET` existe.
+  >
+  > **Correção de diagnóstico:** os erros `P1001`/`P1000` de banco vistos no `get_runtime_errors`
+  > são **históricos**, de 10:50–11:00 UTC, atribuídos a `dpl_FP6ht` (deploy de 10:57). O deploy
+  > atual é de 17:15 UTC — mais de 6h depois — e não registrou nenhum erro. Antes de mais nada eu
+  > os havia apresentado como estado atual; estava errado.
+  > **O banco de produção está funcionando**, e a prova não é "deu 200" (§9.30): nas últimas 6h a
+  > produção serviu `/dashboard`, `/processos`, `/cotacoes`, `/fornecedores` e — decisivo — páginas
+  > de detalhe com CUIDs reais (`/processos/cmqfcgkj7000004l8xx75eqyf`), que só renderizam se o
+  > registro veio do Postgres. Agrupar logs por `requestPath` é o que torna essa distinção visível.
   Arquivos: `src/lib/migrations/aplicar.ts` (lógica pura), `.../\_\_tests\_\_/aplicar.test.ts`
   (18 testes), `src/app/api/admin/migrate/route.ts` (reescrito), `next.config.ts`.
   Decisões tomadas: **uma transação por migration** (escolha do usuário — mesmo comportamento de
