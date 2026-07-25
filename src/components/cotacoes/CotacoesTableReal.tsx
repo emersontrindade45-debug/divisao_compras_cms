@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, Eye } from "lucide-react";
+import { BellRing } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table/DataTable";
-import { Button } from "@/components/ui/button";
 import { StatusCotacaoBadge } from "./StatusCotacaoBadge";
 import { formatBRL } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -104,23 +103,27 @@ const columns: ColumnDef<CotacaoRow>[] = [
       ),
   },
   {
-    id: "acoes",
-    header: "",
-    cell: ({ row }) => (
-      <div className="flex items-center gap-1">
-        {(row.original.status === "silenciosa" || row.original.status === "incompleta") &&
-          !row.original.lembreteEnviado && (
-            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
-              <Bell className="size-3" />
-              Lembrar
-            </Button>
-          )}
-        <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
-          <Eye className="size-3" />
-          Ver
-        </Button>
-      </div>
-    ),
+    id: "lembrete",
+    header: "Lembrete",
+    // Informativo, não acionável: o envio de e-mail é feito pela Câmara fora do
+    // sistema (CLAUDE.md §9.3) — a plataforma apenas registra o que ocorreu.
+    cell: ({ row }) => {
+      const aguardando =
+        row.original.status === "silenciosa" || row.original.status === "incompleta";
+      if (row.original.lembreteEnviado) {
+        return (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <BellRing className="size-3 text-success" aria-hidden />
+            Enviado
+          </span>
+        );
+      }
+      return (
+        <span className="text-xs text-muted-foreground">
+          {aguardando ? "Pendente" : "—"}
+        </span>
+      );
+    },
   },
 ];
 

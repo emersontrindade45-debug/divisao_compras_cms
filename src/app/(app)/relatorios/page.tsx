@@ -17,9 +17,6 @@ export default async function RelatoriosPage() {
     return !serie || Number(serie.valorEstimado) === 0;
   });
 
-  const primeiroComSerie = processosComSerie[0];
-  const seriePrimeiro = primeiroComSerie?.itens[0]?.seriePrecos[0];
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -67,38 +64,47 @@ export default async function RelatoriosPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="memoria">
-          {primeiroComSerie && seriePrimeiro ? (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Exibindo memória de cálculo do processo mais recente com série consolidada.
-                Use os botões de exportação para baixar o PDF.
-              </p>
-              <div className="rounded-md border bg-muted/30 p-6 text-center space-y-3">
-                <p className="font-medium">{primeiroComSerie.numero}</p>
-                <p className="text-sm text-muted-foreground">{primeiroComSerie.objeto}</p>
-                <div className="flex justify-center gap-2">
-                  <a
-                    href={`/api/relatorios/${primeiroComSerie.id}/pdf`}
-                    download
-                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted transition-colors"
-                  >
-                    <FileText className="size-3.5" />
-                    Baixar PDF
-                  </a>
-                  <a
-                    href={`/api/relatorios/${primeiroComSerie.id}/xlsx`}
-                    download
-                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted transition-colors"
-                  >
-                    <FileText className="size-3.5" />
-                    Baixar Excel
-                  </a>
-                </div>
-              </div>
-            </div>
+        <TabsContent value="memoria" className="space-y-3">
+          {processosComSerie.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nenhum processo com série consolidada.
+            </p>
           ) : (
-            <p className="text-sm text-muted-foreground">Nenhum processo com série consolidada.</p>
+            <>
+              <p className="text-sm text-muted-foreground">
+                Memória de cálculo e série de preços de cada processo consolidado, prontas
+                para instrução processual.
+              </p>
+              {processosComSerie.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium tabular-nums">{p.numero}</p>
+                    <p className="truncate text-sm text-muted-foreground">{p.objeto}</p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <a
+                      href={`/api/relatorios/${p.id}/pdf`}
+                      download
+                      className="inline-flex items-center gap-1.5 rounded-md border bg-background px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+                    >
+                      <FileText className="size-3.5" />
+                      PDF
+                    </a>
+                    <a
+                      href={`/api/relatorios/${p.id}/xlsx`}
+                      download
+                      className="inline-flex items-center gap-1.5 rounded-md border bg-background px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+                    >
+                      <FileText className="size-3.5" />
+                      Excel
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </>
           )}
         </TabsContent>
       </Tabs>

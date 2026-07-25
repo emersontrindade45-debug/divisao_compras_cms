@@ -1,10 +1,11 @@
-import { CheckCircle2, Circle } from "lucide-react";
+import { PageHeader } from "@/components/common/PageHeader";
 import { requireAuth } from "@/lib/auth/rbac";
 
 const ETAPAS = [
   {
     titulo: "Abra o processo no sistema",
-    descricao: "Acesse Processos → Novo processo e preencha os dados do objeto a ser pesquisado.",
+    descricao:
+      "O cadastro do objeto é feito na planilha padrão da Divisão. Em Processos, sincronize a planilha para trazer os itens a cotar.",
   },
   {
     titulo: "Consulte contratações públicas similares",
@@ -19,7 +20,7 @@ const ETAPAS = [
   {
     titulo: "Consulte fornecedores diretamente",
     descricao:
-      "Envie cotação a pelo menos 3 fornecedores. Registre os que não responderam.",
+      "Envie o pedido de cotação a pelo menos 3 fornecedores pelo e-mail da Divisão e registre cada consulta aqui, incluindo os que não responderam.",
   },
   {
     titulo: "Valide as propostas recebidas",
@@ -45,27 +46,21 @@ export default async function OnboardingPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="space-y-1">
-        <h1 className="text-lg font-semibold">Fluxo correto de pesquisa de preços</h1>
-        <p className="text-sm text-muted-foreground">
-          Siga estas etapas na ordem para garantir conformidade com a IN SEGES/ME 65/2021.
-        </p>
-      </div>
+      <PageHeader
+        title="Fluxo correto de pesquisa de preços"
+        description="Siga estas etapas na ordem para garantir conformidade com a IN SEGES/ME 65/2021."
+      />
 
+      {/* Guia de referência, não checklist de progresso: o andamento real de cada
+          processo vive no painel de conformidade do respectivo detalhe. */}
       <ol className="space-y-4">
         {ETAPAS.map((etapa, idx) => (
           <li key={idx} className="flex gap-4 rounded-lg border p-4">
-            <span className="mt-0.5 shrink-0">
-              {idx < 2 ? (
-                <CheckCircle2 className="size-5 text-green-600 dark:text-green-500" />
-              ) : (
-                <Circle className="size-5 text-zinc-400" />
-              )}
+            <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold tabular-nums text-muted-foreground">
+              {idx + 1}
             </span>
             <div className="space-y-0.5">
-              <p className="font-medium text-sm">
-                {idx + 1}. {etapa.titulo}
-              </p>
+              <p className="text-sm font-medium">{etapa.titulo}</p>
               <p className="text-sm text-muted-foreground">{etapa.descricao}</p>
             </div>
           </li>
