@@ -353,6 +353,36 @@ fornecedor/sites documentadas acima.
   `GeminiProvider` removido no M11). URL validada abrindo o link real no portal, conforme a §9.8
   exige; CNPJ `49203409000102` confirmado como o da Câmara Municipal de Santos.
 
+### Próximos passos (retomar por aqui)
+
+1. **Limpar `.env.example`** — diagnóstico já feito em 2026-07-25. São **8 variáveis documentadas
+   que o código nunca lê**: `RESEND_API_KEY`, `RESEND_FROM`, `EMAIL_RESPONSAVEL` (órfãs da remoção
+   do módulo de e-mail — ver §9.3), `BLOB_READ_WRITE_TOKEN`, `NEXT_PUBLIC_APP_URL`,
+   `GOOGLE_SHEETS_PRIVATE_KEY`, `GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL` e
+   `GOOGLE_SHEETS_PLANILHA_MODELO_ID`. Manter `E2E_EMAIL`/`E2E_PASSWORD` — são usadas em
+   `e2e/auth.setup.ts`, fora de `src/`. As lidas de fato são: `ADMIN_MIGRATE_SECRET`,
+   `AUTH_SECRET`, `CRON_SECRET`, `DATABASE_URL`, `DIRECT_URL`,
+   `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY`, `NEXT_PUBLIC_SHEETS_URL`, `OPENAI_API_KEY` e `ORGAO_CNPJ`.
+2. **Monitoramento de erro em produção (Sentry ou equivalente)** — exige instalar dependência,
+   o que precisa de autorização explícita do usuário (CLAUDE.md §8).
+
+### Fora do M11 — pendências abertas em 2026-07-25
+
+- **Rota `/api/admin/migrate` continua quebrada** com `Cannot find module 'effect'` (dependência
+  transitiva de `@prisma/config` que ficou fora do bundle). Três ciclos de correção de tracing
+  falharam — ver §9.18, §9.26, §9.28 e §9.29. **Não tentar uma quarta variação de glob.** O plano
+  acordado é executar o SQL das migrations via `pg`: ler `prisma/migrations/*/migration.sql`,
+  comparar com a tabela `_prisma_migrations` e aplicar o pendente em transação, sem subprocesso
+  nem CLI empacotado. Não bloqueia nada — o canal manual funciona (editar `DIRECT_URL` no `.env`
+  local, rodar `pnpm prisma migrate deploy`, reverter), e foi assim que a migration pendente foi
+  aplicada em 2026-07-25.
+- **Senha do banco Supabase precisa ser rotacionada** — foi exposta durante a sessão de
+  2026-07-25 e chegou a passar por dois arquivos versionados antes de ser removida. Verificado que
+  **nunca entrou em nenhum commit** (`git log --all -S`), mas a credencial está comprometida.
+  Trocar em Supabase → Settings → Database → Reset database password, e atualizar **as duas**
+  variáveis na Vercel (`DATABASE_URL` com o Transaction pooler na porta 6543 e `DIRECT_URL` com a
+  conexão direta na 5432 — ver §9.32), seguido de redeploy.
+
 ### Pendências conhecidas (não bloqueantes)
 
 - **Formatação do CV em pt-BR:** `alertas.ts` usa `toFixed(1)`, gerando `"CV de 42.6%"` onde a UI
