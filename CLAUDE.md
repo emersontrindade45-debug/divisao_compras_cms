@@ -362,3 +362,20 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     preciso ler o `tail` do log e observar em que fase ele para. Compilação verde não é deploy
     verde; as fases seguintes (tracing, upload das funções) falham por motivos próprios,
     tipicamente tamanho.
+28. **Lista explícita de pacotes no tracing precisa incluir a árvore transitiva, não só o primeiro
+    nível.** Ao estreitar o glob para caber no limite (item 26), foram listados os 6 pacotes que o
+    CLI carrega diretamente — mas `@prisma/config` depende de `effect`, que ficou de fora, e a rota
+    passou de `Cannot find module '@prisma/engines'` para `Cannot find module 'effect'`. Restringir
+    por tamanho e enumerar por completude são objetivos em tensão: cortar demais quebra a
+    resolução, incluir demais estoura a função. A verificação local precisa espelhar **o conjunto
+    exato** que o glob copia — não basta testar `require("@prisma/config")` com o `node_modules`
+    completo da máquina, porque ali as transitivas existem e o teste passa em falso. Derivar a
+    lista com `pnpm list --depth=N` ou percorrer os `dependencies` dos `package.json` envolvidos,
+    em vez de enumerar de memória.
+29. **Erro que muda de mensagem é progresso, não fracasso — mas cada iteração de tracing custa um
+    deploy.** `@prisma/engines` → `effect` prova que o `NODE_PATH` funcionou e que a causa raiz
+    estava certa. Ainda assim, três ciclos foram gastos porque cada correção foi validada só
+    parcialmente. Para dependência de binário/CLI em serverless, o teste local tem de reproduzir o
+    isolamento real (copiar apenas os caminhos do glob para um diretório limpo e rodar o comando
+    de lá), ou a alternativa arquitetural — executar o SQL das migrations via `pg`, sem subprocesso
+    nem CLI empacotado — passa a ser mais barata que continuar iterando.
