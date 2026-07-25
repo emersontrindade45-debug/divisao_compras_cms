@@ -3,6 +3,7 @@ import { listarCapturas, listarSites } from "@/lib/actions/sites";
 import { listarProcessos } from "@/lib/actions/listar";
 import type { SiteFixture } from "@/lib/fixtures/sites";
 import type { CapturaRow } from "@/components/sites/CapturasTable";
+import { PageHeader } from "@/components/common/PageHeader";
 
 export default async function SitesPage() {
   const [sitesDb, capturasDb, processosDb] = await Promise.all([
@@ -42,13 +43,10 @@ export default async function SitesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Sites admissíveis</h1>
-        <p className="text-sm text-muted-foreground">
-          Evidências de sites vinculadas a cada processo, com captura de data/hora e bloqueio de
-          marketplaces.
-        </p>
-      </div>
+      <PageHeader
+        title="Sites admissíveis"
+        description="Evidências de sites vinculadas a cada processo, com captura de data/hora e bloqueio de marketplaces."
+      />
       <SitesPageClient sites={sites} capturas={capturas} processos={processos} />
     </div>
   );

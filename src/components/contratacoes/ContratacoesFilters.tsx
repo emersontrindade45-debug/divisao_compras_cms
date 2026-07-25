@@ -20,8 +20,7 @@ interface ContratacoesFiltersProps {
   onChange: (filters: ContratacoesFilters) => void;
 }
 
-const SELECT_CLASS =
-  "h-8 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus:ring-2 focus:ring-ring/50";
+import { SELECT_CLASS } from "@/components/common/selectClass";
 
 export function ContratacoesFilters({
   busca,

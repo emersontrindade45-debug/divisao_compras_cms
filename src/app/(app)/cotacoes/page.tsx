@@ -8,6 +8,7 @@ import { listarCotacoes } from "@/lib/actions/cotacoes";
 import { buscarAlertas } from "@/lib/actions/alertas";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
+import { PageHeader } from "@/components/common/PageHeader";
 
 export default async function CotacoesPage() {
   await requireAuth();
@@ -84,12 +85,10 @@ export default async function CotacoesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Cotações</h1>
-        <p className="text-sm text-muted-foreground">
-          Disparo de e-mails, painel de controle de SLA e checklist de propostas.
-        </p>
-      </div>
+      <PageHeader
+        title="Cotações"
+        description="Registro de consultas a fornecedores, controle de SLA e checklist de propostas."
+      />
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
 

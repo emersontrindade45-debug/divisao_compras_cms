@@ -4,6 +4,7 @@ import { ProcessosTable } from "@/components/processos/ProcessosTable";
 import { listarProcessos } from "@/lib/actions/listar";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import type { StatusDominio } from "@/lib/domain/status";
+import { PageHeader } from "@/components/common/PageHeader";
 
 const STATUS_MAP: Record<string, StatusDominio> = {
   aderente: "aderente",
@@ -32,12 +33,10 @@ export default async function ProcessosPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Processos</h1>
-        <p className="text-sm text-muted-foreground">
-          Processos de pesquisa de preços.
-        </p>
-      </div>
+      <PageHeader
+        title="Processos"
+        description="Processos de pesquisa de preços sincronizados da planilha padrão."
+      />
       <SheetsBanner sheetsUrl={sheetsUrl} />
       <SincronizarPlanilhaForm defaultUrl={sheetsUrl} />
       <ProcessosTable processos={processosMapeados} />

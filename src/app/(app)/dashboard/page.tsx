@@ -6,6 +6,7 @@ import {
   Mail,
 } from "lucide-react";
 import { MetricCard } from "@/components/common/MetricCard";
+import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
@@ -61,12 +62,10 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Visão geral da operação de pesquisa de preços.
-        </p>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        description="Visão geral da operação de pesquisa de preços."
+      />
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
 

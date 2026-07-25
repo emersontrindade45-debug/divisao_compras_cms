@@ -2,6 +2,7 @@ import { ContratacoesPageClient } from "@/components/contratacoes/ContratacoesPa
 import { listarContratacoes } from "@/lib/actions/contratacoes";
 import type { ContratacaoFixture } from "@/lib/fixtures/contratacoes";
 import type { StatusDominio } from "@/lib/domain/status";
+import { PageHeader } from "@/components/common/PageHeader";
 
 const ADERENCIA_MAP: Record<string, StatusDominio> = {
   aderente: "aderente",
@@ -32,12 +33,10 @@ export default async function ContratacoesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Contratações públicas similares</h1>
-        <p className="text-sm text-muted-foreground">
-          Busca e classificação de aderência por processo (fonte prioritária IN 65/2021).
-        </p>
-      </div>
+      <PageHeader
+        title="Contratações públicas similares"
+        description="Busca e classificação de aderência por processo (fonte prioritária IN 65/2021)."
+      />
       <ContratacoesPageClient contratacoes={contratacoes} />
     </div>
   );

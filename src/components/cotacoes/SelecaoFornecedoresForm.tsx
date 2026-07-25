@@ -35,8 +35,9 @@ Prazo para retorno: {prazo}
 Atenciosamente,
 Divisão de Compras — Câmara Municipal de Santos`;
 
-const SELECT_CLASS =
-  "h-8 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus:ring-2 focus:ring-ring/50 w-full max-w-md";
+import { SELECT_CLASS as SELECT_BASE } from "@/components/common/selectClass";
+
+const SELECT_CLASS = cn(SELECT_BASE, "w-full max-w-md");
 
 export interface FornecedorOption {
   id: string;

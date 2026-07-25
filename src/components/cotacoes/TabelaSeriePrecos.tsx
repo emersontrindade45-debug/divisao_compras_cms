@@ -16,8 +16,9 @@ import { formatBRL, formatDate } from "@/lib/formatters";
 import type { SeriePrecoFixture, MetodoConsolidacao } from "@/lib/fixtures/seriePrecos";
 import { cn } from "@/lib/utils";
 
-const SELECT_CLASS =
-  "h-8 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus:ring-2 focus:ring-ring/50 w-52";
+import { SELECT_CLASS as SELECT_BASE } from "@/components/common/selectClass";
+
+const SELECT_CLASS = cn(SELECT_BASE, "w-52");
 
 const FONTE_LABEL: Record<string, string> = {
   "contratacao-publica": "Contratação pública",

@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { SiteFixture } from "@/lib/fixtures/sites";
+import { SELECT_CLASS as SELECT_BASE } from "@/components/common/selectClass";
+import { cn } from "@/lib/utils";
 
 export interface ProcessoOption {
   id: string;
@@ -28,8 +30,7 @@ interface CapturaFormProps {
   onSubmit: (data: NovaCapturaData) => void | Promise<void>;
 }
 
-const SELECT_CLASS =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus:ring-2 focus:ring-ring/50";
+const SELECT_CLASS = cn(SELECT_BASE, "w-full");
 
 export function CapturaForm({ sites, processos, onSubmit }: CapturaFormProps) {
   const [siteId, setSiteId] = useState("");

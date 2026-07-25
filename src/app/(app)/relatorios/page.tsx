@@ -2,6 +2,7 @@ import { BarChart3, FileText } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RelatorioResumoCard } from "@/components/relatorios/RelatorioResumoCard";
 import { listarProcessosComSerie } from "@/lib/actions/listar";
+import { PageHeader } from "@/components/common/PageHeader";
 
 export default async function RelatoriosPage() {
   const processos = await listarProcessosComSerie();
@@ -21,12 +22,10 @@ export default async function RelatoriosPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Relatórios</h1>
-        <p className="text-sm text-muted-foreground">
-          Relatório resumido, completo e memória de cálculo por processo.
-        </p>
-      </div>
+      <PageHeader
+        title="Relatórios"
+        description="Relatório resumido, completo e memória de cálculo por processo."
+      />
 
       <Tabs defaultValue="resumo" className="space-y-4">
         <TabsList>

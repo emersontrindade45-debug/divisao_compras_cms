@@ -1,6 +1,7 @@
 import { FornecedoresPageClient } from "@/components/fornecedores/FornecedoresPageClient";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
+import { PageHeader } from "@/components/common/PageHeader";
 import type {
   FornecedorFixture,
   HistoricoCotacaoFixture,
@@ -73,12 +74,10 @@ export default async function FornecedoresPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Fornecedores</h1>
-        <p className="text-sm text-muted-foreground">
-          Cadastro vivo, score operacional e histórico de resposta por processo.
-        </p>
-      </div>
+      <PageHeader
+        title="Fornecedores"
+        description="Cadastro vivo, score operacional e histórico de resposta por processo."
+      />
       <FornecedoresPageClient fornecedores={fornecedores} historico={historico} />
     </div>
   );
