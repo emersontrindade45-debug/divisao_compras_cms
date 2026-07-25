@@ -13,9 +13,28 @@ const STATUS_MAP: Record<string, StatusDominio> = {
   pendente: "pendente",
 };
 
-export default async function ProcessosPage() {
+const STATUS_VALIDOS = ["aderente", "parcial", "nao_aderente", "pendente"] as const;
+
+type StatusProcessoParam = (typeof STATUS_VALIDOS)[number];
+
+function parseStatus(valor?: string): StatusProcessoParam | undefined {
+  return STATUS_VALIDOS.find((s) => s === valor);
+}
+
+export default async function ProcessosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; busca?: string }>;
+}) {
   const sheetsUrl = process.env.NEXT_PUBLIC_SHEETS_URL || undefined;
-  const processos = await listarProcessos();
+  const { status, busca } = await searchParams;
+
+  // Filtro vindo da URL (cards do dashboard). Valor inválido é ignorado, não
+  // quebra a listagem.
+  const processos = await listarProcessos({
+    status: parseStatus(status),
+    busca: busca || undefined,
+  });
 
   const processosMapeados: ProcessoFixture[] = processos.map((p) => ({
     id: p.id,

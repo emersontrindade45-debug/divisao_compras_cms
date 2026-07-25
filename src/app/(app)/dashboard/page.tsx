@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { MetricCard } from "@/components/common/MetricCard";
 import { PageHeader } from "@/components/common/PageHeader";
+import { WorkQueueCard } from "@/components/dashboard/WorkQueueCard";
+import { priorizarFilaTrabalho } from "@/lib/domain/filaTrabalho";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
@@ -23,7 +25,27 @@ export default async function DashboardPage() {
   const [processos, cotacoes, alertas] = await Promise.all([
     db.processo.findMany({
       orderBy: { dataAbertura: "desc" },
-      select: { id: true, numero: true, objeto: true, status: true },
+      select: {
+        id: true,
+        numero: true,
+        objeto: true,
+        status: true,
+        itens: {
+          select: {
+            fontes: { select: { tipo: true, status: true } },
+            seriePrecos: {
+              select: { precosIncluidos: true, coeficienteVariacao: true },
+            },
+          },
+        },
+        cotacoes: {
+          select: {
+            status: true,
+            dataLimite: true,
+            proposta: { select: { statusGeral: true } },
+          },
+        },
+      },
     }),
     db.cotacao.findMany({
       include: {
@@ -52,6 +74,32 @@ export default async function DashboardPage() {
     .filter((p) => p.status === "nao_aderente" || p.status === "parcial")
     .slice(0, 4);
 
+  const fila = priorizarFilaTrabalho(
+    processos.map((p) => {
+      const fontes = p.itens.flatMap((i) => i.fontes);
+      const series = p.itens.flatMap((i) => i.seriePrecos);
+      const cvs = series.map((s) => Number(s.coeficienteVariacao));
+      return {
+        processoId: p.id,
+        numero: p.numero,
+        objeto: p.objeto,
+        status: p.status,
+        temFontePublica: fontes.some(
+          (f) => f.tipo === "contratacao_publica" && f.status === "incluido",
+        ),
+        cotacoesVencidas: p.cotacoes.filter(
+          (c) => c.status === "silenciosa" && c.dataLimite < now,
+        ).length,
+        propostasPendentes: p.cotacoes.filter(
+          (c) => c.proposta && c.proposta.statusGeral !== "valida",
+        ).length,
+        precosIncluidos: Math.max(0, ...series.map((s) => s.precosIncluidos)),
+        coeficienteVariacao: cvs.length > 0 ? Math.max(...cvs) : null,
+        temPesquisaIniciada: fontes.length > 0 || p.cotacoes.length > 0,
+      };
+    }),
+  ).slice(0, 6);
+
   const cotacoesPendentes = cotacoes
     .filter(
       (c) =>
@@ -75,24 +123,28 @@ export default async function DashboardPage() {
           value={emAndamento}
           hint={`${processos.length} total`}
           icon={FolderSearch}
+          href="/processos?status=pendente"
         />
         <MetricCard
           label="Taxa de resposta"
           value={`${taxaResposta}%`}
           hint={`${respondidas} de ${total} cotações`}
           icon={Mail}
+          href="/cotacoes"
         />
         <MetricCard
           label="Cotações silenciosas"
           value={silenciosas}
           hint={`${vencidas} com prazo vencido`}
           icon={Clock}
+          href="/cotacoes"
         />
         <MetricCard
           label="Processos com gargalo"
           value={gargalos}
           hint="sem fonte pública suficiente"
           icon={AlertTriangle}
+          href="/processos?status=nao_aderente"
         />
       </div>
 
@@ -179,26 +231,7 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Resumo de processos</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {(["aderente", "parcial", "pendente", "nao_aderente"] as const).map((s) => {
-              const count = processos.filter((p) => p.status === s).length;
-              return (
-                <div key={s} className="rounded-md border p-3 text-center">
-                  <p className="text-2xl font-semibold tabular-nums">{count}</p>
-                  <div className="mt-1 flex justify-center">
-                    <StatusBadge status={s as never} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
+      <WorkQueueCard itens={fila} />
     </div>
   );
 }

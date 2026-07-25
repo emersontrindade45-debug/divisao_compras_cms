@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -8,15 +9,22 @@ export function MetricCard({
   delta,
   hint,
   icon: Icon,
+  href,
 }: {
   label: string;
   value: string | number;
   delta?: { value: string; positive: boolean };
   hint?: string;
   icon?: LucideIcon;
+  /** Quando informado, o card inteiro vira link para a lista correspondente. */
+  href?: string;
 }) {
-  return (
-    <Card>
+  const card = (
+    <Card
+      className={cn(
+        href && "h-full transition-colors hover:border-primary/40 hover:bg-muted/40",
+      )}
+    >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
         {Icon ? <Icon className="size-4 text-muted-foreground" aria-hidden /> : null}
@@ -38,5 +46,13 @@ export function MetricCard({
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       </CardContent>
     </Card>
+  );
+
+  if (!href) return card;
+
+  return (
+    <Link href={href} className="block rounded-xl focus-visible:ring-2 focus-visible:ring-ring">
+      {card}
+    </Link>
   );
 }
