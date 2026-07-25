@@ -1,6 +1,7 @@
 "use client";
 
 import { Input } from "@/components/ui/input";
+import { SELECT_CLASS } from "@/components/common/selectClass";
 
 export interface FornecedoresFilters {
   busca: string;
@@ -21,7 +22,6 @@ interface FornecedoresFiltersProps {
   onChange: (filters: FornecedoresFilters) => void;
 }
 
-import { SELECT_CLASS } from "@/components/common/selectClass";
 
 export function FornecedoresFilters({
   busca,

@@ -1,6 +1,7 @@
 "use client";
 
 import { Input } from "@/components/ui/input";
+import { SELECT_CLASS } from "@/components/common/selectClass";
 
 export interface ContratacoesFilters {
   busca: string;
@@ -20,7 +21,6 @@ interface ContratacoesFiltersProps {
   onChange: (filters: ContratacoesFilters) => void;
 }
 
-import { SELECT_CLASS } from "@/components/common/selectClass";
 
 export function ContratacoesFilters({
   busca,

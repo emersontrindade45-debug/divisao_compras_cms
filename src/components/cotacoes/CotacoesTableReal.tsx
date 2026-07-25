@@ -7,12 +7,12 @@ import { DataTable } from "@/components/data-table/DataTable";
 import { Button } from "@/components/ui/button";
 import { StatusCotacaoBadge } from "./StatusCotacaoBadge";
 import { formatBRL } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
+import type { StatusCotacao } from "@prisma/client";
 
 function formatDate(date: Date): string {
   return new Intl.DateTimeFormat("pt-BR").format(date);
 }
-import { cn } from "@/lib/utils";
-import type { StatusCotacao } from "@prisma/client";
 
 export interface CotacaoRow {
   id: string;
