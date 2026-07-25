@@ -8,6 +8,7 @@ import {
   type EvidenciaResumo,
   type FonteResumo,
 } from "@/components/processos/ProcessoTabs";
+import { ConformidadePanel } from "@/components/processos/ConformidadePanel";
 import { FontesSimilaridadeList } from "@/components/processos/FontesSimilaridadeList";
 import { obterProcessoDetalhado } from "@/lib/actions/listar";
 import { avaliarConformidade } from "@/lib/domain/conformidade";
@@ -173,15 +174,18 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
   return (
     <div className="space-y-6">
       <ProcessoHeader processo={processoMapeado} />
-      <ProcessoTabs
-        processo={processoMapeado}
-        conformidade={conformidade}
-        fontes={fontes}
-        evidencias={evidencias}
-        cotacoes={cotacoes}
-        serie={serie}
-        fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
-      />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <ProcessoTabs
+          processo={processoMapeado}
+          conformidade={conformidade}
+          fontes={fontes}
+          evidencias={evidencias}
+          cotacoes={cotacoes}
+          serie={serie}
+          fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
+        />
+        <ConformidadePanel conformidade={conformidade} processoId={processo.id} />
+      </div>
     </div>
   );
 }
