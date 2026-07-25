@@ -329,8 +329,19 @@ fornecedor/sites documentadas acima.
 - [ ] Limpar `.env.example`: remover variáveis mortas (ex.: `RESEND_*`) e corrigir nomes que não
   batem com o que o código lê de fato (ex.: variáveis `GOOGLE_SHEETS_*` documentadas com nomes
   diferentes de `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY`, que é o que `googleAuth.ts` realmente usa).
-- [ ] Teste unitário para `src/lib/domain/alertas.ts` (único módulo de `lib/domain/` sem
-  cobertura correspondente).
+- [x] Teste unitário para `src/lib/domain/alertas.ts` (único módulo de `lib/domain/` sem
+  cobertura correspondente). **29 testes**, cobrindo as quatro categorias de alerta, as fronteiras
+  de `diasRestantes` (-1/0/1/2), a ordenação por severidade e as strings exigidas pela IN 65/2021.
+  Cobertura validada por teste de mutação na revisão: remover `"IN 65/2021"`, remover
+  `"exige análise crítica"` ou quebrar a fronteira `<= 1` faz 5 testes falharem.
+  **Bug corrigido no mesmo ciclo:** o id do alerta de dispersão derivava de `itemDescricao` (texto
+  livre) e é usado como chave de dispensa em `AlertasBanner`. Dois itens com descrição idêntica
+  colidiam, e dispensar um escondia o outro — suprimindo da tela um item que exige análise crítica.
+  Passou a usar `seriePrecoId`: a query itera `SeriePreco` e `Item -> SeriePreco` é 1-N, então
+  `itemId` reintroduziria a colisão para itens com duas séries acima do limiar de CV.
+  **Pendência conhecida (não bloqueante):** o CV é formatado com `toFixed(1)`, gerando
+  `"CV de 42.6%"` em UI pt-BR, onde o esperado seria `42,6%`. Dois testes fixam o formato atual;
+  corrigir para `toLocaleString("pt-BR")` fará ambos falharem, sinalizando o ponto a atualizar.
 
 ### Critério de aceite
 Cada ressalva do M10 está ou implementada ou formalmente descartada (com justificativa registrada
