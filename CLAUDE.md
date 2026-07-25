@@ -349,3 +349,16 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     (nenhuma era lida em build time), mas a decisão de sequência era dele. Se uma etapa depende de
     ação do usuário e ela não foi confirmada, **perguntar** — não assumir que o passo já ocorreu
     nem tratar ausência de resposta como aprovação.
+26. **Glob de tracing é cirúrgico, nunca genérico — `@prisma+*` estoura o limite da função.**
+    Ampliar o padrão para pegar "tudo do escopo" arrasta `@prisma/client` (85 MB), `studio-core`
+    (38 MB) e `@prisma/dev` (15 MB): 228 MB numa função só, e o deploy falha **depois** do
+    `Build Completed`, na fase `Deploying outputs...`. Listar explicitamente os pacotes que o
+    comando alvo carrega (para `migrate deploy/status`: `engines`, `engines-version`,
+    `get-platform`, `fetch-engine`, `debug`, `config` — 85 MB) e medir com
+    `du -csh` antes de commitar. Sintoma diagnóstico: `lambdaRuntimeStats` sobe (3 → 5 lambdas) e
+    o log de build termina sem erro em "Deploying outputs...".
+27. **`state: "ERROR"` com `Build Completed` no log significa falha no empacotamento, não na
+    compilação.** `errorsOnly: true` nos logs não mostra nada porque o build em si passou — é
+    preciso ler o `tail` do log e observar em que fase ele para. Compilação verde não é deploy
+    verde; as fases seguintes (tracing, upload das funções) falham por motivos próprios,
+    tipicamente tamanho.
