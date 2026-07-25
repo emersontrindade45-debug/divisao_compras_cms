@@ -1,6 +1,7 @@
 "use client";
 
-import { LogOut, User } from "lucide-react";
+import Link from "next/link";
+import { BookOpen, LogOut, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,6 +60,10 @@ export function UserMenu({ name, role }: UserMenuProps) {
         <DropdownMenuItem>
           <User className="mr-2 size-4" /> Perfil
         </DropdownMenuItem>
+        <DropdownMenuItem render={<Link href="/onboarding" />}>
+          <BookOpen className="mr-2 size-4" /> Guia de uso
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           className="text-red-600 focus:text-red-600 dark:text-red-400"
           onSelect={async () => {
