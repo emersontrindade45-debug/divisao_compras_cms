@@ -3,6 +3,7 @@
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { gerarAlertas, type Alerta } from "@/lib/domain/alertas";
+import { CV_PRE_ALERTA } from "@/lib/domain/priceStats";
 
 export async function buscarAlertas(): Promise<Alerta[]> {
   await requireAuth();
@@ -49,9 +50,9 @@ export async function buscarAlertas(): Promise<Alerta[]> {
         },
       }),
 
-      // Séries com dispersão alta (CV >= 25%)
+      // Séries com dispersão alta (pré-alerta: ver comentário em priceStats.ts)
       db.seriePreco.findMany({
-        where: { coeficienteVariacao: { gte: 25 } },
+        where: { coeficienteVariacao: { gte: CV_PRE_ALERTA } },
         include: {
           item: {
             select: {

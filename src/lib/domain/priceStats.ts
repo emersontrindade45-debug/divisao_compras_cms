@@ -1,5 +1,15 @@
 import type { DomainResult, EstatisticaPrecos, ValidacaoFonte, Violation } from "./types";
 
+/**
+ * Limiares de coeficiente de variação (CV). São dois de propósito:
+ * - `CV_PRE_ALERTA` (25%): dispara alerta antecipado no banner/dashboard, antes de a regra
+ *   formal ser violada — dá tempo de agir.
+ * - `CV_ANALISE_CRITICA` (30%): limiar da regra R-06 (IN 65/2021) — acima dele a análise
+ *   crítica da dispersão é obrigatória.
+ */
+export const CV_PRE_ALERTA = 25;
+export const CV_ANALISE_CRITICA = 30;
+
 function medianaArr(valores: number[]): number {
   const sorted = [...valores].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -82,10 +92,10 @@ export function calcularEstatisticas(
   const dp = desvioPadrao(precosIncluidos, avg);
   const cv = (dp / avg) * 100;
 
-  if (cv > 30) {
+  if (cv > CV_ANALISE_CRITICA) {
     violations.push({
       code: "R-06",
-      rule: "Grande dispersão de preços: análise crítica obrigatória (CV > 30%)",
+      rule: `Grande dispersão de preços: análise crítica obrigatória (CV > ${CV_ANALISE_CRITICA}%)`,
       severity: "warn",
     });
   }
