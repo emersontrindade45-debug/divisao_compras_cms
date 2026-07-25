@@ -401,3 +401,25 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     precisa de DDL e sessão estável). Variável de ambiente nova ou editada **só passa a valer após
     redeploy** — editar no painel não afeta funções já publicadas, e o campo aparecer vazio ao
     reabrir é comportamento normal de variável marcada como Sensitive, não perda do valor.
+33. **Lição documentada aqui não é lição implementada — conferir no código antes de confiar.**
+    As regras §9.8 (formato da URL do PNCP) e §9.9 (excluir o CNPJ do próprio órgão) estavam
+    escritas neste arquivo há meses enquanto o código em produção não as aplicava: ficaram num
+    branch de agente (`d781a16`, PR #9) que foi deployado como preview e **nunca mesclado**. Em
+    produção, toda evidência de contratação similar apontava para link inválido e o contrato em
+    renovação podia servir de referência de preço para si mesmo. Ao invocar uma lição do §9 como
+    garantia, verificar que ela existe no código (`grep` pela constante/variável que ela cita);
+    ao fechar uma tarefa em branch, confirmar o merge em `main`, não só que o preview subiu.
+34. **Estado em nível de módulo (flag de "avisar uma vez") exige `vi.resetModules()` + import
+    dinâmico no teste — não um reset exportado.** Módulo com `import "server-only"` não deve expor
+    função só para teste: prefixo `__` e JSDoc são convenção, não barreira, e nada impede um
+    chamador futuro de silenciar um aviso de conformidade em produção. `vi.resetModules()` seguido
+    de `await import(...)` cria instância nova com a flag zerada, o que já isola os casos; testes
+    que importam o módulo estaticamente não interferem nessa instância. Antes de adicionar
+    escapatória de teste ao código de produção, **remover e rodar a suíte** — se continuar verde,
+    a escapatória não protegia nada.
+35. **Justificativa de design precisa de evidência, não de plausibilidade.** Um helper foi mantido
+    com a teoria de que testes pré-existentes consumiriam o aviso antes dos novos; a teoria era
+    plausível e estava errada, e bastou remover o helper e rodar a suíte para descobrir. Vale para
+    agente e para revisor: ao afirmar que algo é necessário, dizer **qual experimento** confirma —
+    mutação (quebrar a regra e ver o teste falhar), remoção (tirar o código e ver o que quebra) ou
+    execução isolada. Teste que passa não prova que protege; só a mutação prova.
