@@ -55,6 +55,7 @@ export async function buscarAlertas(): Promise<Alerta[]> {
         include: {
           item: {
             select: {
+              id: true,
               descricao: true,
               processo: { select: { id: true, numero: true } },
             },
@@ -89,6 +90,8 @@ export async function buscarAlertas(): Promise<Alerta[]> {
       fornecedorNome: p.cotacao.fornecedor.razaoSocial,
     })),
     itensComDispersao: seriesComDispersao.map((s) => ({
+      seriePrecoId: s.id,
+      itemId: s.item.id,
       processoId: s.item.processo.id,
       processoNumero: s.item.processo.numero,
       itemDescricao: s.item.descricao,
