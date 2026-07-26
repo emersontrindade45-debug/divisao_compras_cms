@@ -443,6 +443,32 @@ fornecedor/sites documentadas acima.
   A correção acordada (SQL via `pg`, sem CLI empacotado) passou por `pnpm test`/`lint`/`typecheck`/
   `build`, todos verdes, e foi commitada em 2026-07-25.
 
+  > **ESTADO AO FIM DA SESSÃO DE 2026-07-25 (~21h40 local) — FALTA UM PASSO SÓ.**
+  >
+  > Tudo publicado e sincronizado: `main` local = `origin/main` = `dacc34a`, working tree limpo,
+  > deploy `dpl_9Ke8x5J` `READY` com o alias de produção. Aplicação **saudável e exercitada**:
+  > nas últimas 2h serviu `/dashboard`, `/cotacoes`, `/fornecedores` e páginas de processo com
+  > CUIDs reais (só renderizam lendo do Postgres) — `get_runtime_errors` sem nenhum erro.
+  >
+  > **O que falta:** corrigir a `MIGRATE_URL` na Vercel e rodar o `GET`. A string que o usuário
+  > tem está no **Transaction pooler** e precisa ir para o **Session pooler**:
+  >
+  > | | está | precisa ficar |
+  > |---|---|---|
+  > | porta | `6543` | **`5432`** |
+  > | usuário | `postgres.projeto` (placeholder?) | `postgres.bybkhnxxtbdcggfuatxc` |
+  >
+  > Host `aws-0-sa-east-1.pooler.supabase.com` está correto. Senha sem colchetes e com
+  > URL-encoding se tiver caractere especial (`@`→`%40`, `#`→`%23`, `/`→`%2F`).
+  > **Não mexer na `DATABASE_URL`** — ela fica na 6543 mesmo (Transaction é o certo para a app).
+  > Depois de salvar: **redeploy** (§9.32); não precisa de push, o código já está no ar.
+  >
+  > **Progresso do diagnóstico (cada erro foi um passo à frente, não um retrocesso):**
+  > `401` (sem segredo) → `ENOTFOUND` (rede: host IPv6-only, §9.43) → `password authentication
+  > failed for user "postgres"` (autenticou e conectou; só falta o ref no usuário). O próximo erro,
+  > se houver, deve ser lido do mesmo jeito: **como** a mensagem nomeia o usuário diz se o problema
+  > é o ref (`"postgres"` = falta o ref) ou a senha (`"postgres.bybkh…"` = ref ok).
+  >
   > **DEPLOY CONFIRMADO (2026-07-25, 23:38 UTC): a rota nova está no ar.**
   > `dpl_7r3Ke8JVbepAre1eu5RwMRV9s6GP`, `readyState: "READY"` **e** `alias` contendo
   > `divisao-compras-cms.vercel.app` — os dois critérios da §9.21, não sondagem HTTP.
