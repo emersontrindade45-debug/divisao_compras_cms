@@ -7,6 +7,7 @@ import {
   calcularPendentes,
   detectarOrfas,
   lerMigrationsLocais,
+  explicarErroConexao,
   type ExecutorSql,
   type RegistroMigration,
 } from "@/lib/migrations/aplicar";
@@ -27,13 +28,25 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Migrations exigem DDL e sessão estável, então usam a conexão direta — o mesmo
-// alvo que o CLI usava via prisma.config.ts. O pooler (DATABASE_URL) só entra
-// como fallback para ambientes onde as duas apontam para o mesmo lugar (dev).
+// Migrations exigem DDL e sessão estável. Daí a preferência por `MIGRATE_URL`/
+// `DIRECT_URL`, com `DATABASE_URL` (pooler) apenas como último recurso.
+//
+// **Cuidado com o alvo em serverless (CLAUDE.md §9.43).** A conexão direta do
+// Supabase (`db.<ref>.supabase.co`) é IPv6-only, e funções da Vercel não têm
+// IPv6: de lá ela falha com `getaddrinfo ENOTFOUND`, embora funcione da máquina
+// do dev. Para esta rota, `DIRECT_URL` só serve se apontar para um host IPv4 —
+// na Vercel, o **Session pooler** (`aws-0-<região>.pooler.supabase.com:5432`),
+// que mantém sessão estável e suporta DDL. O Transaction pooler (6543) **não**
+// serve para migration.
+//
+// `MIGRATE_URL` existe para permitir um alvo próprio desta rota sem perturbar o
+// `DIRECT_URL` que o CLI local usa — os dois ambientes têm restrições de rede
+// diferentes e não precisam compartilhar o mesmo host.
 function connectionString(): string {
-  const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+  const url =
+    process.env.MIGRATE_URL ?? process.env.DIRECT_URL ?? process.env.DATABASE_URL;
   if (!url) {
-    throw new Error("DIRECT_URL (ou DATABASE_URL) não configurada");
+    throw new Error("MIGRATE_URL, DIRECT_URL ou DATABASE_URL não configurada");
   }
   return url;
 }
@@ -116,7 +129,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         comando: "status",
-        erro: error instanceof Error ? error.message : String(error),
+        erro: explicarErroConexao(error),
         executadoEm: new Date().toISOString(),
       },
       { status: 500 },
@@ -154,7 +167,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         comando: "deploy",
-        erro: error instanceof Error ? error.message : String(error),
+        erro: explicarErroConexao(error),
         executadoEm: new Date().toISOString(),
       },
       { status: 500 },

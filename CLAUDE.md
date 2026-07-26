@@ -401,6 +401,9 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     precisa de DDL e sessão estável). Variável de ambiente nova ou editada **só passa a valer após
     redeploy** — editar no painel não afeta funções já publicadas, e o campo aparecer vazio ao
     reabrir é comportamento normal de variável marcada como Sensitive, não perda do valor.
+    **Ressalva descoberta em 2026-07-25 (ver §9.43): "conexão direta para migrations" vale para o
+    CLI rodando da máquina do dev, NÃO para código dentro de função serverless** — de lá o host
+    direto do Supabase é inalcançável, e o alvo correto é o Session pooler.
 33. **Lição documentada aqui não é lição implementada — conferir no código antes de confiar.**
     As regras §9.8 (formato da URL do PNCP) e §9.9 (excluir o CNPJ do próprio órgão) estavam
     escritas neste arquivo há meses enquanto o código em produção não as aplicava: ficaram num
@@ -495,7 +498,22 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     `waitFor` do `@testing-library/react`. Instalar exigiria autorização do usuário (§8) — antes de
     importar qualquer pacote num teste, conferir se ele já está em `package.json`, valendo a mesma
     regra do código de produção.
-43. **Ao inserir imports com script (`awk`/`sed`), imports multilinha quebram silenciosamente.**
+43. **A conexão direta do Supabase (`db.<ref>.supabase.co`) é IPv6-only e é inalcançável de dentro
+    de uma função serverless da Vercel.** O `GET /api/admin/migrate` autenticou, executou e falhou
+    com `getaddrinfo ENOTFOUND db.<ref>.supabase.co`. O hostname **resolve** — mas só para AAAA
+    (`2600:1f1e:…`), sem nenhum registro A; funções da Vercel não têm IPv6, então para elas o host
+    simplesmente não existe. `ENOTFOUND` aqui significa "sem endereço utilizável", não "host
+    inexistente" — diagnosticar com `nslookup` e olhar **qual família** de endereço volta, em vez
+    de ler a mensagem como erro de digitação no hostname.
+    Consequência para a §9.32: "migrations usam a conexão direta" vale para o **CLI rodando da
+    máquina do dev** (que tem IPv6), e **não** para código dentro de função serverless. Da Vercel,
+    DDL precisa ir pelo **Session pooler** (`aws-0-<região>.pooler.supabase.com:5432`, IPv4, sessão
+    estável — suporta DDL), nunca pelo Transaction pooler da 6543, que não serve para migration.
+    Regra geral: antes de escolher um host para código que roda em serverless, perguntar **de onde
+    a conexão parte**, não só o que o banco aceita. Ver também §9.31 — `DATABASE_URL` e `DIRECT_URL`
+    são caminhos independentes, e um funcionar não diz nada sobre o outro: aqui a app servia
+    páginas com dados reais pelo pooler enquanto a rota de migrations não alcançava banco nenhum.
+44. **Ao inserir imports com script (`awk`/`sed`), imports multilinha quebram silenciosamente.**
     Inserir uma linha após "o último `import`" partiu ao meio um `import type { A, B } from …` em
     `fornecedores/page.tsx`, produzindo um arquivo sintaticamente inválido. O typecheck pegou, mas
     o modo de falha é traiçoeiro em arquivo grande. Para edição estrutural de código, usar a

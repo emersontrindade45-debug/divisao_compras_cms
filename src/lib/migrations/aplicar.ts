@@ -89,6 +89,26 @@ export function detectarOrfas(
     .map((r) => r.migration_name);
 }
 
+/**
+ * Traduz falhas de rede comuns para uma mensagem que aponta a causa provável.
+ *
+ * Sem isto, `getaddrinfo ENOTFOUND db.<ref>.supabase.co` parece erro de digitação
+ * no hostname, quando na verdade o host **resolve** — só que apenas em IPv6, que
+ * a função serverless não alcança (CLAUDE.md §9.43). A mensagem crua já custou
+ * uma rodada de diagnóstico na direção errada.
+ */
+export function explicarErroConexao(erro: unknown): string {
+  const msg = erro instanceof Error ? erro.message : String(erro);
+  if (msg.includes("ENOTFOUND") && msg.includes(".supabase.co")) {
+    return (
+      `${msg} — a conexão direta do Supabase é IPv6-only e não é alcançável de ` +
+      `uma função serverless. Aponte MIGRATE_URL para o Session pooler ` +
+      `(aws-0-<região>.pooler.supabase.com:5432), que é IPv4 e suporta DDL.`
+    );
+  }
+  return msg;
+}
+
 /** Checksum no mesmo formato do Prisma (SHA-256 hex do conteúdo do arquivo). */
 export function checksum(sql: string): string {
   return createHash("sha256").update(sql).digest("hex");

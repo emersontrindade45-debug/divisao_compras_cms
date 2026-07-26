@@ -4,6 +4,7 @@ import {
   calcularPendentes,
   checksum,
   detectarOrfas,
+  explicarErroConexao,
   type ExecutorSql,
   type MigrationLocal,
   type RegistroMigration,
@@ -234,5 +235,33 @@ describe("aplicarPendentes", () => {
     const resultados = await aplicarPendentes([], executor);
     expect(resultados).toEqual([]);
     expect(confirmados).toEqual([]);
+  });
+});
+
+describe("explicarErroConexao", () => {
+  it("explica o ENOTFOUND do host direto do Supabase, que resolve só em IPv6", () => {
+    const msg = explicarErroConexao(
+      new Error("getaddrinfo ENOTFOUND db.bybkhnxxtbdcggfuatxc.supabase.co"),
+    );
+    // Preserva a mensagem original — sem ela o diagnóstico perde o hostname.
+    expect(msg).toContain("getaddrinfo ENOTFOUND db.bybkhnxxtbdcggfuatxc.supabase.co");
+    // E acrescenta a causa e a saída, que é o ponto do helper.
+    expect(msg).toContain("IPv6-only");
+    expect(msg).toContain("Session pooler");
+    expect(msg).toContain("MIGRATE_URL");
+  });
+
+  it("não altera erros de outra natureza", () => {
+    const original = "password authentication failed for user 'postgres'";
+    expect(explicarErroConexao(new Error(original))).toBe(original);
+  });
+
+  it("não confunde ENOTFOUND de outro host com o caso do Supabase", () => {
+    const original = "getaddrinfo ENOTFOUND localhost";
+    expect(explicarErroConexao(new Error(original))).toBe(original);
+  });
+
+  it("aceita valor que não é Error", () => {
+    expect(explicarErroConexao("falha crua")).toBe("falha crua");
   });
 });
