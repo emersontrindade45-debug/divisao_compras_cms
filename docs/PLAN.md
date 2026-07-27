@@ -626,7 +626,11 @@ sessão (CLAUDE.md §7); a conferência de layout no browser é o único item n�
 
 ---
 
-## M13 — Assistente de pesquisa (OpenAI + Perplexity) — EM ANDAMENTO
+## M13 — Assistente de pesquisa (OpenAI + Perplexity) — FASES 13.0 a 13.3 CONCLUÍDAS
+
+> As quatro fases de código estão fechadas. O que resta é ambiente, não implementação:
+> `PERPLEXITY_API_KEY` na Vercel (sem ela a busca web da Perplexity se auto-desabilita e o
+> assistente segue com PNCP + web search da OpenAI) e o deploy da fase 13.3.
 
 **Problema.** O pipeline de similaridade do M10 faz uma passada só: extrai o TR, deriva um termo,
 consulta o PNCP, rankeia e grava candidatos. Quando o termo sai genérico ou o PNCP não devolve nada
@@ -725,9 +729,87 @@ não-etapa distorceria um tipo do qual a conformidade depende. O painel também 
 real — o servidor conversa enquanto continua vendo a lista de candidatos por trás. O gatilho ficou
 no `ProcessoHeader`, que ganhou um slot `acoes`.
 
-### Fase 13.3 — NÃO INICIADA
-Os três tipos de `rascunhar_justificativa` (aderência da fonte, metodologia da série, rota e
-escolha de fornecedores).
+### Fase 13.3 — CONCLUÍDA (2026-07-27)
+- [x] `rascunhar_justificativa` no registry, com os três tipos: `aderencia_fonte`,
+      `metodologia_serie`, `rota_fornecedores`.
+
+**Decisão de escopo, com o usuário: a ferramenta é de LEITURA e não persiste nada.** Ela reúne os
+números reais do processo e o modelo redige o texto no chat; o servidor revisa e leva aos autos.
+Dois motivos concretos, e o primeiro é de conformidade:
+
+1. Justificativa é peça de instrução processual. Gravar texto de IA num campo que hoje só recebe
+   texto humano apagaria a distinção entre os dois para quem ler os autos depois — e nenhum dos
+   três destinos tem coluna marcando origem.
+2. Dos três, **só `ContratacaoPublica.justificativaAderencia` existe no schema**. Metodologia (em
+   `SeriePreco`) e rota (em `Processo`) exigiriam migration, e o M13 já quebrou duas vezes por
+   código subir antes da migration (§9.46). Esta fase entrega **sem tocar no banco**.
+
+Achado durante a exploração: `conformidade.ts` já reconhecia a lacuna — na avaliação do R-07 ele
+passa `undefined` fixo para `validarFontePublica`, com o comentário "justificativa por processo
+ainda não é modelada". A justificativa de rota é exatamente o texto que preenche essa lacuna, hoje
+pela mão do servidor.
+
+Reuso em vez de duplicação: o corte de análise crítica usa `CV_ANALISE_CRITICA` de `priceStats` e o
+mínimo de fornecedores usa `MIN_FONTES_SUFICIENCIA` de `conformidade` — o modelo não recebe nenhum
+limite hardcodado, e mudar a regra no domínio muda o que o assistente diz.
+
+`select` explícito na consulta, nunca `include` (§9.46).
+
+**Verificação — 14 testes novos, 4 mutações com mapeamento 1:1:**
+
+| Guarda desligada | Teste que caiu |
+|---|---|
+| `analiseCriticaObrigatoria` fixado em `false` | "sinaliza análise crítica obrigatória quando o CV passa de 30%" |
+| Escopo de processo (`if (false)`) | "recusa rascunhar para outro processo numa conversa presa a um processo" |
+| **Escrita acrescentada à ferramenta** (`updateMany` na justificativa) | "não grava ao rascunhar aderencia_fonte" |
+| `usouFontePublica` fixado em `true` | "informa se houve fonte pública, que é o que o R-07 cobra" |
+
+A terceira é a que mais importa: os testes de não-persistência **passavam com a ferramenta ainda
+inexistente**, então não provavam nada até a mutação mostrar que detectam uma escrita introduzida
+depois. É a §9.35 — teste que passa não prova que protege; só a mutação prova.
+
+Armadilha encontrada: o prompt de sistema é um template literal, e usar crase para marcar nome de
+ferramenta dentro dele **fecha a string** — 5 erros de sintaxe no `tsc` e um "Parsing error" no
+ESLint, ambos apontando para uma linha que parecia texto comum.
+
+`tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · **538 testes em 66 arquivos**
+(eram 473 em 60) · `next build` compilou e listou `/api/assistente/chat`.
+
+### Revisão do PR #10 — dois achados aplicados
+
+O `code-reviewer` encontrou um buraco real, reproduzido antes de aceitar:
+
+**Os testes de não-persistência enumeravam métodos proibidos à mão** (`update`, `updateMany`,
+`createMany`) e deixavam `create` de fora. Resultado: a ferramenta podia criar `Fonte`,
+`Evidencia` e `PrecoConsolidado` — as escritas que o comentário de `ferramentas.ts` declara
+proibidas — com os 14 testes verdes. A garantia documentada era justamente a que estava sem teste.
+Corrigido varrendo a **superfície inteira** (8 métodos de escrita × 13 models), que reporta o nome
+exato do que escreveu; enumerar mais nomes repetiria o erro na próxima adição ao schema. Virou a
+§9.56.
+
+**`MIN_FONTES_SUFICIENCIA` media fornecedores.** A constante é documentada como mínimo de *fontes*
+com evidência (OP-ADH-04) e estava contando *cotações* (R-03), aqui e em `conformidade.ts`. Sem bug
+hoje — ambas valem 3 —, mas mudar a suficiência de fontes mudaria a regra de fornecedores em
+silêncio. Criada `MIN_FORNECEDORES_PESQUISA_DIRETA` em `in65Rules.ts`, onde a regra mora,
+substituindo também o `>= 3` que estava hardcodado lá.
+
+### Bug de infraestrutura encontrado pelo PR: preview nunca buildou
+
+O deploy de preview do PR #10 falhou com `Failed to collect page data for /api/jobs/lembretes`.
+Investigado até a causa raiz, não corrigido na primeira hipótese:
+
+`DATABASE_URL` existe **só em Production** (`vercel env ls` confirma o target), então **nenhum
+deploy de preview deste projeto jamais buildou**. Só apareceu agora porque este é o primeiro PR
+desde que o M13 passou a ser feito direto em `main`.
+
+Mas a variável ausente é o gatilho, não a causa: `export const db = createPrismaClient()` conectava
+ao **avaliar o módulo**, então bastava o Next importar a rota para coletar metadados e o `throw`
+derrubava o build inteiro. **`force-dynamic` não resolve** — foi a primeira tentativa, e o build
+continuou quebrando: a diretiva impede a execução do handler, não a importação do módulo. A
+correção é conexão preguiçosa via `Proxy`, com o client nascendo no primeiro acesso a um model.
+
+Verificado na condição real (§9.23): `env DATABASE_URL= next build` reproduzia a falha exata do
+preview em 15 segundos e agora passa, sem gastar ciclo de deploy. Lições §9.54 e §9.55.
 
 ### Verificação até aqui
 `tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · `next build` compilou e

@@ -610,3 +610,47 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     terminante e aborta o script antes da parte útil. Para confirmar que um `CREATE ROLE`/DDL pegou,
     consultar `pg_roles`/`information_schema` — é a §9.37 de novo: exercitar a capacidade, não ler
     um indicador indireto.
+52. **Crase dentro de template literal fecha a string — não usar Markdown com crase em prompt de
+    sistema.** O prompt do assistente é um template literal (`` `...` ``), e marcar nomes de
+    ferramenta como `` `buscar_pncp` `` no texto novo encerrou a string no meio: 5 erros `TS1005`
+    e um `Parsing error` do ESLint, todos apontando para uma linha que parecia texto comum. O
+    modo de falha engana porque o arquivo *já* usava crases em outros trechos — elas estavam
+    balanceadas por acaso. Em texto dentro de template literal, marcar nome de identificador com
+    aspas ou negrito; e ao editar um arquivo de prompt, rodar `typecheck` antes de qualquer outra
+    verificação, porque o erro não se parece com erro de código.
+53. **Teste escrito antes da implementação pode passar pelo motivo errado desde o início.** Os
+    testes que provam que `rascunhar_justificativa` não persiste nada passaram na primeira rodada
+    de TDD — quando a ferramenta **ainda não existia**: `expect(db.x.update).not.toHaveBeenCalled()`
+    é trivialmente verdadeiro quando nada roda. Um teste de ausência ("não grava", "não chama",
+    "não vaza") é sempre verde contra código inexistente, então a fase vermelha do TDD não o
+    valida como valida um teste de presença. A prova é a mutação **inversa**: acrescentar a
+    escrita que o teste deveria barrar e confirmar que ele cai. Vale para toda asserção negativa —
+    ela só vira garantia depois que alguém demonstrou o que a derruba (§9.35, §9.39).
+54. **Cliente de banco criado na avaliação do módulo quebra o build, não só o runtime.**
+    `export const db = createPrismaClient()` conectava ao **importar** `lib/db.ts`. Bastava o Next
+    importar uma rota para coletar metadados durante o build e o `throw` de `DATABASE_URL` ausente
+    derrubava tudo com `Failed to collect page data for /api/jobs/lembretes` — antes de qualquer
+    handler rodar. **`export const dynamic = "force-dynamic"` não resolve**: ele impede a execução
+    do handler, não a importação do módulo (comprovado — a declaração foi acrescentada primeiro e
+    o build continuou quebrando). A correção é conexão preguiçosa: o client nasce no primeiro
+    acesso a um model, então em build time ninguém acessa. Ao inicializar recurso externo em escopo
+    de módulo, perguntar **"o que acontece se isto for importado sem a variável de ambiente?"** —
+    em Next, importar não é usar, e o build importa tudo.
+55. **Ambiente que ninguém exercita esconde defeito por tempo indefinido — Preview é um deles.**
+    O defeito da §9.54 existia desde sempre e **nenhum deploy de preview deste projeto jamais
+    buildou**. Só apareceu quando o primeiro PR foi aberto, porque o M13 vinha sendo feito direto
+    em `main`, onde o build usa as variáveis de Production. Duas consequências: (a) `vercel env ls`
+    mostra o *target* de cada variável, e variável que existe só em Production significa que
+    Preview nunca funcionou — conferir isso ao abrir o primeiro PR de um projeto; (b) trabalhar
+    sempre em `main` não é só questão de processo, **suprime um ambiente inteiro de verificação**.
+    Reproduzir localmente é possível e barato: `env DATABASE_URL= next build` mostrou a falha exata
+    do preview em 15 segundos, sem gastar ciclo de deploy (§9.23, §9.29).
+56. **Teste de ausência que enumera nomes proibidos à mão sempre deixa uma porta aberta.** Os
+    testes de "não persiste nada" listavam `update`, `updateMany` e `createMany` e esqueceram
+    `create` — então a ferramenta podia criar `Fonte`, `Evidencia` e `PrecoConsolidado` com a suíte
+    100% verde, justamente as escritas que o comentário do arquivo declarava proibidas. A garantia
+    documentada era a que estava sem teste. Corrigir acrescentando os nomes que faltam repete o
+    erro na próxima adição ao schema: a asserção correta varre a **superfície inteira** (todo
+    método de escrita × todo model) e reporta o nome exato do que escreveu. Regra geral: quando o
+    teste afirma "nunca faz X", ele precisa observar todas as formas de fazer X, não uma lista de
+    formas lembradas na hora de escrever.

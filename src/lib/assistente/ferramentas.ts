@@ -3,6 +3,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { avaliarConformidade } from "@/lib/domain/conformidade";
+import { MIN_FORNECEDORES_PESQUISA_DIRETA } from "@/lib/domain/in65Rules";
+import { CV_ANALISE_CRITICA } from "@/lib/domain/priceStats";
 import { buscarContratosPNCP } from "@/lib/integracoes/pncp";
 import {
   buscarWebPerplexity,
@@ -90,6 +92,14 @@ const registrarSchema = z.object({
     .min(1, "Informe ao menos um id de candidato devolvido por uma busca.")
     .max(MAX_CANDIDATOS_POR_REGISTRO),
   termoBuscaUsado: z.string().min(1),
+});
+
+const rascunharSchema = z.object({
+  tipo: z.enum(["aderencia_fonte", "metodologia_serie", "rota_fornecedores"], {
+    message:
+      "tipo deve ser um de: aderencia_fonte, metodologia_serie, rota_fornecedores.",
+  }),
+  processoId: z.string().min(1).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -426,6 +436,217 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
   }
 
   // -------------------------------------------------------------------------
+  // Rascunho de justificativa (fase 13.3)
+  //
+  // A ferramenta é de LEITURA, por decisão de escopo: ela reúne os números reais
+  // do processo para o modelo redigir o texto no chat, e não grava em lugar
+  // nenhum. Dois motivos concretos:
+  //
+  // 1. Justificativa é peça de instrução processual. Persistir texto de IA num
+  //    campo que hoje só recebe texto humano apagaria a distinção entre os dois
+  //    para quem ler os autos depois — e nenhum dos três destinos tem coluna
+  //    marcando origem.
+  // 2. Dos três, só `ContratacaoPublica.justificativaAderencia` existe no
+  //    schema. Os outros dois exigiriam migration, e o M13 já quebrou duas vezes
+  //    por código subir antes da migration (CLAUDE.md §9.46).
+  //
+  // O servidor lê o rascunho, edita e cola onde o fluxo já prevê. É a mesma
+  // divisão de trabalho de `registrar_candidatos`: o sistema fornece os dados,
+  // a decisão é humana.
+  // -------------------------------------------------------------------------
+
+  const dec = (v: { toString(): string } | null | undefined): number =>
+    v == null ? 0 : Number(v.toString());
+
+  async function rascunharJustificativa(tipo: string, processoId: string) {
+    const processo = await db.processo.findUnique({
+      where: { id: processoId },
+      // `select` explícito, nunca `include`: coluna nova no schema quebraria a
+      // consulta em produção antes da migration rodar (CLAUDE.md §9.46).
+      select: {
+        id: true,
+        numero: true,
+        objeto: true,
+        itens: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            descricao: true,
+            unidade: true,
+            quantidade: true,
+            fontes: {
+              select: {
+                id: true,
+                tipo: true,
+                descricao: true,
+                status: true,
+                valorUnitario: true,
+                dataReferencia: true,
+                _count: { select: { evidencias: true } },
+              },
+            },
+            seriePrecos: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: {
+                metodo: true,
+                valorEstimado: true,
+                media: true,
+                mediana: true,
+                menorValor: true,
+                coeficienteVariacao: true,
+                totalPrecos: true,
+                precosIncluidos: true,
+                createdAt: true,
+                precos: {
+                  select: {
+                    fonte: true,
+                    descricaoFonte: true,
+                    fornecedorOuOrgao: true,
+                    valorUnitario: true,
+                    dataReferencia: true,
+                    status: true,
+                    motivoExclusao: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        cotacoes: {
+          select: {
+            id: true,
+            status: true,
+            fornecedor: { select: { razaoSocial: true } },
+          },
+        },
+      },
+    });
+    if (!processo) throw new ArgumentosInvalidosError("Processo não encontrado.");
+
+    const cabecalho = { numero: processo.numero, objeto: processo.objeto };
+    const aviso =
+      "Este é um RASCUNHO. Nada foi gravado no processo: o texto que você redigir volta ao " +
+      "servidor, que revisa, ajusta e insere nos autos. Diga isso na sua resposta.";
+
+    if (tipo === "aderencia_fonte") {
+      const itens = processo.itens.map((item) => ({
+        itemId: item.id,
+        descricao: item.descricao,
+        unidade: item.unidade,
+        quantidade: item.quantidade,
+        fontes: item.fontes.map((f) => ({
+          descricao: f.descricao,
+          tipo: f.tipo,
+          status: f.status,
+          valorUnitario: dec(f.valorUnitario),
+          dataReferencia: f.dataReferencia.toISOString().slice(0, 10),
+          totalEvidencias: f._count.evidencias,
+        })),
+      }));
+
+      return {
+        tipo,
+        persistido: false,
+        processo: cabecalho,
+        dados: { itens },
+        orientacao:
+          "Para cada fonte, explique por que o objeto contratado é comparável ao item: mesma " +
+          "natureza, especificação equivalente, unidade e quantidade em ordem compatível. " +
+          "Aponte as diferenças em vez de omiti-las — adaptação declarada sustenta a fonte; " +
+          "adaptação escondida a invalida. Fonte sem evidência anexada não pode ser afirmada " +
+          "como comprovada.",
+        aviso,
+      };
+    }
+
+    if (tipo === "metodologia_serie") {
+      const series = processo.itens.flatMap((item) =>
+        item.seriePrecos.map((s) => {
+          const cv = dec(s.coeficienteVariacao);
+          return {
+            itemId: item.id,
+            item: item.descricao,
+            metodo: s.metodo,
+            valorEstimado: dec(s.valorEstimado),
+            media: dec(s.media),
+            mediana: dec(s.mediana),
+            menorValor: dec(s.menorValor),
+            coeficienteVariacao: cv,
+            totalPrecos: s.totalPrecos,
+            precosIncluidos: s.precosIncluidos,
+            consolidadaEm: s.createdAt.toISOString().slice(0, 10),
+            // O limite não é opinião do modelo: é o mesmo `CV_ANALISE_CRITICA`
+            // que o painel de conformidade aplica (item R-06).
+            analiseCriticaObrigatoria: cv > CV_ANALISE_CRITICA,
+            precos: s.precos.map((p) => ({
+              fonte: p.fonte,
+              descricao: p.descricaoFonte,
+              fornecedorOuOrgao: p.fornecedorOuOrgao,
+              valorUnitario: dec(p.valorUnitario),
+              dataReferencia: p.dataReferencia.toISOString().slice(0, 10),
+              status: p.status,
+              motivoExclusao: p.motivoExclusao,
+            })),
+          };
+        }),
+      );
+
+      return {
+        tipo,
+        persistido: false,
+        processo: cabecalho,
+        dados: { series, limiteAnaliseCritica: CV_ANALISE_CRITICA },
+        orientacao:
+          series.length === 0
+            ? "Não há série consolidada neste processo ainda. Não redija a memória de cálculo: " +
+              "diga ao servidor que é preciso consolidar a série antes."
+            : "Descreva a memória de cálculo: quantos preços entraram, quais foram excluídos e " +
+              `por quê, qual método foi aplicado e por que ele cabe aqui. Se o CV passar de ` +
+              `${CV_ANALISE_CRITICA}%, a análise crítica da dispersão é obrigatória pela IN ` +
+              "65/2021 — trate-a como parte do texto, não como observação. Use os números como " +
+              "vieram; não recalcule nem arredonde por conta própria.",
+        aviso,
+      };
+    }
+
+    // rota_fornecedores
+    const fontesIncluidas = processo.itens.flatMap((i) =>
+      i.fontes.filter((f) => f.status === "incluido"),
+    );
+    const usouFontePublica = fontesIncluidas.some((f) => f.tipo === "contratacao_publica");
+    const semResposta = processo.cotacoes
+      .filter((c) => c.status === "silenciosa")
+      .map((c) => c.fornecedor?.razaoSocial ?? "(fornecedor sem razão social)");
+
+    return {
+      tipo,
+      persistido: false,
+      processo: cabecalho,
+      dados: {
+        usouFontePublica,
+        tiposDeFonteUsados: [...new Set(fontesIncluidas.map((f) => f.tipo))],
+        fornecedoresConsultados: processo.cotacoes.length,
+        fornecedoresQueResponderam: processo.cotacoes.length - semResposta.length,
+        semResposta,
+        atendeMinimoTresFornecedores: processo.cotacoes.length >= MIN_FORNECEDORES_PESQUISA_DIRETA,
+      },
+      orientacao:
+        (usouFontePublica
+          ? "Houve fonte pública na pesquisa, que é a rota prioritária da IN 65/2021. Explique " +
+            "por que as demais fontes foram somadas a ela."
+          : "NÃO houve contratação pública entre as fontes. A IN 65/2021 trata a fonte pública " +
+            "como prioritária, então o texto precisa justificar por que ela não foi usada — " +
+            "ausência de contratação similar, objeto sem paralelo no PNCP, urgência motivada. " +
+            "Sem essa justificativa nos autos, o item R-07 do checklist fica em aberto.") +
+        ` A norma pede ao menos ${MIN_FORNECEDORES_PESQUISA_DIRETA} fornecedores consultados na pesquisa ` +
+        "direta; registre também os que não responderam, porque a consulta sem resposta é " +
+        "parte da diligência e precisa constar.",
+      aviso,
+    };
+  }
+
+  // -------------------------------------------------------------------------
   // Escrita — única ferramenta que grava
   // -------------------------------------------------------------------------
 
@@ -640,6 +861,34 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         required: ["itemId", "candidatoIds", "termoBuscaUsado"],
       },
     },
+    {
+      nome: "rascunhar_justificativa",
+      descricao:
+        "Reúne os dados reais do processo para você redigir uma das três justificativas formais " +
+        "da IN 65/2021. Devolve números, não texto pronto: quem escreve é você, a partir do que " +
+        "vier. O resultado é um RASCUNHO exibido no chat — nada é gravado no processo, e o " +
+        "servidor revisa antes de levar aos autos.",
+      parametros: {
+        type: "object",
+        properties: {
+          tipo: {
+            type: "string",
+            enum: ["aderencia_fonte", "metodologia_serie", "rota_fornecedores"],
+            description:
+              "`aderencia_fonte`: por que cada fonte é comparável ao item. " +
+              "`metodologia_serie`: memória de cálculo da série (método, exclusões, dispersão). " +
+              "`rota_fornecedores`: a rota de pesquisa escolhida e os fornecedores consultados.",
+          },
+          processoId: {
+            type: "string",
+            description: ctx.processoId
+              ? "Opcional: esta conversa já está no processo aberto."
+              : "Obrigatório nesta conversa geral. Descubra com `busca_global`.",
+          },
+        },
+        required: ctx.processoId ? ["tipo"] : ["tipo", "processoId"],
+      },
+    },
   ];
 
   // A busca web só é exposta quando existe chave configurada. Anunciar uma
@@ -699,6 +948,12 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         case "registrar_candidatos": {
           const args = parseArgumentos(registrarSchema, chamada.argumentos);
           return ok(await registrarCandidatos(args));
+        }
+        case "rascunhar_justificativa": {
+          const args = parseArgumentos(rascunharSchema, chamada.argumentos);
+          return ok(
+            await rascunharJustificativa(args.tipo, resolverProcesso(ctx, args.processoId)),
+          );
         }
         default:
           // `parseArgumentos` nunca roda aqui: nome desconhecido é erro do

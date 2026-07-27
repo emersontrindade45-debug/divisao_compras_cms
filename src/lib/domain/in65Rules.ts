@@ -1,5 +1,15 @@
 import type { DomainResult, Violation } from "./types";
 
+/**
+ * Mínimo de fornecedores consultados na pesquisa direta (R-03 da IN 65/2021).
+ *
+ * Separada de `MIN_FONTES_SUFICIENCIA`, que vale 3 pelo mesmo acaso mas mede
+ * outra coisa (fontes com evidência na série). Eram usadas de forma
+ * intercambiável; se um dia a suficiência de fontes mudar para 4, a regra de
+ * fornecedores não pode mudar junto em silêncio.
+ */
+export const MIN_FORNECEDORES_PESQUISA_DIRETA = 3;
+
 const JANELAS_VALIDADE: Record<string, number> = {
   contratacao_publica: 365,
   site_eletronico: 90,
@@ -30,7 +40,7 @@ export function validarMinFornecedores(
     };
   }
 
-  if (fornecedoresConsultados >= 3) {
+  if (fornecedoresConsultados >= MIN_FORNECEDORES_PESQUISA_DIRETA) {
     return { value: undefined, valid: true, violations: [] };
   }
 

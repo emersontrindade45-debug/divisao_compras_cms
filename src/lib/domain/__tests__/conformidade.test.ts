@@ -4,6 +4,7 @@ import {
   MIN_FONTES_SUFICIENCIA,
   type ConformidadeInput,
 } from "../conformidade";
+import { MIN_FORNECEDORES_PESQUISA_DIRETA } from "../in65Rules";
 
 const AGORA = new Date("2026-07-25T12:00:00Z");
 const RECENTE = new Date("2026-07-01T12:00:00Z");
@@ -266,5 +267,26 @@ describe("avaliarConformidade — checklist", () => {
 
   it("constante de suficiência é 3 (exigida pela IN 65/2021)", () => {
     expect(MIN_FONTES_SUFICIENCIA).toBe(3);
+  });
+
+  // As duas valem 3 hoje, e por isso vinham sendo usadas de forma
+  // intercambiável — `MIN_FONTES_SUFICIENCIA` chegou a medir fornecedores. Medem
+  // coisas diferentes: fontes com evidência na série (OP-ADH-04) e fornecedores
+  // consultados na pesquisa direta (R-03). O teste existe para que reunificá-las
+  // seja uma decisão consciente, não um acidente de refatoração.
+  it("mínimo de fornecedores é constante própria, separada da suficiência de fontes", () => {
+    expect(MIN_FORNECEDORES_PESQUISA_DIRETA).toBe(3);
+
+    const r = avaliarConformidade(
+      base({
+        fontes: [fonte("f1", { tipo: "fornecedor_direto" })],
+        cotacoes: [
+          { id: "c1", status: "positiva", temProposta: true, propostaStatus: "valida" },
+        ],
+      }),
+    );
+    const r03 = r.itens.find((i) => i.codigo === "R-03");
+
+    expect(r03?.detalhe).toBe(`1 de ${MIN_FORNECEDORES_PESQUISA_DIRETA} fornecedores consultados`);
   });
 });
