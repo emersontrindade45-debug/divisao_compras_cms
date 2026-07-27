@@ -17,7 +17,7 @@ const ICONE: Record<EstadoItemConformidade, typeof Check> = {
 const CLASSE_ICONE: Record<EstadoItemConformidade, string> = {
   ok: "bg-success/15 text-success",
   atencao: "bg-warning/20 text-warning-foreground dark:text-warning",
-  bloqueio: "bg-danger/15 text-danger",
+  bloqueio: "bg-danger/15 text-danger-strong",
   nao_aplicavel: "bg-muted text-muted-foreground",
 };
 

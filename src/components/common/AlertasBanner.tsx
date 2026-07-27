@@ -10,14 +10,14 @@ const SEVERIDADE_CONFIG = {
     containerClass: "border-danger/30 bg-danger/5",
     iconClass: "text-danger",
     icon: AlertCircle,
-    badgeClass: "bg-danger/10 text-danger",
+    badgeClass: "bg-danger/10 text-danger-strong",
     label: "Crítico",
   },
   aviso: {
     containerClass: "border-warning/30 bg-warning/5",
     iconClass: "text-warning",
     icon: AlertTriangle,
-    badgeClass: "bg-warning/10 text-warning",
+    badgeClass: "bg-warning/10 text-warning-strong",
     label: "Atenção",
   },
   info: {
@@ -49,12 +49,12 @@ export function AlertasBanner({ alertas }: Props) {
         <p className="text-sm font-medium text-muted-foreground">
           {visiveis.length} alerta{visiveis.length !== 1 ? "s" : ""}
           {criticos > 0 && (
-            <span className="ml-1.5 inline-flex items-center rounded-full bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger">
+            <span className="ml-1.5 inline-flex items-center rounded-full bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger-strong">
               {criticos} crítico{criticos !== 1 ? "s" : ""}
             </span>
           )}
           {avisos > 0 && (
-            <span className="ml-1.5 inline-flex items-center rounded-full bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning">
+            <span className="ml-1.5 inline-flex items-center rounded-full bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning-strong">
               {avisos} atenção
             </span>
           )}

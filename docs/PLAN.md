@@ -721,3 +721,27 @@ ao caminho de escrita).
 3. **`PERPLEXITY_API_KEY`** no `.env` e na Vercel — depende do usuário. Sem ela a ferramenta se
    auto-desabilita e o assistente segue com PNCP e busca web da OpenAI, então não bloqueia.
    `OPENAI_ASSISTENTE_MODEL` é opcional (padrão `gpt-5.4-mini`, conferido contra a conta real).
+
+4. ~~**Contraste WCAG 2 AA.**~~ **RESOLVIDA (2026-07-27).** Ter a suíte E2E rodando (consequência
+   da pendência 2) revelou 5 falhas de contraste pré-existentes, invisíveis até então. Duas eram
+   valor de token no modo claro: `--muted-foreground` dava 4.34:1 sobre `--muted` e `--success`
+   dava 4.38:1 sob o texto do badge "aderente" — ambos abaixo do mínimo de 4.5:1.
+
+   As outras três eram um problema **estrutural**, não de valor: `--warning` e `--danger` faziam
+   dois papéis conflitantes ao mesmo tempo — fundo sólido com `-foreground` por cima
+   (`bg-danger text-danger-foreground`) e texto sobre uma tinta clara de si mesmos
+   (`bg-warning/10 text-warning`, que dava 2.5:1). Escurecer o token conserta o segundo e quebra o
+   primeiro: `text-warning-foreground` cairia de 6.5:1 para 3.47:1. Um token não consegue ser fundo
+   e texto ao mesmo tempo. A correção foi criar `--warning-strong` e `--danger-strong`, dedicados
+   ao texto sobre tinta, com valores invertidos no modo escuro (lá a tinta é escura, então o texto
+   precisa ser mais claro que a base). Seis usos passaram a apontar para os tokens novos.
+
+   Os valores foram calculados a partir da luminância relativa dos fundos reais, não escolhidos por
+   tentativa. Resultado: **E2E de 9 passando / 5 falhando para 14 passando / 0 falhando**.
+
+### Capacidade nova: suíte E2E executável
+
+Com banco e navegador disponíveis, `pnpm test:e2e` roda neste ambiente pela primeira vez: 14 testes
+cobrindo login real, fluxo principal e acessibilidade de 5 páginas. É a verificação que a §9.30
+exige — um caminho que atravessa o banco de verdade, em vez de um `GET` de página pública.
+Requer o Chromium do Playwright (`pnpm exec playwright install chromium`) e o Postgres local no ar.

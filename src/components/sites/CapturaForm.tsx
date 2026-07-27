@@ -176,7 +176,7 @@ export function CapturaForm({ sites, processos, onSubmit }: CapturaFormProps) {
           </div>
 
           {isBloqueado && (
-            <div className="rounded-lg border border-danger bg-danger/10 px-3 py-2 text-sm text-danger">
+            <div className="rounded-lg border border-danger bg-danger/10 px-3 py-2 text-sm text-danger-strong">
               <strong>Atenção:</strong> este site está na lista vermelha ou é um marketplace. Capturas de fontes bloqueadas não podem ser utilizadas como evidência em pesquisa de preços pública.
             </div>
           )}

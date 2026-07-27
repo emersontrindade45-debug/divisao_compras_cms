@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 /** Quanto menor a urgência, mais forte o destaque. */
 const CLASSE_URGENCIA: Record<number, string> = {
-  1: "bg-danger/15 text-danger border-danger/20",
+  1: "bg-danger/15 text-danger-strong border-danger/20",
   2: "bg-warning/20 text-warning-foreground border-warning/30 dark:text-warning",
   3: "bg-warning/15 text-warning-foreground border-warning/20 dark:text-warning",
 };

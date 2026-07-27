@@ -76,7 +76,7 @@ export function TabelaSeriePrecos({ serie }: { serie: SeriePrecoFixture }) {
   return (
     <div className="space-y-4">
       {naoConsolidada && (
-        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning-strong">
           <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
           <span>
             Série ainda não consolidada. Os preços abaixo já foram registrados, mas os valores
