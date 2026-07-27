@@ -527,3 +527,17 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     ferramenta de edição com contexto (que casa o bloco inteiro), não manipulação por número de
     linha — ou, no mínimo, rodar `typecheck` imediatamente após qualquer script que reescreva
     arquivos em lote.
+45. **Guarda de autenticação nunca pode depender de a configuração existir — `if (segredo && ...)`
+    é fail-open.** `/api/jobs/lembretes` checava
+    `if (cronSecret && authHeader !== 'Bearer ' + cronSecret) return 401`. Com `CRON_SECRET`
+    ausente do ambiente, a condição curto-circuita para `false` e a rota fica **pública**. Não era
+    teórico: em 2026-07-27 `GET https://divisao-compras-cms.vercel.app/api/jobs/lembretes` respondia
+    **200 sem cabeçalho nenhum**, executando query no banco a cada requisição anônima e devolvendo
+    razão social de fornecedor, número de processo e prazos sempre que houvesse cotação vencendo.
+    A variável nunca havia sido criada na Vercel — e a ausência dela, que deveria fechar a porta,
+    era justamente o que a abria. O padrão correto já existia dois diretórios ao lado, em
+    `/api/admin/migrate`: `if (!secret) return false`. Ao escrever qualquer guarda, perguntar
+    **"o que acontece se esta variável não existir?"** — a resposta tem de ser "nega", nunca
+    "libera". Corolário: variável de ambiente lida pelo código mas ausente do painel de deploy é um
+    achado por si só; conferir a lista real (`vercel env ls`) contra o que o código lê, porque
+    `.env.example` documenta a intenção, não o que está de fato configurado em produção.

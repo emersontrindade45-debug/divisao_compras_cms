@@ -739,6 +739,40 @@ ao caminho de escrita).
    Os valores foram calculados a partir da luminância relativa dos fundos reais, não escolhidos por
    tentativa. Resultado: **E2E de 9 passando / 5 falhando para 14 passando / 0 falhando**.
 
+### Auditoria da Vercel (2026-07-27) — via CLI, não MCP
+
+Não há ferramenta MCP da Vercel nesta sessão, mas a CLI (`vercel` 56.5.0) está instalada no Windows,
+autenticada e com o projeto vinculado (`divisao-compras-cms`). Cruzar `vercel env ls` com o que o
+código realmente lê revelou:
+
+**VULNERABILIDADE — rota de cron pública em produção. Corrigida no código, ainda não deployada.**
+`CRON_SECRET` era lida pelo código mas **nunca existiu** na Vercel. A guarda era
+`if (cronSecret && authHeader !== ...)`, que com a variável ausente curto-circuita e libera.
+Confirmado exercitando produção: `GET /api/jobs/lembretes` respondia **200 sem cabeçalho nenhum**,
+rodando query no banco a cada requisição anônima e expondo razão social de fornecedor, número de
+processo e prazos quando houvesse cotação vencendo em 3 dias. Ver CLAUDE.md §9.45.
+Ordem seguida (a inversa quebraria o cron): **1.** `CRON_SECRET` criada na Vercel em Production, com
+64 chars hex gerados dentro do PowerShell para o valor não passar por contexto nem por log;
+**2.** código passou a fail-closed, no padrão de `/api/admin/migrate`; **3.** 7 testes novos, com a
+falha provada por mutação (voltar ao fail-open derruba os 2 testes do caso "sem segredo").
+Preview ficou sem a variável de propósito: cron só roda em produção, e lá a rota passa a negar tudo.
+**Continua exposta até o deploy** — o código corrigido está apenas commitado localmente.
+
+**Variáveis mortas (definidas na Vercel, lidas por zero arquivos):** `GEMINI_API_KEY`,
+`GOOGLE_SHEETS_PLANILHA_MODELO_ID`, `EMAIL_RESPONSAVEL`, `NEXT_PUBLIC_APP_URL`. Por decisão do
+usuário (2026-07-27) **não foram removidas** — o risco é alguma automação externa ao repositório
+depender delas. Nota: `GEMINI_API_KEY` é credencial ativa sem uso desde o M11; vale revogar no
+Google mesmo mantendo a variável.
+
+**`MIGRATE_URL` não é diagnosticável por aqui.** Está marcada como Sensitive e a Vercel devolve
+`[SENSITIVE]` no `env pull`, então não dá para ler o valor atual nem reconstruir o correto (exigiria
+a senha do banco). Segue como ação do usuário no painel.
+
+**Ausentes para o M13:** `PERPLEXITY_API_KEY`, `OPENAI_ASSISTENTE_MODEL` (esta é opcional).
+**Ausente e conhecida:** `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`, pendência do M11.
+**`ORGAO_CNPJ`** não está definida: o código cai no CNPJ padrão da Câmara, que é o correto aqui, mas
+emite aviso a cada busca.
+
 ### Capacidade nova: suíte E2E executável
 
 Com banco e navegador disponíveis, `pnpm test:e2e` roda neste ambiente pela primeira vez: 14 testes

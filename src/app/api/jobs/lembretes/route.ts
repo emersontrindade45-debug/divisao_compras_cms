@@ -1,13 +1,32 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-// Vercel Cron Job — chamado a cada hora via vercel.json
+// Vercel Cron Job — agendado em vercel.json.
 // Localmente: GET /api/jobs/lembretes
-export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
+//
+// Proteção: header `Authorization: Bearer <CRON_SECRET>`, que a Vercel envia
+// automaticamente às rotas de cron quando a variável existe no projeto.
+//
+// A guarda é **fail-closed**, no mesmo padrão de /api/admin/migrate. A versão
+// anterior era `if (cronSecret && authHeader !== ...)`, que com CRON_SECRET
+// ausente curto-circuitava para false e deixava a rota **pública** — foi o que
+// aconteceu em produção: `GET https://divisao-compras-cms.vercel.app/api/jobs/lembretes`
+// respondia 200 sem cabeçalho nenhum, executando consulta ao banco a cada
+// requisição anônima e expondo razão social do fornecedor, número do processo e
+// prazos sempre que houvesse cotação vencendo em 3 dias.
+//
+// Regra geral: guarda de autenticação nunca depende de a configuração existir.
+// Configuração ausente fecha a porta, não abre.
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+/** Sem segredo configurado, a rota fica fechada. */
+function autorizado(request: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  return request.headers.get("authorization") === `Bearer ${secret}`;
+}
+
+export async function GET(request: Request) {
+  if (!autorizado(request)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   }
 
