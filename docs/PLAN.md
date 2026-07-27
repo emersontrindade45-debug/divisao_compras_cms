@@ -836,7 +836,36 @@ usuário (2026-07-27) **não foram removidas** — o risco é alguma automação
 depender delas. Nota: `GEMINI_API_KEY` é credencial ativa sem uso desde o M11; vale revogar no
 Google mesmo mantendo a variável.
 
-**`MIGRATE_URL` — valor correto levantado (2026-07-27), falta só a senha.** A Vercel não devolve o
+**`MIGRATE_URL` — RESOLVIDA (2026-07-27).** A senha do `postgres` era irrecuperável: o Supabase
+grava o `pooler-url` **sem** ela e nunca reexibe a senha depois da criação; na Vercel as três
+variáveis são Sensitive (write-only). Sobravam duas saídas:
+
+| | resetar a senha do `postgres` | usuário dedicado |
+|---|---|---|
+| Downtime | ~5 min de app fora | nenhum |
+| O que toca | as 3 variáveis, inclusive as que funcionavam | só a `MIGRATE_URL`, já quebrada |
+| Reversível | não | sim (`drop role`) |
+
+Escolhido o segundo: resetar a senha pediria **arriscar o que funciona para consertar o que está
+quebrado**. Criado via Management API (que autentica pelo token da CLI, sem senha de banco):
+
+```sql
+create role migrator with login password '<gerado por RNG criptográfico>';
+grant postgres to migrator;          -- direito de DDL nas tabelas existentes
+alter role migrator set role to postgres;  -- objetos novos nascem com o dono certo
+```
+
+A terceira linha é a que a maioria esquece: sem ela as tabelas criadas pela migration teriam dono
+`migrator` e o schema ficaria inconsistente. Credencial validada de ponta a ponta pelo **session
+pooler** antes de qualquer migration — `session_user = migrator`, `current_user = postgres`,
+`has_schema_privilege('public','CREATE') = true`. O Supavisor **aceita** usuário customizado no
+formato `<usuario>.<project-ref>`, que era o risco em aberto (a doc mostra só exemplos com
+`CREATE USER`).
+
+Ganho colateral: a `MIGRATE_URL` passa a ser **rotacionável sozinha** — se vazar, basta
+`drop role migrator`, sem tocar na aplicação. Com a senha do `postgres` isso era impossível.
+
+Histórico de como o alvo foi levantado, antes da correção: A Vercel não devolve o
 valor atual (Sensitive), mas a CLI do Supabase está instalada e autenticada, e vincular o projeto
 num diretório temporário fez a própria API do Supabase gravar o alvo em `supabase/.temp/pooler-url`:
 

@@ -592,3 +592,21 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     Corolário de captura: redirecionar a saída do PowerShell com `>` grava em **UTF-16LE**; ler com
     `cat` produz texto com bytes nulos entre os caracteres. Usar `iconv -f UTF-16LE`, ou preferir
     `--reporter=list` para arquivo e decodificar na leitura.
+50. **Segredo em comando que pode ecoar a entrada: mascarar a saída SEMPRE, não só quando falha —
+    e `Out-File -Encoding utf8` no PowerShell 5.1 grava BOM.** Ao criar o papel `migrator` no
+    Supabase (2026-07-27), o SQL foi gravado com `Out-File -Encoding utf8`, que no Windows
+    PowerShell 5.1 (não no 7+) escreve **BOM**; o Postgres rejeitou com
+    `syntax error at or near "﻿create"`, e a mensagem de erro da CLI devolveu a **linha
+    inteira** — com a senha em texto claro no log. Os dois erros compõem: o BOM causou a falha, e a
+    falha foi o caminho pelo qual o segredo vazou. Regras: gravar SQL com
+    `[System.IO.File]::WriteAllText($p, $texto, (New-Object System.Text.UTF8Encoding($false)))`;
+    e, ao rodar qualquer comando que receba segredo em arquivo ou argumento, capturar a saída e
+    aplicar `-replace [regex]::Escape($segredo), '<MASCARADO>'` **antes** de imprimir, em vez de
+    contar com o caminho feliz. Mitigação que salvou o caso: o papel não chegou a ser criado, então
+    a senha vazada nunca existiu no banco — mas isso foi sorte, não desenho.
+51. **`$LASTEXITCODE` da CLI do Supabase não é sinal de sucesso — verificar no banco.** A CLI
+    devolve exit 1 só por escrever "A new version is available" em stderr, mesmo quando o comando
+    funcionou. Combinado com `$ErrorActionPreference = 'Stop'`, qualquer aviso em stderr vira erro
+    terminante e aborta o script antes da parte útil. Para confirmar que um `CREATE ROLE`/DDL pegou,
+    consultar `pg_roles`/`information_schema` — é a §9.37 de novo: exercitar a capacidade, não ler
+    um indicador indireto.
