@@ -40,6 +40,33 @@ pnpm db:migrate
 pnpm db:seed
 ```
 
+<details>
+<summary><strong>Alternativa sem Docker: Postgres nativo no WSL</strong></summary>
+
+Quando o Docker Desktop não estiver disponível no WSL, dá para rodar o Postgres
+direto na distribuição, com a mesma configuração do `docker-compose.yml` — assim
+o `DATABASE_URL` do `.env` continua valendo sem alteração:
+
+```bash
+sudo apt-get install -y postgresql
+sudo service postgresql start            # WSL não tem systemd: repetir a cada reinício
+sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+sudo -u postgres createdb divisao_compras
+```
+
+O WSL2 encaminha `localhost` do Windows para a distribuição, então a aplicação
+rodando no Windows (`pnpm dev`) alcança este banco normalmente — verificado com o
+seed em 2026-07-27.
+
+Note que `prisma db seed` invoca `tsx` pelo nome e falha com `ENOENT` se o
+`node_modules/.bin` não estiver no PATH. Rodar `pnpm exec tsx prisma/seed.ts`
+contorna isso.
+
+**Ter um banco local não é conforto, é requisito de conformidade.** Sem ele, toda
+migration estreia em produção — foi a causa raiz das lições §9.19, §9.31 e §9.43
+do CLAUDE.md.
+</details>
+
 ### 4. Iniciar servidor de desenvolvimento
 
 ```bash

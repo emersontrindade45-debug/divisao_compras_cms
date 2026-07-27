@@ -684,13 +684,40 @@ exclusão do órgão próprio (6 falhas), casamento de domínio da lista vermelh
 promoção de site eletrônico (2 falhas, no domínio **e** na action, provando que a guarda está ligada
 ao caminho de escrita).
 
-### Pendências abertas
-1. **Migration não aplicada em lugar nenhum.** Não há Postgres neste ambiente (sem Docker, sem
-   instância local, `.env` aponta para `localhost`), então ela não foi exercitada nem em dev. Só
-   estará "pronta" após rodar em produção e confirmar `Database schema is up to date!` (§9.19) —
-   o que ainda depende da correção da `MIGRATE_URL` na Vercel, pendência herdada do M11.
-2. **`PERPLEXITY_API_KEY` e `OPENAI_ASSISTENTE_MODEL`** precisam entrar no `.env` e na Vercel.
-   O modelo padrão deve ser escolhido consultando os modelos disponíveis na conta, não de memória.
-3. **Ruído de CRLF na árvore de trabalho.** 10 arquivos aparecem modificados no git sem nenhuma
-   mudança de conteúdo — só fim de linha. Não há `.gitattributes` nem `core.autocrlf` configurado.
-   Recomendado adicionar `* text=auto eol=lf` para o problema não voltar.
+### Pendências
+
+1. ~~**Ruído de CRLF na árvore de trabalho.**~~ **RESOLVIDA (2026-07-27).** `.gitattributes` com
+   `* text=auto eol=lf`; os 10 arquivos convertidos no mesmo commit. Árvore ficou com 0 arquivos
+   modificados. `text=auto` preserva a detecção de binário do git, o que protege
+   `docs/ATO2017_2023.md` (UTF-8 com 834 bytes NUL). Regra explícita para
+   `prisma/migrations/**/*.sql`: o checksum em `_prisma_migrations` é do conteúdo do arquivo, e
+   renormalizar migration já aplicada faria o `migrate deploy` recusá-la.
+
+2. ~~**Migration não aplicada / sem banco de desenvolvimento.**~~ **RESOLVIDA em dev
+   (2026-07-27).** A causa raiz não era a `MIGRATE_URL`: era a **ausência de banco de dev**, que
+   fazia toda migration estrear em produção — origem comum das lições §9.19, §9.31 e §9.43.
+   Postgres 18.4 instalado nativamente no WSL com a mesma configuração do `docker-compose.yml`
+   (usuário `postgres`, base `divisao_compras`, porta 5432), então o `.env` valeu sem alteração.
+   Documentado no README.
+   Verificado:
+   - `prisma migrate deploy` → as 5 migrations aplicam; `migrate status` responde
+     **`Database schema is up to date!`**.
+   - **O caminho de produção foi testado à parte.** `migrate deploy` não exercita o runner próprio
+     (`src/lib/migrations/aplicar.ts`), que envolve cada migration em **uma transação** — onde mora
+     o risco do `ALTER TYPE ... ADD VALUE`. Num banco descartável, com as 4 migrations anteriores
+     aplicadas, a do M13 rodou via `psql --single-transaction` e passou; o valor `site_eletronico`
+     é utilizável após o commit.
+   - A constraint de unicidade da instrução global foi provada empiricamente: a segunda linha
+     `chave='global'` é rejeitada pelo banco. E a contraprova confirma o desenho —
+     `UNIQUE(escopo, categoria, processoId)` **aceita duas linhas globais** quando as colunas
+     anuláveis são NULL.
+   - `prisma db seed` rodou **a partir do Windows** contra o Postgres do WSL: 8 processos,
+     8 fornecedores, 12 sites (5 na lista vermelha). Confirma que a app alcança o banco.
+
+   **Continua aberto:** aplicar em **produção**. Depende da correção da `MIGRATE_URL` na Vercel
+   (porta 6543 → 5432, usuário `postgres.projeto` → `postgres.bybkhnxxtbdcggfuatxc`), que é ação
+   do usuário no painel (§8). Só então vale a §9.19.
+
+3. **`PERPLEXITY_API_KEY`** no `.env` e na Vercel — depende do usuário. Sem ela a ferramenta se
+   auto-desabilita e o assistente segue com PNCP e busca web da OpenAI, então não bloqueia.
+   `OPENAI_ASSISTENTE_MODEL` é opcional (padrão `gpt-5.4-mini`, conferido contra a conta real).
