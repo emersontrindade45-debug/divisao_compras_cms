@@ -664,16 +664,21 @@ aquilo é chat *entre pessoas*, não assistente de IA. Ambos os documentos foram
 - [x] `assistente/instrucoes.ts`: composição global → categoria → processo, com chave única.
 - [x] `assistente/laco.ts`: laço agentico com orçamento de 8 passos/turno, fechamento obrigatório
       ao esgotar e tolerância a falha de ferramenta.
-- [ ] `ia/assistenteOpenAI.ts` — Responses API + `web_search` + function calling.
+- [x] `ia/assistenteOpenAI.ts` — Responses API (não `chat.completions`: só ela mistura o tool
+      hospedado `web_search` com function tools na mesma requisição). Modelo configurável por
+      `OPENAI_ASSISTENTE_MODEL`, padrão `gpt-5.4-mini` — escolhido consultando `GET /v1/models`
+      na conta real, não de memória. Descoberta relevante: o `web_search` da OpenAI só aceita
+      `allowed_domains`, sem denylist, o que confirma a necessidade da lista vermelha em código.
+- [x] `assistente/promptSistema.ts` — regras de conformidade no prompt para o modelo *entender*
+      o terreno; o cumprimento continua em código.
 - [ ] `assistente/ferramentas.ts` — registry com os executores.
-- [ ] `assistente/promptSistema.ts`.
 - [ ] `app/api/assistente/chat/route.ts` — SSE.
 
 ### Fases 13.2 e 13.3 — NÃO INICIADAS
 UI do chat (aba no processo + Sheet global), painel de instruções, rascunhos de justificativa.
 
 ### Verificação até aqui
-`tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · **394 testes em 54 arquivos**
+`tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · **421 testes em 56 arquivos**
 (eram 321 em 50). Mutações confirmadas — cada guarda foi desligada e os testes falharam:
 exclusão do órgão próprio (6 falhas), casamento de domínio da lista vermelha (5 falhas), recusa de
 promoção de site eletrônico (2 falhas, no domínio **e** na action, provando que a guarda está ligada
