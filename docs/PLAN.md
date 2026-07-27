@@ -764,9 +764,39 @@ usuário (2026-07-27) **não foram removidas** — o risco é alguma automação
 depender delas. Nota: `GEMINI_API_KEY` é credencial ativa sem uso desde o M11; vale revogar no
 Google mesmo mantendo a variável.
 
-**`MIGRATE_URL` não é diagnosticável por aqui.** Está marcada como Sensitive e a Vercel devolve
-`[SENSITIVE]` no `env pull`, então não dá para ler o valor atual nem reconstruir o correto (exigiria
-a senha do banco). Segue como ação do usuário no painel.
+**`MIGRATE_URL` — valor correto levantado (2026-07-27), falta só a senha.** A Vercel não devolve o
+valor atual (Sensitive), mas a CLI do Supabase está instalada e autenticada, e vincular o projeto
+num diretório temporário fez a própria API do Supabase gravar o alvo em `supabase/.temp/pooler-url`:
+
+```
+postgresql://postgres.bybkhnxxtbdcggfuatxc:<SENHA>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres
+```
+
+Isto é o **Session pooler**, e cada parte foi confirmada contra o projeto real, não deduzida:
+região `sa-east-1` (South America/São Paulo), prefixo `aws-0-` (varia entre projetos — não chutar),
+porta 5432, usuário `postgres.<project-ref>`. Postgres de produção: **15.8**.
+
+A §9.43 foi comprovada empiricamente na mesma sessão, com DNS ao vivo:
+
+| Host | IPv4 | IPv6 |
+|---|---|---|
+| `aws-0-sa-east-1.pooler.supabase.com` (Session pooler) | `15.229.150.166`, `54.94.90.106` | mapeados de IPv4 |
+| `db.bybkhnxxtbdcggfuatxc.supabase.co` (conexão direta) | **nenhum** | `2600:1f1e:…` |
+
+É essa ausência de registro A que produz o `ENOTFOUND` na função da Vercel. Porta 5432 do pooler
+verificada aberta.
+
+**Estado do banco de produção em 2026-07-27** (lido via `supabase db query --linked`, que usa a
+Management API e dispensa a senha): 4 migrations aplicadas, a do M13 **não**; nenhuma das 3 tabelas
+novas existe; nenhuma das 3 colunas novas existe; o enum `TipoCandidatoSimilaridade` tem só 2
+valores. Há **142 linhas** em `resultados_similaridade`, 11 processos e 2 usuários — banco com dados
+reais. Isso confirma que a regressão do `promoverFonte` (§9.46) era real, não hipotética.
+
+O projeto Supabase se chama **"Atendimento Whats"**: nome herdado de um uso anterior, reaproveitado
+para esta aplicação. Confirmado com o usuário — não é apontamento para o projeto errado.
+
+Aplicar a migration continua sendo ação do usuário, por decisão dele (§8 exige autorização explícita
+para DDL em produção).
 
 **Ausentes para o M13:** `PERPLEXITY_API_KEY`, `OPENAI_ASSISTENTE_MODEL` (esta é opcional).
 **Ausente e conhecida:** `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`, pendência do M11.
