@@ -1,0 +1,41 @@
+# Fim de linha: LF no repositório e na árvore de trabalho, em qualquer sistema.
+#
+# Existe porque 10 arquivos apareciam "modificados" no `git status` sem nenhuma
+# mudança de conteúdo — só CRLF gravado por editor no Windows. Diff poluído
+# esconde a alteração real e torna a revisão inútil: um arquivo de 175 linhas
+# aparecia como 175 remoções + 175 inserções idênticas.
+#
+# `text=auto` deixa o git detectar binário sozinho — arquivo com byte NUL nos
+# primeiros 8000 bytes nunca é convertido. É o que protege docs/ATO2017_2023.md,
+# que é UTF-8 válido mas contém 834 bytes NUL.
+* text=auto eol=lf
+
+# Migrations: o checksum gravado em `_prisma_migrations` é do conteúdo do
+# arquivo (ver src/lib/migrations/aplicar.ts) e o `prisma migrate deploy` recusa
+# migration cujo checksum mudou, com uma mensagem que não explica a causa.
+# Todas já estão em LF hoje; fixar aqui impede que uma renormalização futura
+# invalide silenciosamente uma migration já aplicada em produção.
+prisma/migrations/**/*.sql text eol=lf
+
+# Binários declarados. O git já os detectaria pela heurística do NUL, mas ser
+# explícito evita surpresa caso algum deles passe a não ter NUL no início.
+*.ico  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.xlsx binary
+
+# Shell script com CRLF falha com "bad interpreter" mesmo rodando no Windows
+# (WSL, Git Bash), porque o \r entra no caminho do interpretador.
+*.sh text eol=lf
+
+# Batch/cmd do Windows, ao contrário, exigem CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
