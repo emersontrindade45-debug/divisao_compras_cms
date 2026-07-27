@@ -836,6 +836,29 @@ usuário (2026-07-27) **não foram removidas** — o risco é alguma automação
 depender delas. Nota: `GEMINI_API_KEY` é credencial ativa sem uso desde o M11; vale revogar no
 Google mesmo mantendo a variável.
 
+**Migration do M13 — APLICADA EM PRODUÇÃO (2026-07-27).** Executada com `psql` pela credencial
+`migrator`, em uma única transação, a partir do SQL gerado do próprio
+`prisma/migrations/20260727104500_add_assistente_pesquisa/migration.sql` (DDL conferido byte a byte
+contra o repositório antes de rodar). Verificação pós-commit:
+
+| | |
+|---|---|
+| migrations registradas | 5 (era 4) |
+| checksum gravado == SHA-256 do arquivo | **true** — o banco segue intercambiável com `prisma migrate deploy` |
+| tabelas novas / colunas novas | 3 / 3 |
+| enum `TipoCandidatoSimilaridade` | `contratacao_publica, painel_precos, site_eletronico` |
+| `site_eletronico` usável pós-commit | sim (a restrição do `ADD VALUE` vale só dentro da transação) |
+| linhas em `resultados_similaridade` | 142, preservadas |
+
+Efeito colateral que importa: a quebra do `preencherCotacao` (§9.46) **morreu sem deploy** — ela
+existia porque o código pedia colunas inexistentes, e agora elas existem.
+
+Armadilha de verificação encontrada aqui: as colunas novas são `origem`, `conversaId` e
+`termoBuscaUsado` — **camelCase**, como todo o schema deste projeto. Consultar
+`information_schema.columns` com `conversa_id`/`termo_busca_usado` devolve 0 mesmo com a migration
+aplicada, o que se lê como "não aplicou". Conferir a convenção de nome antes de tratar um zero
+como diagnóstico.
+
 **`MIGRATE_URL` — RESOLVIDA (2026-07-27).** A senha do `postgres` era irrecuperável: o Supabase
 grava o `pooler-url` **sem** ela e nunca reexibe a senha depois da criação; na Vercel as três
 variáveis são Sensitive (write-only). Sobravam duas saídas:
