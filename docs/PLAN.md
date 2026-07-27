@@ -772,8 +772,44 @@ Armadilha encontrada: o prompt de sistema é um template literal, e usar crase p
 ferramenta dentro dele **fecha a string** — 5 erros de sintaxe no `tsc` e um "Parsing error" no
 ESLint, ambos apontando para uma linha que parecia texto comum.
 
-`tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · **530 testes em 65 arquivos**
+`tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · **538 testes em 66 arquivos**
 (eram 473 em 60) · `next build` compilou e listou `/api/assistente/chat`.
+
+### Revisão do PR #10 — dois achados aplicados
+
+O `code-reviewer` encontrou um buraco real, reproduzido antes de aceitar:
+
+**Os testes de não-persistência enumeravam métodos proibidos à mão** (`update`, `updateMany`,
+`createMany`) e deixavam `create` de fora. Resultado: a ferramenta podia criar `Fonte`,
+`Evidencia` e `PrecoConsolidado` — as escritas que o comentário de `ferramentas.ts` declara
+proibidas — com os 14 testes verdes. A garantia documentada era justamente a que estava sem teste.
+Corrigido varrendo a **superfície inteira** (8 métodos de escrita × 13 models), que reporta o nome
+exato do que escreveu; enumerar mais nomes repetiria o erro na próxima adição ao schema. Virou a
+§9.56.
+
+**`MIN_FONTES_SUFICIENCIA` media fornecedores.** A constante é documentada como mínimo de *fontes*
+com evidência (OP-ADH-04) e estava contando *cotações* (R-03), aqui e em `conformidade.ts`. Sem bug
+hoje — ambas valem 3 —, mas mudar a suficiência de fontes mudaria a regra de fornecedores em
+silêncio. Criada `MIN_FORNECEDORES_PESQUISA_DIRETA` em `in65Rules.ts`, onde a regra mora,
+substituindo também o `>= 3` que estava hardcodado lá.
+
+### Bug de infraestrutura encontrado pelo PR: preview nunca buildou
+
+O deploy de preview do PR #10 falhou com `Failed to collect page data for /api/jobs/lembretes`.
+Investigado até a causa raiz, não corrigido na primeira hipótese:
+
+`DATABASE_URL` existe **só em Production** (`vercel env ls` confirma o target), então **nenhum
+deploy de preview deste projeto jamais buildou**. Só apareceu agora porque este é o primeiro PR
+desde que o M13 passou a ser feito direto em `main`.
+
+Mas a variável ausente é o gatilho, não a causa: `export const db = createPrismaClient()` conectava
+ao **avaliar o módulo**, então bastava o Next importar a rota para coletar metadados e o `throw`
+derrubava o build inteiro. **`force-dynamic` não resolve** — foi a primeira tentativa, e o build
+continuou quebrando: a diretiva impede a execução do handler, não a importação do módulo. A
+correção é conexão preguiçosa via `Proxy`, com o client nascendo no primeiro acesso a um model.
+
+Verificado na condição real (§9.23): `env DATABASE_URL= next build` reproduzia a falha exata do
+preview em 15 segundos e agora passa, sem gastar ciclo de deploy. Lições §9.54 e §9.55.
 
 ### Verificação até aqui
 `tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · `next build` compilou e
