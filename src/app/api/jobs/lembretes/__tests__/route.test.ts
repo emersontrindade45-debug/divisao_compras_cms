@@ -8,7 +8,7 @@ vi.mock("@/lib/db", () => ({
   db: { cotacao: { findMany: mocks.findMany } },
 }));
 
-import { GET } from "../route";
+import { GET, dynamic } from "../route";
 
 function requisicao(authorization?: string): Request {
   return new Request("https://exemplo.test/api/jobs/lembretes", {
@@ -114,5 +114,14 @@ describe("GET /api/jobs/lembretes", () => {
     const janelaMs =
       argumento.where.dataLimite.lte.getTime() - argumento.where.dataLimite.gt.getTime();
     expect(janelaMs).toBe(3 * 24 * 60 * 60 * 1000);
+  });
+
+  // Regressão real: sem esta declaração o Next tenta coletar dados da rota em
+  // build time, instancia o Prisma sem `DATABASE_URL` e derruba o build inteiro
+  // com "Failed to collect page data for /api/jobs/lembretes". Aconteceu no
+  // primeiro deploy de preview do projeto — a rota é a única que toca o banco
+  // sem ser dinâmica por parâmetro, então é a única que o Next tenta pré-render.
+  it("é declarada dinâmica, para não ser executada em build time", () => {
+    expect(dynamic).toBe("force-dynamic");
   });
 });

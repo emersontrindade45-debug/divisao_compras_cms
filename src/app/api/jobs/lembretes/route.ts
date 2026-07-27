@@ -18,6 +18,14 @@ import { db } from "@/lib/db";
 // Regra geral: guarda de autenticação nunca depende de a configuração existir.
 // Configuração ausente fecha a porta, não abre.
 
+// A rota consulta o banco, então nunca pode ser avaliada em build time: sem
+// isto o Next tenta coletar dados dela ao construir, instancia o Prisma sem
+// `DATABASE_URL` e derruba o build inteiro ("Failed to collect page data").
+// Foi o que quebrou o primeiro deploy de preview do projeto — em produção
+// passava despercebido porque lá a variável existe.
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 /** Sem segredo configurado, a rota fica fechada. */
 function autorizado(request: Request): boolean {
   const secret = process.env.CRON_SECRET;

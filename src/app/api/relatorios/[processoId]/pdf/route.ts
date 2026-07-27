@@ -6,6 +6,11 @@ import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { MemoriaCalculoPdfDocument } from "@/lib/relatorios/memoriaCalculoPdf";
 
+// Consulta o banco e exige sessão: nunca avaliada em build time. Hoje o
+// parâmetro `[processoId]` já impede a pré-renderização, mas a declaração é
+// explícita para a rota não depender de um detalhe de roteamento.
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ processoId: string }> },
