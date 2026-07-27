@@ -541,3 +541,17 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     "libera". Corolário: variável de ambiente lida pelo código mas ausente do painel de deploy é um
     achado por si só; conferir a lista real (`vercel env ls`) contra o que o código lê, porque
     `.env.example` documenta a intenção, não o que está de fato configurado em produção.
+46. **Adicionar coluna ao schema torna `include`/consulta-sem-`select` uma bomba-relógio até a
+    migration rodar.** Ao subir o M13 (2026-07-27), `promoverFonte.ts` usava
+    `findUnique({ where, include: { item: ... } })`. Sem `select`, o Prisma pede **todas** as colunas
+    escalares do model — e o M13 acrescentara `origem`, `conversaId` e `termoBuscaUsado` ao
+    `ResultadoSimilaridade`. Como código e migration sobem em tempos diferentes (§9.19), o deploy
+    levou o client novo para um banco que ainda não tinha as colunas: promover candidato a fonte
+    passou a falhar em runtime com `column does not exist`, num caminho que nenhum teste pegava
+    porque todos mockam o Prisma. A regra: **ao acrescentar coluna a um model já usado, varrer os
+    `findUnique`/`findFirst`/`findMany` daquele model e garantir `select` explícito** — assim a
+    action funciona antes e depois da migration, que é o padrão expand/contract. O teste que protege
+    isso não olha o resultado, olha o **argumento** passado ao Prisma: `include` ausente, `select`
+    presente e sem as colunas novas. Corolário mais amplo: suíte 100% verde com Prisma mockado não
+    diz nada sobre compatibilidade de schema — essa classe de defeito só aparece exercitando o banco
+    real, e o banco de produção é o único que fica atrás do código.

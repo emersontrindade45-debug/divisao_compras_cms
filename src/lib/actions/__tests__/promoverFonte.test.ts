@@ -100,6 +100,42 @@ describe("promoverResultadoSimilaridade", () => {
     expect(evidArg.data.descricao).toContain("Objeto e especificações muito próximos");
   });
 
+  // Regressão de deploy (CLAUDE.md §9.19): código e migration sobem em tempos
+  // diferentes. Com `include` em vez de `select`, o Prisma pede todas as colunas
+  // escalares — inclusive as que o M13 acrescentou — e a action quebra em runtime
+  // enquanto a migration não foi aplicada. Aconteceu em produção em 2026-07-27.
+  it("consulta apenas as colunas que usa, sem as acrescentadas pelo M13", async () => {
+    await promoverResultadoSimilaridade(RESULTADO_ID);
+
+    const argumento = mocks.db.resultadoSimilaridade.findUnique.mock.calls[0]![0] as {
+      select?: Record<string, unknown>;
+      include?: Record<string, unknown>;
+    };
+
+    // `include` traria todos os escalares de volta — é o modo de falha original.
+    expect(argumento.include).toBeUndefined();
+    expect(argumento.select).toBeDefined();
+
+    const colunasDoM13 = ["origem", "conversaId", "termoBuscaUsado"];
+    for (const coluna of colunasDoM13) {
+      expect(argumento.select).not.toHaveProperty(coluna);
+    }
+
+    // E o que a action realmente lê continua sendo pedido.
+    for (const coluna of [
+      "tipoCandidato",
+      "fonteDescricao",
+      "fonteOrgaoOuId",
+      "valorUnitario",
+      "dataReferencia",
+      "scoreFinal",
+      "justificativa",
+      "promovidoParaFonte",
+    ]) {
+      expect(argumento.select).toHaveProperty(coluna, true);
+    }
+  });
+
   // Conformidade IN 65/2021 (CLAUDE.md §8 — bypass de conformidade é bloqueado):
   // um achado na web aberta pelo assistente (M13) não pode virar Fonte por este
   // caminho, porque a Evidencia sairia com `dataHoraAcesso` do instante da

@@ -41,9 +41,28 @@ export async function promoverResultadoSimilaridade(
   const parsed = promoverSchema.safeParse({ resultadoId });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
 
+  // `select` explícito, e não `include`: sem ele o Prisma pede TODAS as colunas
+  // escalares do model, incluindo as que o M13 acrescentou (`origem`,
+  // `conversaId`, `termoBuscaUsado`). Código e migration sobem em tempos
+  // diferentes (CLAUDE.md §9.19) — entre o deploy e a aplicação da migration,
+  // o SELECT referenciaria colunas inexistentes e esta ação quebraria em runtime
+  // com "column does not exist". Listar o que se usa mantém a action compatível
+  // com o banco antes e depois da migration.
   const resultado = await db.resultadoSimilaridade.findUnique({
     where: { id: parsed.data.resultadoId },
-    include: { item: { select: { id: true, processoId: true } } },
+    select: {
+      id: true,
+      tipoCandidato: true,
+      fonteDescricao: true,
+      fonteOrgaoOuId: true,
+      fonteUrl: true,
+      valorUnitario: true,
+      dataReferencia: true,
+      scoreFinal: true,
+      justificativa: true,
+      promovidoParaFonte: true,
+      item: { select: { id: true, processoId: true } },
+    },
   });
 
   if (!resultado) return { error: "Candidato não encontrado" };
