@@ -1,4 +1,5 @@
 import {
+  MIN_FORNECEDORES_PESQUISA_DIRETA,
   validarFontePublica,
   validarMinFornecedores,
   validarRegistroNaoRespondentes,
@@ -167,7 +168,7 @@ export function avaliarConformidade(input: ConformidadeInput): ConformidadeProce
     itens.push({
       codigo: "R-03",
       titulo: "Mínimo de 3 fornecedores consultados",
-      detalhe: `${consultados} de ${MIN_FONTES_SUFICIENCIA} fornecedores consultados`,
+      detalhe: `${consultados} de ${MIN_FORNECEDORES_PESQUISA_DIRETA} fornecedores consultados`,
       estado: minFornecedores.valid ? "ok" : "atencao",
       etapaAlvo: "validacao",
     });

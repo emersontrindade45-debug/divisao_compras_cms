@@ -2,7 +2,8 @@ import "server-only";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { registrarAuditoria } from "@/lib/auth/audit";
-import { avaliarConformidade, MIN_FONTES_SUFICIENCIA } from "@/lib/domain/conformidade";
+import { avaliarConformidade } from "@/lib/domain/conformidade";
+import { MIN_FORNECEDORES_PESQUISA_DIRETA } from "@/lib/domain/in65Rules";
 import { CV_ANALISE_CRITICA } from "@/lib/domain/priceStats";
 import { buscarContratosPNCP } from "@/lib/integracoes/pncp";
 import {
@@ -628,7 +629,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         fornecedoresConsultados: processo.cotacoes.length,
         fornecedoresQueResponderam: processo.cotacoes.length - semResposta.length,
         semResposta,
-        atendeMinimoTresFornecedores: processo.cotacoes.length >= MIN_FONTES_SUFICIENCIA,
+        atendeMinimoTresFornecedores: processo.cotacoes.length >= MIN_FORNECEDORES_PESQUISA_DIRETA,
       },
       orientacao:
         (usouFontePublica
@@ -638,7 +639,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
             "como prioritária, então o texto precisa justificar por que ela não foi usada — " +
             "ausência de contratação similar, objeto sem paralelo no PNCP, urgência motivada. " +
             "Sem essa justificativa nos autos, o item R-07 do checklist fica em aberto.") +
-        ` A norma pede ao menos ${MIN_FONTES_SUFICIENCIA} fornecedores consultados na pesquisa ` +
+        ` A norma pede ao menos ${MIN_FORNECEDORES_PESQUISA_DIRETA} fornecedores consultados na pesquisa ` +
         "direta; registre também os que não responderam, porque a consulta sem resposta é " +
         "parte da diligência e precisa constar.",
       aviso,

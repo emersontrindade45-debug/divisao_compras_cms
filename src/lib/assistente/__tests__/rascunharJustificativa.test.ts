@@ -1,25 +1,93 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  db: {
-    site: { findMany: vi.fn() },
-    processo: { findUnique: vi.fn(), findMany: vi.fn() },
-    item: { findMany: vi.fn(), findUnique: vi.fn() },
-    resultadoSimilaridade: { findMany: vi.fn(), createMany: vi.fn() },
-    // Presentes de propósito: os testes provam que a ferramenta NUNCA escreve.
-    fonte: { create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
-    evidencia: { create: vi.fn() },
-    precoConsolidado: { create: vi.fn() },
-    seriePreco: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() },
-    contratacaoPublica: { update: vi.fn(), updateMany: vi.fn() },
-  },
-  registrarAuditoria: vi.fn(),
-  buscarContratosPNCP: vi.fn(),
-  buscarWebPerplexity: vi.fn(),
-  perplexityConfigurada: vi.fn(),
-  rankearCandidatos: vi.fn(),
-  getProvedorIA: vi.fn(),
-}));
+/**
+ * Toda escrita do Prisma, num único ponto de observação.
+ *
+ * A primeira versão deste arquivo enumerava à mão os métodos proibidos
+ * (`fonte.update`, `contratacaoPublica.updateMany`, ...) e a revisão encontrou
+ * o buraco previsível: `create` de `Fonte`, `Evidencia` e `PrecoConsolidado`
+ * ficou de fora, então a ferramenta podia criar as três com os 14 testes
+ * verdes — justamente as escritas que o comentário de `ferramentas.ts` declara
+ * proibidas. Enumerar à mão foi o que produziu o buraco, então a correção não é
+ * enumerar mais nomes: é fazer qualquer escrita, em qualquer model, cair aqui.
+ */
+const METODOS_DE_ESCRITA = [
+  "create",
+  "createMany",
+  "createManyAndReturn",
+  "update",
+  "updateMany",
+  "upsert",
+  "delete",
+  "deleteMany",
+] as const;
+
+const MODELS = [
+  "site",
+  "processo",
+  "item",
+  "resultadoSimilaridade",
+  "fonte",
+  "evidencia",
+  "precoConsolidado",
+  "seriePreco",
+  "contratacaoPublica",
+  "cotacao",
+  "proposta",
+  "fornecedor",
+  "auditLog",
+] as const;
+
+const mocks = vi.hoisted(() => {
+  const METODOS_ESCRITA = [
+    "create",
+    "createMany",
+    "createManyAndReturn",
+    "update",
+    "updateMany",
+    "upsert",
+    "delete",
+    "deleteMany",
+  ];
+  const MODELS_MOCK = [
+    "site",
+    "processo",
+    "item",
+    "resultadoSimilaridade",
+    "fonte",
+    "evidencia",
+    "precoConsolidado",
+    "seriePreco",
+    "contratacaoPublica",
+    "cotacao",
+    "proposta",
+    "fornecedor",
+    "auditLog",
+  ];
+
+  const db: Record<string, Record<string, ReturnType<typeof vi.fn>>> = {};
+  for (const model of MODELS_MOCK) {
+    db[model] = {
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      count: vi.fn(),
+    };
+    // Toda escrita existe no mock — sem isso um método não previsto lançaria
+    // "is not a function" em vez de ser observado pela asserção.
+    for (const metodo of METODOS_ESCRITA) db[model]![metodo] = vi.fn();
+  }
+
+  return {
+    db,
+    registrarAuditoria: vi.fn(),
+    buscarContratosPNCP: vi.fn(),
+    buscarWebPerplexity: vi.fn(),
+    perplexityConfigurada: vi.fn(),
+    rankearCandidatos: vi.fn(),
+    getProvedorIA: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
@@ -135,20 +203,35 @@ describe("rascunhar_justificativa", () => {
 
   describe("não persiste nada", () => {
     it.each(["aderencia_fonte", "metodologia_serie", "rota_fornecedores"])(
-      "não grava ao rascunhar %s",
+      "não grava em nenhum model ao rascunhar %s",
       async (tipo) => {
         const registry = montarRegistry(CTX_PROCESSO);
 
         await chamar(registry, "rascunhar_justificativa", { tipo });
 
-        expect(mocks.db.fonte.update).not.toHaveBeenCalled();
-        expect(mocks.db.fonte.updateMany).not.toHaveBeenCalled();
-        expect(mocks.db.seriePreco.update).not.toHaveBeenCalled();
-        expect(mocks.db.contratacaoPublica.update).not.toHaveBeenCalled();
-        expect(mocks.db.contratacaoPublica.updateMany).not.toHaveBeenCalled();
-        expect(mocks.db.resultadoSimilaridade.createMany).not.toHaveBeenCalled();
+        // Varre a superfície inteira em vez de enumerar métodos suspeitos:
+        // qualquer escrita, em qualquer model, aparece aqui com o nome exato.
+        const escritas: string[] = [];
+        for (const model of MODELS) {
+          for (const metodo of METODOS_DE_ESCRITA) {
+            const espiao = mocks.db[model]?.[metodo];
+            if (espiao && espiao.mock.calls.length > 0) {
+              escritas.push(`db.${model}.${metodo}`);
+            }
+          }
+        }
+
+        expect(escritas).toEqual([]);
       },
     );
+
+    it("não registra auditoria — não há ato a auditar num rascunho", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      await chamar(registry, "rascunhar_justificativa", { tipo: "aderencia_fonte" });
+
+      expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
+    });
 
     it("marca o retorno como rascunho que exige revisão humana", async () => {
       const registry = montarRegistry(CTX_PROCESSO);
