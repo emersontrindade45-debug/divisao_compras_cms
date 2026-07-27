@@ -6,7 +6,10 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
-import { mapTipoCandidatoParaFonte } from "@/lib/domain/tipoFonteSimilaridade";
+import {
+  mapTipoCandidatoParaFonte,
+  podePromoverCandidato,
+} from "@/lib/domain/tipoFonteSimilaridade";
 import type { ActionResult } from "./processos";
 
 const promoverSchema = z.object({
@@ -45,6 +48,12 @@ export async function promoverResultadoSimilaridade(
 
   if (!resultado) return { error: "Candidato não encontrado" };
   if (resultado.promovidoParaFonte) return { error: "Este candidato já foi promovido" };
+
+  // Candidato achado na web aberta não pode virar Fonte por aqui: a evidência
+  // seria criada com data/hora do instante da promoção, não do acesso real à
+  // página (IN 65/2021). Ver `podePromoverCandidato`.
+  const promocao = podePromoverCandidato(resultado.tipoCandidato);
+  if (!promocao.permitido) return { error: promocao.motivo ?? "Candidato não promovível" };
 
   const itemId = resultado.item.id;
   const tipoFonte = mapTipoCandidatoParaFonte(resultado.tipoCandidato);

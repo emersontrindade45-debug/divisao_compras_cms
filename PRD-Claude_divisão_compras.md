@@ -73,6 +73,16 @@ preços — fica disponível para análise, e a promoção a fonte é sempre uma
 
 Não faz sentido priorizar, nesta versão, Kanban, Multi empresa, Parte premium, Chat/Mensagens, Calendário e Landing Page como núcleo do produto, porque o ganho principal está na inteligência operacional da pesquisa de preços, não em recursos comerciais ou de colaboração social
 
+Assistente de pesquisa com IA (M13): um chat conversacional por processo que lê o que já foi
+pesquisado, refaz buscas de contratações públicas quantas vezes forem necessárias (PNCP e web),
+registra os achados como candidatos e redige as justificativas formais exigidas pela IN 65/2021.
+**Isto não é o "Chat/Mensagens" excluído no parágrafo acima** — aquele é comunicação entre pessoas,
+um recurso de colaboração social sem ganho para a instrução processual. Este é ferramenta de
+pesquisa: a interface conversacional existe porque a busca por similaridade é iterativa por
+natureza, e o pipeline automático de passada única (M10) não tem como refinar o termo quando o
+resultado sai fraco. O assistente registra candidatos, **nunca** cria Fonte — a promoção continua
+sendo ação manual do usuário, como já vale para toda a pesquisa por similaridade.
+
 ## 4. USER PERSONAS
 
 Os principais usuários são servidores do setor de compras da Câmara Municipal de Santos que precisam instruir processos com rapidez, padronização e segurança documental. Eles não precisam de um software genérico de procurement; precisam de uma ferramenta especializada para encontrar e validar preços dentro da lógica exigida pela pesquisa de preços pública. Não precisa de Tipos de Usuários

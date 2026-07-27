@@ -622,3 +622,70 @@ sessão (CLAUDE.md §7); a conferência de layout no browser é o único item n�
 | M10 | `feat/pesquisa-similaridade` | Conformidade | TR → contratos similares → fornecedores, via IA |
 | M11 | `feat/fechamento-m10-producao` | Conformidade/Entrega | Fecha ressalvas do M10 + observabilidade em produção |
 | M12 | `main` | UX | Sidebar em blocos, stepper de etapas, painel de conformidade, dashboard acionável |
+| M13 | `main` | Conformidade/UX | Assistente de pesquisa: chat com PNCP + web (OpenAI e Perplexity), candidatos e justificativas |
+
+---
+
+## M13 — Assistente de pesquisa (OpenAI + Perplexity) — EM ANDAMENTO
+
+**Problema.** O pipeline de similaridade do M10 faz uma passada só: extrai o TR, deriva um termo,
+consulta o PNCP, rankeia e grava candidatos. Quando o termo sai genérico ou o PNCP não devolve nada
+aderente, o fluxo trava — não há como refinar de dentro do sistema. Some-se a isso que o Painel de
+Preços está desativado (`painelPrecos.ts` é stub), então **o PNCP é a única fonte automática**, e a
+web aberta, onde o servidor de fato pesquisa, não tem porta de entrada na plataforma.
+
+**Decisões com o usuário (2026-07-27).** Um chat só, com os motores como ferramentas (o usuário
+nunca escolhe o motor); busca web **por dois caminhos** — `web_search` nativo da OpenAI e Perplexity
+Sonar; chat por processo (persistido) **e** atalho global; o assistente **grava candidato e nunca
+Fonte**; instruções de pesquisa editáveis em **três níveis** (global + categoria + processo);
+formaliza justificativa de aderência, metodológica/memória de cálculo e de rota/fornecedores.
+
+**Ressalva de escopo.** O `CLAUDE.md` §6 e o PRD listavam "Chat/Mensagens" como fora de escopo —
+aquilo é chat *entre pessoas*, não assistente de IA. Ambos os documentos foram corrigidos na fase
+13.0 com aviso explícito para o módulo não ser removido por engano (modo de falha da §9.33).
+
+### Fase 13.0 — Escopo — CONCLUÍDA
+- [x] Ressalva registrada em `CLAUDE.md` §6 e no `PRD-Claude_divisão_compras.md`.
+
+### Fase 13.1 — Fundação — PARCIAL
+- [x] Schema + migration `20260727104500_add_assistente_pesquisa`: models `ConversaAssistente`,
+      `MensagemAssistente`, `InstrucaoPesquisa`; enums `OrigemResultado`, `PapelMensagem`,
+      `EscopoInstrucaoPesquisa`; `site_eletronico` em `TipoCandidatoSimilaridade`; colunas `origem`,
+      `conversaId` e `termoBuscaUsado` em `ResultadoSimilaridade`. SQL gerado por `prisma migrate
+      diff` (não escrito à mão). **Ainda não aplicada em banco algum** — ver pendências.
+- [x] `domain/orgaoProprio.ts`: exclusão do CNPJ do próprio órgão promovida de privada do
+      `pncp.ts` a fonte única, para que a busca web herde a regra (§9.9 + §9.33).
+- [x] `domain/tipoFonteSimilaridade.ts`: `podePromoverCandidato` recusa promover achado de site
+      eletrônico a Fonte — a evidência sairia com data/hora da promoção, não do acesso real.
+- [x] `integracoes/perplexity.ts`: `fetch` + Zod (sem dependência nova), com
+      `search_domain_filter` (lista branca/vermelha, teto de 20) e `search_recency_filter: year`.
+- [x] `assistente/guardas.ts`: filtro de órgão próprio, lista vermelha por sufixo de domínio e
+      relato dos descartes.
+- [x] `assistente/instrucoes.ts`: composição global → categoria → processo, com chave única.
+- [x] `assistente/laco.ts`: laço agentico com orçamento de 8 passos/turno, fechamento obrigatório
+      ao esgotar e tolerância a falha de ferramenta.
+- [ ] `ia/assistenteOpenAI.ts` — Responses API + `web_search` + function calling.
+- [ ] `assistente/ferramentas.ts` — registry com os executores.
+- [ ] `assistente/promptSistema.ts`.
+- [ ] `app/api/assistente/chat/route.ts` — SSE.
+
+### Fases 13.2 e 13.3 — NÃO INICIADAS
+UI do chat (aba no processo + Sheet global), painel de instruções, rascunhos de justificativa.
+
+### Verificação até aqui
+`tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · **394 testes em 54 arquivos**
+(eram 321 em 50). Mutações confirmadas — cada guarda foi desligada e os testes falharam:
+exclusão do órgão próprio (6 falhas), casamento de domínio da lista vermelha (5 falhas), recusa de
+promoção de site eletrônico (2 falhas, no domínio **e** na action, provando que a guarda está ligada
+ao caminho de escrita).
+
+### Pendências abertas
+1. **Migration não aplicada em lugar nenhum.** Não há Postgres neste ambiente (sem Docker, sem
+   instância local, `.env` aponta para `localhost`), então ela não foi exercitada nem em dev. Só
+   estará "pronta" após rodar em produção e confirmar `Database schema is up to date!` (§9.19) —
+   o que ainda depende da correção da `MIGRATE_URL` na Vercel, pendência herdada do M11.
+2. **`PERPLEXITY_API_KEY` e `OPENAI_ASSISTENTE_MODEL`** precisam entrar no `.env` e na Vercel.
+   O modelo padrão deve ser escolhido consultando os modelos disponíveis na conta, não de memória.
+3. **Ruído de CRLF na árvore de trabalho.** 10 arquivos aparecem modificados no git sem nenhuma
+   mudança de conteúdo — só fim de linha. Não há `.gitattributes` nem `core.autocrlf` configurado.
+   Recomendado adicionar `* text=auto eol=lf` para o problema não voltar.

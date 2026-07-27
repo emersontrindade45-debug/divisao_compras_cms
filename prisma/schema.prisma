@@ -35,6 +35,35 @@ enum TipoFonte {
 enum TipoCandidatoSimilaridade {
   contratacao_publica
   painel_precos
+  // Achado pelo assistente (M13) numa busca na web aberta. NÃO é promovível a
+  // Fonte pelo fluxo de similaridade: evidência de site exige data/hora do
+  // acesso real e arquivo capturado (IN 65/2021), o que só o módulo de sites
+  // (CapturaEvidencia) produz. Ver `podePromoverCandidato` em
+  // src/lib/domain/tipoFonteSimilaridade.ts.
+  site_eletronico
+}
+
+/**
+ * Como o candidato de similaridade entrou na base (M13).
+ */
+enum OrigemResultado {
+  pipeline_automatico
+  assistente
+}
+
+enum PapelMensagem {
+  user
+  assistant
+  tool
+}
+
+/**
+ * Nível em que uma instrução de pesquisa se aplica (M13).
+ */
+enum EscopoInstrucaoPesquisa {
+  global
+  categoria
+  processo
 }
 
 enum AderenciaFonte {
@@ -102,6 +131,9 @@ model User {
   updatedAt    DateTime   @updatedAt
   auditLogs    AuditLog[]
 
+  conversas          ConversaAssistente[]
+  instrucoesPesquisa InstrucaoPesquisa[]
+
   @@map("users")
 }
 
@@ -126,6 +158,9 @@ model Processo {
   capturas     CapturaEvidencia[]
   cotacoes     Cotacao[]
   auditLogs    AuditLog[]
+
+  conversas          ConversaAssistente[]
+  instrucoesPesquisa InstrucaoPesquisa[]
 
   @@map("processos")
 }
@@ -166,12 +201,22 @@ model ResultadoSimilaridade {
   adaptado               Boolean                   @default(false)
   justificativa          String
   promovidoParaFonte     Boolean                   @default(false)
+  // Origem do candidato (M13). O default mantém válidas as linhas gravadas pelo
+  // pipeline automático antes desta migration.
+  origem                 OrigemResultado           @default(pipeline_automatico)
+  // Conversa que gerou o candidato — só preenchido quando origem = assistente.
+  conversaId             String?
+  // Termo efetivamente usado na busca que achou este candidato. Alimenta a
+  // análise de quais termos produzem candidatos que viram Fonte.
+  termoBuscaUsado        String?
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
 
-  item  Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  fonte Fonte?
+  item     Item                @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  fonte    Fonte?
+  conversa ConversaAssistente? @relation(fields: [conversaId], references: [id], onDelete: SetNull)
 
+  @@index([conversaId])
   @@map("resultados_similaridade")
 }
 
@@ -405,4 +450,81 @@ model AuditLog {
   cotacao  Cotacao?  @relation(fields: [cotacaoId], references: [id])
 
   @@map("audit_logs")
+}
+
+// ─── Assistente de pesquisa (M13) ────────────────────────────────────────────
+
+/**
+ * Conversa com o assistente de pesquisa. `processoId` nulo é o que distingue a
+ * conversa global (atalho da Topbar) da conversa ancorada num processo.
+ */
+model ConversaAssistente {
+  id         String   @id @default(cuid())
+  processoId String?
+  userId     String
+  titulo     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  processo   Processo?               @relation(fields: [processoId], references: [id], onDelete: Cascade)
+  user       User                    @relation(fields: [userId], references: [id])
+  mensagens  MensagemAssistente[]
+  candidatos ResultadoSimilaridade[]
+
+  @@index([processoId])
+  @@index([userId])
+  @@map("conversas_assistente")
+}
+
+model MensagemAssistente {
+  id                String        @id @default(cuid())
+  conversaId        String
+  papel             PapelMensagem
+  conteudo          String
+  // Rastro das ferramentas usadas no turno: [{ ferramenta, argumentos,
+  // resumoResultado, duracaoMs }]. É o que a UI mostra como "passos" e o que
+  // permite auditar de qual fonte veio cada afirmação da IA.
+  ferramentasUsadas Json?
+  // [{ url, titulo, data }] das buscas web. Nunca vira Evidencia sozinho.
+  citacoes          Json?
+  modelo            String?
+  tokensEntrada     Int?
+  tokensSaida       Int?
+  createdAt         DateTime      @default(now())
+
+  conversa ConversaAssistente @relation(fields: [conversaId], references: [id], onDelete: Cascade)
+
+  @@index([conversaId])
+  @@map("mensagens_assistente")
+}
+
+/**
+ * Regras de pesquisa escritas pelos servidores para o assistente melhorar as
+ * buscas de similaridade. Aplicadas em três níveis, concatenadas nesta ordem:
+ * global → categoria do item → processo aberto.
+ * `chave` existe porque `@@unique([escopo, categoria, processoId])` NÃO
+ * garantiria unicidade: no Postgres, NULL é distinto de NULL, e dois registros
+ * globais (ambos com categoria/processoId nulos) passariam pela constraint.
+ * A chave textual ("global", "categoria:mobiliario", "processo:<id>") torna a
+ * unicidade verificável pelo banco, não por checagem em código (CLAUDE.md §9.14).
+ */
+model InstrucaoPesquisa {
+  id              String                  @id @default(cuid())
+  escopo          EscopoInstrucaoPesquisa
+  categoria       String?
+  processoId      String?
+  chave           String                  @unique
+  conteudo        String
+  versao          Int                     @default(1)
+  ativo           Boolean                 @default(true)
+  atualizadoPorId String
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  processo      Processo? @relation(fields: [processoId], references: [id], onDelete: Cascade)
+  atualizadoPor User      @relation(fields: [atualizadoPorId], references: [id])
+
+  @@index([escopo])
+  @@index([processoId])
+  @@map("instrucoes_pesquisa")
 }

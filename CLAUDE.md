@@ -168,9 +168,16 @@ Card de métrica do dashboard.
 validador de sites, cadastro de fornecedores, disparo/controle de e-mails de cotação, checklist
 de propostas, consolidação da série de preços, dashboards, auth/RBAC, busca/filtros, relatórios.
 
-**Fora (não priorizar):** Kanban, multiempresa, planos premium, chat/mensagens, calendário,
-landing page comercial. O valor está na **inteligência operacional da pesquisa**, não em
+**Fora (não priorizar):** Kanban, multiempresa, planos premium, chat/mensagens **entre pessoas**,
+calendário, landing page comercial. O valor está na **inteligência operacional da pesquisa**, não em
 recursos sociais ou comerciais.
+
+> **Ressalva — o assistente de IA (M13) não é o "chat/mensagens" excluído acima.** A exclusão vale
+> para comunicação entre usuários (recurso social). O assistente de pesquisa é ferramenta de
+> pesquisa: interface conversacional sobre PNCP + web + base interna, porque a busca por
+> similaridade é iterativa e o pipeline de passada única do M10 não sabe refinar o termo quando o
+> resultado sai fraco. Decidido com o usuário em 2026-07-27. **Não remover este módulo alegando
+> que "chat está fora do PRD"** — é exatamente o modo de falha da §9.33.
 
 ## 7. Processo de trabalho
 - Quebrar o build em **milestones entregáveis**; core primeiro, iterar depois.

@@ -1,5 +1,6 @@
 import "server-only";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
+import { cnpjOrgaoProprio, normalizarCnpj } from "@/lib/domain/orgaoProprio";
 
 const PNCP_SEARCH_BASE_URL = "https://pncp.gov.br/api/search";
 const PNCP_ITENS_BASE_URL = "https://pncp.gov.br/pncp-api/v1";
@@ -13,37 +14,10 @@ const MAX_TENTATIVAS = 3;
 const BACKOFF_BASE_MS = 1000;
 const LOTE_BUSCA_ITENS = 5;
 
-// CNPJ da Câmara Municipal de Santos. Um contrato do próprio órgão não pode servir de
-// referência de preço para sua própria renovação/prorrogação (IN 65/2021), então ele é
-// excluído das buscas de similaridade. O fallback é intencional e não deve virar erro:
-// a regra de conformidade precisa valer mesmo sem ORGAO_CNPJ definido no ambiente.
-const CNPJ_ORGAO_PADRAO = "49203409000102";
-
-// Flag de módulo: o aviso do fallback sai uma única vez por processo. cnpjOrgaoProprio()
-// é chamada a cada busca (uma por item da cotação), e repetir o alerta afogaria o log.
-let avisoFallbackCnpjEmitido = false;
-
-/** Remove máscara (pontos, barra, hífen) para comparar CNPJs vindos de formatos diferentes. */
-function normalizarCnpj(cnpj: string | null | undefined): string {
-  return (cnpj ?? "").replace(/\D/g, "");
-}
-
-function cnpjOrgaoProprio(): string {
-  const configurado = normalizarCnpj(process.env.ORGAO_CNPJ);
-  if (configurado) return configurado;
-
-  if (!avisoFallbackCnpjEmitido) {
-    avisoFallbackCnpjEmitido = true;
-    console.warn(
-      `[PNCP] ORGAO_CNPJ não está definida no ambiente. Usando o CNPJ padrão ${CNPJ_ORGAO_PADRAO} ` +
-        "(Câmara Municipal de Santos) para excluir contratações do próprio órgão das buscas de " +
-        "similaridade, conforme a IN 65/2021. Se esta instalação pertence a outro órgão, os " +
-        "contratos DELE continuarão aparecendo como candidatos de preço — defina ORGAO_CNPJ para " +
-        "corrigir a exclusão.",
-    );
-  }
-  return CNPJ_ORGAO_PADRAO;
-}
+// A exclusão do próprio órgão (IN 65/2021, CLAUDE.md §9.9) mora em
+// `domain/orgaoProprio.ts`. Ela saiu daqui para virar fonte única: enquanto era
+// privada deste módulo, qualquer fonte nova — como a busca web do assistente
+// (M13) — nascia sem a regra.
 
 /** Monta a URL do edital no portal PNCP: /app/editais/{cnpj}/{ano}/{sequencial}. */
 function montarUrlEdital(processo: PNCPSearchItem): string {

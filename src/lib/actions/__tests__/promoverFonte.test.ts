@@ -100,6 +100,30 @@ describe("promoverResultadoSimilaridade", () => {
     expect(evidArg.data.descricao).toContain("Objeto e especificações muito próximos");
   });
 
+  // Conformidade IN 65/2021 (CLAUDE.md §8 — bypass de conformidade é bloqueado):
+  // um achado na web aberta pelo assistente (M13) não pode virar Fonte por este
+  // caminho, porque a Evidencia sairia com `dataHoraAcesso` do instante da
+  // promoção em vez do acesso real à página. O caminho válido é a captura pelo
+  // módulo de Sites.
+  it("recusa promover candidato de site eletrônico e não escreve nada", async () => {
+    mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(
+      resultadoBase({ tipoCandidato: "site_eletronico" }),
+    );
+
+    const res = await promoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.data).toBeUndefined();
+    expect(res.error).toMatch(/data e hora/i);
+    // A recusa precisa acontecer ANTES de qualquer escrita: nem a transação abre.
+    expect(mocks.db.$transaction).not.toHaveBeenCalled();
+    expect(mocks.tx.fonte.create).not.toHaveBeenCalled();
+    expect(mocks.tx.evidencia.create).not.toHaveBeenCalled();
+    expect(mocks.tx.precoConsolidado.create).not.toHaveBeenCalled();
+    expect(mocks.tx.resultadoSimilaridade.updateMany).not.toHaveBeenCalled();
+    // Nada aconteceu, então não há o que auditar.
+    expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
+  });
+
   it("cria uma nova série zerada quando o item ainda não tem série", async () => {
     mocks.tx.seriePreco.findFirst.mockResolvedValue(null);
 
