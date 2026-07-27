@@ -555,3 +555,21 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     presente e sem as colunas novas. Corolário mais amplo: suíte 100% verde com Prisma mockado não
     diz nada sobre compatibilidade de schema — essa classe de defeito só aparece exercitando o banco
     real, e o banco de produção é o único que fica atrás do código.
+47. **Teste de rota que devolve `ReadableStream` precisa drenar o stream antes de asserir — senão
+    testa uma corrida.** O corpo do `start()` de um `ReadableStream` roda **depois** que o handler
+    já retornou a `Response`. Ao testar a rota SSE do assistente (2026-07-27), dois casos que
+    verificavam gravação de mensagem e auditoria passavam sem consumir o stream: passavam por sorte
+    de ordenação de microtask, e o teste vizinho — idêntico na estrutura — falhava com "Number of
+    calls: 0". Nenhum dos dois provava coisa alguma. A correção é um helper que faz
+    `await res.clone().text()` antes das asserções. Regra geral: quando o efeito que se quer
+    observar acontece **fora** da função que se chamou (stream, `queueMicrotask`, `after()`,
+    promessa não aguardada), o teste precisa de um ponto de sincronização explícito; "passou" sem
+    ele é indistinguível de "correu antes". Sintoma diagnóstico: dois testes com a mesma forma e
+    resultados diferentes.
+48. **Exit code do PowerShell não é exit code do comando quando se usa `2>&1`.** `next build`
+    rodado via interop com `2>&1 | Out-String` sai com código 1 mesmo compilando: o aviso de
+    deprecação do `middleware` vai para stderr, o PowerShell o converte em `NativeCommandError` e
+    contamina o status. Ler o exit code aqui e reportar "build falhou" seria falso — a evidência
+    real está no log (`✓ Compiled successfully` seguido da tabela de rotas). Vale a recíproca: em
+    ambiente com interop, confirmar sucesso/falha pelo **conteúdo** do log, e reservar o exit code
+    para comandos rodados sem redirecionamento de stderr.

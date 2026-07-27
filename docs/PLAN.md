@@ -671,18 +671,57 @@ aquilo é chat *entre pessoas*, não assistente de IA. Ambos os documentos foram
       `allowed_domains`, sem denylist, o que confirma a necessidade da lista vermelha em código.
 - [x] `assistente/promptSistema.ts` — regras de conformidade no prompt para o modelo *entender*
       o terreno; o cumprimento continua em código.
-- [ ] `assistente/ferramentas.ts` — registry com os executores.
-- [ ] `app/api/assistente/chat/route.ts` — SSE.
+- [x] `assistente/ferramentas.ts` — registry com os executores. Duas decisões estruturais:
+      **(a) o modelo nunca digita um preço** — `registrar_candidatos` aceita apenas IDs de
+      candidatos que uma busca da própria conversa devolveu (catálogo em memória do registry);
+      id desconhecido é recusado, então valor, órgão e data vêm sempre da fonte. **(b) o modelo
+      nunca atribui um score** — a escrita roda o mesmo `rankearCandidatos` do pipeline automático
+      (filtro de recência da IN 65 + corte por score mínimo), o que mantém candidato do assistente
+      e candidato do robô comparáveis na mesma tabela. Escreve só `ResultadoSimilaridade`; nunca
+      `Fonte`, `Evidencia`, `SeriePreco` ou `PrecoConsolidado`. Numa conversa de processo o escopo
+      é fixo: ler ou escrever em outro processo é recusado.
+- [x] `assistente/carregarInstrucoes.ts` — leitura dos 3 niveis. `ClassificacaoItem` só tem
+      `comum`/`especifico` e não serve de categoria de pesquisa; o casamento do nível "categoria"
+      é textual contra objeto + descrição dos itens + palavras-chave. Separado de `instrucoes.ts`
+      para aquele módulo seguir puro e testável sem mock de Prisma.
+- [x] `app/api/assistente/chat/route.ts` — SSE. `getCurrentUser` (401 JSON) em vez de
+      `requireAuth`, que redireciona e devolveria HTML no lugar do stream. O `conversaId` vem do
+      cliente, então o dono é validado — sem isso qualquer usuário autenticado leria a conversa de
+      outro pelo id. Só mensagens `user`/`assistant` voltam ao modelo: as `tool` de turnos
+      anteriores são JSON bruto de busca, caro em token e já resumido pelo assistente. Falha vai
+      **pelo stream**, não por status HTTP — o 200 já saiu com o primeiro evento, e lançar deixaria
+      o cliente com stream truncado e nada na tela. `maxDuration = 60` (teto do plano Hobby,
+      aceito em todos).
 
 ### Fases 13.2 e 13.3 — NÃO INICIADAS
 UI do chat (aba no processo + Sheet global), painel de instruções, rascunhos de justificativa.
 
 ### Verificação até aqui
-`tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · **421 testes em 56 arquivos**
-(eram 321 em 50). Mutações confirmadas — cada guarda foi desligada e os testes falharam:
-exclusão do órgão próprio (6 falhas), casamento de domínio da lista vermelha (5 falhas), recusa de
-promoção de site eletrônico (2 falhas, no domínio **e** na action, provando que a guarda está ligada
-ao caminho de escrita).
+`tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · `next build` compilou e
+listou `/api/assistente/chat` · **473 testes em 60 arquivos** (eram 429 em 57 ao fim da fase
+anterior; 321 em 50 no início do M13).
+
+Mutações confirmadas — cada guarda foi desligada e os testes falharam. Fases anteriores: exclusão do
+órgão próprio (6 falhas), casamento de domínio da lista vermelha (5), recusa de promoção de site
+eletrônico (2, no domínio **e** na action). Fase 13.1, seis mutações com mapeamento 1:1:
+
+| Guarda desligada | Teste que caiu |
+|---|---|
+| Checagem de id desconhecido em `registrar_candidatos` | 2 testes (recusa de id forjado + isolamento entre conversas) |
+| Escopo de processo na escrita | "recusa escrever em item de outro processo" |
+| `filtrarResultadosWeb` na busca web | "descarta resultado de domínio da lista vermelha" |
+| Gate `perplexityConfigurada()` | "não é anunciada quando a Perplexity não está configurada" |
+| Dono da conversa na rota SSE | "recusa conversa de outro usuário" |
+| Filtro de mensagens `tool` no histórico | "não reenvia ao modelo as mensagens `tool`" |
+
+Armadilha encontrada nos testes da rota: o corpo de um `ReadableStream` roda **depois** que `POST`
+retorna. Asserir sobre gravação ou auditoria sem drenar o stream testa uma corrida — dois testes
+passavam por sorte de ordenação de microtask. O helper `postCompleto` consome o stream antes de
+asserir.
+
+Artefato do ambiente, não do código: `next build` rodado pelo PowerShell com `2>&1` sai com código 1
+mesmo compilando, porque o aviso de deprecação do `middleware` vira error record do PowerShell. A
+evidência de sucesso é o `✓ Compiled successfully` seguido da tabela de rotas — não o exit code.
 
 ### Pendências
 
