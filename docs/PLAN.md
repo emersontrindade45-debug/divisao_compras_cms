@@ -548,9 +548,14 @@ fornecedor/sites documentadas acima.
 - **Formatação do CV em pt-BR:** `alertas.ts` usa `toFixed(1)`, gerando `"CV de 42.6%"` onde a UI
   pt-BR esperaria `42,6%`. Dois testes fixam o formato atual e sinalizarão o ponto exato quando
   for corrigido para `toLocaleString("pt-BR")`.
-- **Worktrees não herdam `.env`** (é gitignored), então `pnpm build` falha neles em "collecting
-  page data" com `DATABASE_URL environment variable is not set`. Contornável com variável dummy
-  inline; vale decidir se o build deve ser resiliente a isso ou se basta documentar.
+- ~~**Worktrees não herdam `.env`**, então `pnpm build` falha neles em "collecting page data" com
+  `DATABASE_URL environment variable is not set`.~~ **RESOLVIDA (2026-07-27).** Era o mesmo defeito
+  que quebrava o deploy de preview, visto de outro ângulo: `lib/db.ts` conectava ao avaliar o
+  módulo, então qualquer build sem a variável caía. Com a conexão preguiçosa (§9.54), o build passa
+  sem `DATABASE_URL` — verificado com `env DATABASE_URL= next build`. A pergunta que a pendência
+  deixava em aberto ("o build deve ser resiliente a isso?") foi respondida na prática: sim, e não
+  por conveniência de worktree, mas porque **Preview nunca teve a variável** e nenhum preview do
+  projeto jamais buildou (§9.55).
 
 ### Critério de aceite
 Cada ressalva do M10 está ou implementada ou formalmente descartada (com justificativa registrada
@@ -1004,7 +1009,10 @@ para esta aplicação. Confirmado com o usuário — não é apontamento para o 
 Aplicar a migration continua sendo ação do usuário, por decisão dele (§8 exige autorização explícita
 para DDL em produção).
 
-**Ausentes para o M13:** `PERPLEXITY_API_KEY`, `OPENAI_ASSISTENTE_MODEL` (esta é opcional).
+**~~Ausentes para o M13:~~** `PERPLEXITY_API_KEY` **criada em Production em 2026-07-27** e ativa
+desde o deploy do merge do PR #10. Validada contra a API real antes de subir (HTTP 200, modelo
+`sonar`, 11 citações) — formato correto não prova chave ativa (§9.37). `OPENAI_ASSISTENTE_MODEL`
+segue ausente e é opcional (padrão `gpt-5.4-mini`).
 **Ausente e conhecida:** `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`, pendência do M11.
 **`ORGAO_CNPJ`** não está definida: o código cai no CNPJ padrão da Câmara, que é o correto aqui, mas
 emite aviso a cada busca.
@@ -1015,3 +1023,45 @@ Com banco e navegador disponíveis, `pnpm test:e2e` roda neste ambiente pela pri
 cobrindo login real, fluxo principal e acessibilidade de 5 páginas. É a verificação que a §9.30
 exige — um caminho que atravessa o banco de verdade, em vez de um `GET` de página pública.
 Requer o Chromium do Playwright (`pnpm exec playwright install chromium`) e o Postgres local no ar.
+
+---
+
+## Estado ao fim da sessão de 2026-07-27
+
+**M13 fechado e em produção.** `main` = `origin/main` = `03f151b` (merge do PR #10), árvore limpa,
+deploy `dpl_7KfmdDA` `READY` com `target: production`. As quatro fases (13.0 a 13.3) estão no ar.
+
+Verificado em produção após o deploy: `/login` 200 · `/api/jobs/lembretes` sem cabeçalho **401**
+(o fail-closed da §9.45 confirmado no ar) · `/api/busca` sem sessão 401 · `/dashboard` 307 ·
+`get_runtime_errors` **sem nenhum erro** nas 2h seguintes.
+
+**Ressalva honesta:** nenhum caminho autenticado foi exercitado de ponta a ponta nesta sessão —
+isso exigiria credencial de usuário real. A ausência de erro de runtime é forte (foi assim que a
+§9.30 apareceu), mas não substitui um login de verdade. O teste que fecharia a lacuna: entrar na
+aplicação, abrir um processo e o painel do assistente, e confirmar que a busca web da Perplexity
+aparece no rastro de ferramentas.
+
+### O que continua aberto (tudo depende de ação do usuário)
+
+1. **`DATABASE_URL` e `AUTH_SECRET` não existem em Preview.** Depois da §9.54 os previews
+   *buildam*, mas não servem nenhuma página que toque o banco — revisar um PR abrindo o preview
+   ainda não funciona de verdade. Criar as duas nesse target resolve.
+2. **`SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN`** — pendência herdada do M11.
+3. **`ORGAO_CNPJ`** não definida: o código cai no CNPJ padrão da Câmara, que é o correto, mas emite
+   aviso a cada busca.
+4. **`GEMINI_API_KEY`** é credencial ativa sem uso desde o M11. A variável foi mantida por decisão
+   do usuário (risco de automação externa depender dela), mas vale **revogar a chave no Google**.
+5. **Dois worktrees órfãos** em `.claude/worktrees/` (`agent-a3d112dc66d2bf3df`,
+   `agent-a6a6060fd0c4eac2f`). Verificado: ambos são **ancestrais de `main`**, já mesclados em
+   25/07, sem trabalho não commitado — não há nada a recuperar. A remoção foi bloqueada pelo
+   classificador de permissões do agente; o diretório já está no `.gitignore`, então não fazem mal.
+   Para limpar: `git worktree remove --force <caminho>` nos dois, depois `git branch -D` nas
+   branches homônimas.
+6. **13 branches remotas** de milestones antigas nunca podadas (o `--prune` desta sessão removeu 3
+   já apagadas no servidor; as demais continuam vivas no remoto).
+
+### Fase seguinte
+
+Não há milestone pendente no plano: M0 a M13 estão concluídos. Próximo trabalho é decisão do
+usuário — usar o sistema em processos reais e deixar o uso apontar o que falta é o caminho mais
+provável de render um M14 útil.
