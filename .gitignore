@@ -2,6 +2,11 @@
 .agents/
 skills-lock.json
 .claude/scheduled_tasks.lock
+# symlinks para .agents/ (fora do repo): num clone virariam links quebrados
+.claude/skills/find-skills
+.claude/skills/supabase
+# worktrees de agentes: .next/node_modules stale que poluem lint/build (CLAUDE.md §9.17)
+.claude/worktrees/
 
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
