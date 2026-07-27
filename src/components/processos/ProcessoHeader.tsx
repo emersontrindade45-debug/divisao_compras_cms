@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,14 @@ function formatarData(iso: string): string {
   return `${dia}/${mes}/${ano}`;
 }
 
-export function ProcessoHeader({ processo }: { processo: ProcessoFixture }) {
+export function ProcessoHeader({
+  processo,
+  acoes,
+}: {
+  processo: ProcessoFixture;
+  /** Ações alinhadas ao título (ex.: gatilho do assistente). */
+  acoes?: ReactNode;
+}) {
   return (
     <div className="space-y-4">
       <Button render={<Link href="/processos" />} variant="ghost" size="sm" className="-ml-2">
@@ -32,7 +40,10 @@ export function ProcessoHeader({ processo }: { processo: ProcessoFixture }) {
           <Badge variant="outline">{CLASSIFICACAO_LABEL[processo.classificacao]}</Badge>
         </div>
 
-        <h1 className="text-2xl font-semibold">{processo.objeto}</h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="text-2xl font-semibold">{processo.objeto}</h1>
+          {acoes && <div className="flex shrink-0 items-center gap-2">{acoes}</div>}
+        </div>
 
         <dl className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
           <div className="flex gap-2">

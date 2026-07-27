@@ -7,6 +7,7 @@ import {
   Globe,
   LayoutDashboard,
   Mail,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -52,6 +53,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { href: "/contratacoes", label: "Contratações públicas", icon: FileText },
       { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
+      // Só as instruções entram na sidebar. O assistente em si não é destino de
+      // navegação: é um painel lateral acionado da Topbar (global) ou de dentro
+      // de um processo, para não tirar o servidor da tela onde ele trabalha.
+      { href: "/assistente/instrucoes", label: "Instruções de pesquisa", icon: Sparkles },
     ],
   },
 ] as const;

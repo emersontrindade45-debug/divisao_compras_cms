@@ -573,3 +573,14 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     real está no log (`✓ Compiled successfully` seguido da tabela de rotas). Vale a recíproca: em
     ambiente com interop, confirmar sucesso/falha pelo **conteúdo** do log, e reservar o exit code
     para comandos rodados sem redirecionamento de stderr.
+49. **Não definir `CI=1` para rodar o Playwright local — isso desliga o `reuseExistingServer` e
+    trava a suíte em silêncio.** O `playwright.config.ts` usa
+    `webServer.reuseExistingServer: true`, mas o Playwright ignora essa opção quando `process.env.CI`
+    está definido: ele tenta subir um dev server novo, encontra a porta 3000 ocupada pelo anterior e
+    fica esperando o timeout sem imprimir nada. Custou dois ciclos de ~10 minutos nesta sessão, com
+    o arquivo de saída vazio e nenhuma mensagem de erro — o modo de falha da §9.22, agora em
+    ferramenta local. Ao ver a suíte passar de ~30s para minutos sem output, checar **quem está na
+    porta** (`Get-NetTCPConnection -LocalPort 3000 -State Listen`) antes de investigar os testes.
+    Corolário de captura: redirecionar a saída do PowerShell com `>` grava em **UTF-16LE**; ler com
+    `cat` produz texto com bytes nulos entre os caracteres. Usar `iconv -f UTF-16LE`, ou preferir
+    `--reporter=list` para arquivo e decodificar na leitura.

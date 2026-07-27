@@ -8,6 +8,7 @@ import {
   type EvidenciaResumo,
   type FonteResumo,
 } from "@/components/processos/ProcessoTabs";
+import { AssistenteSheet } from "@/components/assistente/AssistenteSheet";
 import { ConformidadePanel } from "@/components/processos/ConformidadePanel";
 import { FontesSimilaridadeList } from "@/components/processos/FontesSimilaridadeList";
 import { obterProcessoDetalhado } from "@/lib/actions/listar";
@@ -173,7 +174,12 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
 
   return (
     <div className="space-y-6">
-      <ProcessoHeader processo={processoMapeado} />
+      <ProcessoHeader
+        processo={processoMapeado}
+        acoes={
+          <AssistenteSheet processoId={processo.id} processoNumero={processo.numero} />
+        }
+      />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <ProcessoTabs
           processo={processoMapeado}

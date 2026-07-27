@@ -693,8 +693,41 @@ aquilo é chat *entre pessoas*, não assistente de IA. Ambos os documentos foram
       o cliente com stream truncado e nada na tela. `maxDuration = 60` (teto do plano Hobby,
       aceito em todos).
 
-### Fases 13.2 e 13.3 — NÃO INICIADAS
-UI do chat (aba no processo + Sheet global), painel de instruções, rascunhos de justificativa.
+### Fase 13.2 — UI — CONCLUÍDA
+- [x] `lib/assistente/sse.ts` — parser de Server-Sent Events, puro e sem DOM. Separado do
+      componente porque é a parte mais fácil de errar (um chunk TCP corta o `\n\n` no meio) e a
+      mais difícil de testar dentro do React. Duas armadilhas cobertas por teste: a sobra parcial
+      do buffer precisa voltar na próxima chamada, e o `TextDecoder` precisa de `stream: true`
+      senão acento partido entre chunks vira `�`.
+- [x] `components/ui/textarea.tsx` — escrito à mão no molde de `input.tsx`. A Base UI não expõe
+      primitivo de textarea (`@base-ui/react/input` é só para `<input>`), e o CLI do shadcn
+      instalaria a variante do Radix, mexendo no `package.json` (§8).
+- [x] `components/assistente/AssistenteChat.tsx` — chat único, usado nos dois escopos. Rastro de
+      ferramentas em linguagem de servidor ("Buscando contratações no PNCP", não `buscar_pncp`):
+      o rastro existe para auditar de onde veio cada afirmação da IA, e nome interno não cumpre
+      essa função. `AbortController` cancela o stream na desmontagem — sem isso o turno seguiria
+      consumindo tokens com o painel fechado.
+- [x] `components/assistente/PassoFerramenta.tsx` — um passo do rastro, com estado
+      andamento/sucesso/erro e o termo pesquisado extraído dos argumentos.
+- [x] `components/assistente/AssistenteSheet.tsx` — gatilho em painel lateral.
+- [x] `actions/instrucoesPesquisa.ts` + `InstrucoesPesquisaForm.tsx` +
+      `app/(app)/assistente/instrucoes/page.tsx` — os 3 níveis. Escrita exige
+      `requireRole("revisao")`: o texto entra no prompt de toda busca e todo ranking, então quem
+      edita altera o critério de similaridade de **todos** os processos. `upsert` sobre a chave
+      `@unique`, não busca-depois-grava (§9.14). Desativa em vez de apagar — a instrução já
+      influenciou rankings anteriores, e apagá-la deixaria o histórico sem explicação.
+- [x] `navigation.ts` ganha "Instruções de pesquisa"; `Topbar` ganha o atalho global.
+
+**Desvio do plano aprovado, deliberado:** o plano previa uma **aba** no detalhe do processo; foi
+feito **painel lateral**. Motivo concreto: as abas daquela tela SÃO as 4 etapas do fluxo da IN
+65/2021 (`EtapaId`, consumido por `conformidade.ts` e pelo `ProcessoStepper`), e uma quinta aba
+não-etapa distorceria um tipo do qual a conformidade depende. O painel também serve melhor ao uso
+real — o servidor conversa enquanto continua vendo a lista de candidatos por trás. O gatilho ficou
+no `ProcessoHeader`, que ganhou um slot `acoes`.
+
+### Fase 13.3 — NÃO INICIADA
+Os três tipos de `rascunhar_justificativa` (aderência da fonte, metodologia da série, rota e
+escolha de fornecedores).
 
 ### Verificação até aqui
 `tsc --noEmit` exit 0 · `eslint` 0 erros (2 warnings pré-existentes) · `next build` compilou e
