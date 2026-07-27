@@ -555,6 +555,14 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     presente e sem as colunas novas. Corolário mais amplo: suíte 100% verde com Prisma mockado não
     diz nada sobre compatibilidade de schema — essa classe de defeito só aparece exercitando o banco
     real, e o banco de produção é o único que fica atrás do código.
+    **Corrigir a ocorrência que estourou não é corrigir a classe.** Depois de consertar
+    `promoverFonte`, o mesmo defeito seguiu vivo em produção por horas em
+    `preencherCotacao.ts` — `include: { resultadosSimilaridade: … }` sem `select`, num caminho sem
+    teste nenhum. Ao acrescentar coluna a um model, a varredura é `grep` por **todas** as consultas
+    daquele model e das relações que apontam para ele, não só a que apareceu no erro. Atenção à
+    relação aninhada: `select` no nível de cima não protege o de baixo — sem `select` próprio
+    dentro de `resultadosSimilaridade`, o Prisma volta a pedir todos os escalares do model
+    relacionado.
 47. **Teste de rota que devolve `ReadableStream` precisa drenar o stream antes de asserir — senão
     testa uma corrida.** O corpo do `start()` de um `ReadableStream` roda **depois** que o handler
     já retornou a `Response`. Ao testar a rota SSE do assistente (2026-07-27), dois casos que

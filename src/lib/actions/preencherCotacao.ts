@@ -36,12 +36,23 @@ export async function preencherCotacao(
     return { error: "Não foi possível identificar o ID da planilha de origem do processo." };
   }
 
+  // `select` explícito nos dois níveis, e não `include` (CLAUDE.md §9.46).
+  // Sem ele o Prisma pede TODAS as colunas escalares de `ResultadoSimilaridade`,
+  // inclusive `origem`, `conversaId` e `termoBuscaUsado`, que o M13 acrescentou.
+  // Código e migration sobem em tempos diferentes (§9.19): entre o deploy e a
+  // aplicação da migration, o SELECT referenciaria colunas inexistentes e esta
+  // ação quebraria em runtime com "column does not exist" — no meio do
+  // preenchimento da planilha de cotação, que é justamente onde o servidor menos
+  // pode ser interrompido. Pedir só o que se usa mantém a action compatível com
+  // o banco antes e depois da migration.
   const itens = await db.item.findMany({
     where: { processoId },
-    include: {
+    select: {
+      descricao: true,
       resultadosSimilaridade: {
         orderBy: { scoreFinal: "desc" },
         take: MAX_PRECOS_POR_ITEM,
+        select: { valorUnitario: true },
       },
     },
   });
