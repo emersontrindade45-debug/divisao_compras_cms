@@ -122,6 +122,20 @@ describe("POST /api/assistente/chat", () => {
     expect(mocks.db.mensagemAssistente.create).not.toHaveBeenCalled();
   });
 
+  // Regressão: o cliente inicializa `conversaId` num useRef com `null` e envia o
+  // objeto inteiro, então a primeira mensagem de toda conversa chega com
+  // `conversaId: null` — não ausente. Os demais testes daqui mandavam string ou
+  // omitiam a chave, e por isso a suíte ficava verde com o chat 100% quebrado no
+  // navegador (400 em toda mensagem). O corpo aqui é o que o fetch manda de fato.
+  it("aceita a primeira mensagem com conversaId e processoId nulos", async () => {
+    const res = await postCompleto({ mensagem: "procure cadeiras", conversaId: null, processoId: null });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toMatch(/text\/event-stream/);
+    expect(mocks.db.conversaAssistente.create).toHaveBeenCalled();
+    expect(mocks.executarTurno).toHaveBeenCalled();
+  });
+
   it("recusa mensagem vazia", async () => {
     const res = await POST(requisicao({ mensagem: "" }));
 

@@ -41,8 +41,17 @@ const MAX_MENSAGENS_HISTORICO = 30;
 
 const corpoSchema = z.object({
   mensagem: z.string().min(1, "Mensagem vazia.").max(4000),
-  /** Ausente na primeira mensagem: a conversa é criada. */
-  conversaId: z.string().min(1).optional(),
+  /**
+   * Ausente na primeira mensagem: a conversa é criada.
+   *
+   * `nullish` e não `optional`: o cliente guarda o id num `useRef` inicializado
+   * com `null` e manda o objeto inteiro, então a primeira mensagem de TODA
+   * conversa chega com `conversaId: null`. Com `optional` o Zod rejeitava
+   * (`optional` aceita `undefined`, não `null`) e a rota devolvia 400 antes de
+   * qualquer coisa — e como o id só é preenchido pelo evento `conversa`, que
+   * nunca chegava, nenhuma mensagem passava.
+   */
+  conversaId: z.string().min(1).nullish(),
   /** Nulo/ausente = conversa global (atalho da Topbar). */
   processoId: z.string().min(1).nullish(),
 });
