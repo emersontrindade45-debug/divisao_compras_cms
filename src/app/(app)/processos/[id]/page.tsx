@@ -8,7 +8,7 @@ import {
   type EvidenciaResumo,
   type FonteResumo,
 } from "@/components/processos/ProcessoTabs";
-import { AssistenteSheet } from "@/components/assistente/AssistenteSheet";
+import { AssistenteToggle } from "@/components/assistente/AssistenteDock";
 import { ConformidadePanel } from "@/components/processos/ConformidadePanel";
 import { FontesSimilaridadeList } from "@/components/processos/FontesSimilaridadeList";
 import { obterProcessoDetalhado } from "@/lib/actions/listar";
@@ -176,9 +176,8 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
     <div className="space-y-6">
       <ProcessoHeader
         processo={processoMapeado}
-        acoes={
-          <AssistenteSheet processoId={processo.id} processoNumero={processo.numero} />
-        }
+        // O escopo vem da rota, então o gatilho não precisa passar o processo.
+        acoes={<AssistenteToggle rotulo="Assistente" />}
       />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <ProcessoTabs

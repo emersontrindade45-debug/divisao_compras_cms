@@ -114,9 +114,14 @@ export async function POST(request: Request) {
   const [historicoDb, instrucoesDb, processo] = await Promise.all([
     db.mensagemAssistente.findMany({
       where: { conversaId: conversa.id },
-      orderBy: { createdAt: "asc" },
+      // `desc` + `take` pega as ÚLTIMAS N mensagens; a ordem cronológica é
+      // restaurada abaixo. Com `asc` o `take` traria as N mais ANTIGAS, e numa
+      // conversa longa o modelo receberia o começo dela e não veria nada do que
+      // acabou de ser dito — perdendo justamente o contexto que o teto existe
+      // para preservar.
+      orderBy: { createdAt: "desc" },
       take: MAX_MENSAGENS_HISTORICO,
-      select: { papel: true, conteudo: true },
+      select: { papel: true, conteudo: true, createdAt: true },
     }),
     carregarInstrucoes(processoId),
     processoId
@@ -129,7 +134,8 @@ export async function POST(request: Request) {
   // assistente já resumiu o que achou. O pareamento
   // `function_call`/`function_call_output` que a Responses API exige vale dentro
   // de um turno, e esse pareamento é construído por `executarTurno`.
-  const historico: TurnoMensagem[] = historicoDb
+  const historico: TurnoMensagem[] = [...historicoDb]
+    .reverse()
     .filter((m) => m.papel === "user" || m.papel === "assistant")
     .map((m) => ({ papel: m.papel as "user" | "assistant", conteudo: m.conteudo }));
 
@@ -193,7 +199,8 @@ export async function POST(request: Request) {
           },
         });
 
-        await db.mensagemAssistente.create({
+        const mensagemAssistente = await db.mensagemAssistente.create({
+          select: { id: true },
           data: {
             conversaId: conversa.id,
             papel: "assistant",
@@ -208,6 +215,11 @@ export async function POST(request: Request) {
               resumo: p.resumo,
               duracaoMs: p.duracaoMs,
               erro: p.erro ?? null,
+              // Os candidatos achados ficam gravados AQUI, e é daqui que a
+              // aprovação por clique relê o preço. Sem isso o navegador teria
+              // de devolver o candidato, e um cliente forjado poderia injetar
+              // valor, órgão ou data numa fonte de estimativa pública.
+              ...(p.sugestoes?.length ? { sugestoes: p.sugestoes } : {}),
             })),
             citacoes: modelo.citacoes.map((c) => ({ url: c.url, titulo: c.titulo })),
             modelo: modeloAssistente(),
@@ -231,6 +243,10 @@ export async function POST(request: Request) {
         // saberia que ainda há caminho (CLAUDE.md §9.40).
         enviar("fim", {
           conversaId: conversa.id,
+          // O id da mensagem gravada: é a chave que o cartão de candidato usa
+          // para pedir a aprovação. Sem ele o cliente só teria um id local,
+          // que não existe no banco.
+          mensagemId: mensagemAssistente.id,
           texto: resultado.texto,
           passos: resultado.passos,
           citacoes: modelo.citacoes,

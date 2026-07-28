@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { lerStreamSSE } from "@/lib/assistente/sse";
+import { obterConversaAtiva, listarItensDoProcesso } from "@/lib/actions/assistente";
+import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 import { PassoFerramenta, type PassoExibido } from "./PassoFerramenta";
 import { RespostaFormatada } from "./RespostaFormatada";
+import { SugestoesCandidatos } from "./SugestoesCandidatos";
 
 // Chat do assistente de pesquisa (M13).
 //
@@ -27,6 +30,10 @@ interface Mensagem {
   conteudo: string;
   passos: PassoExibido[];
   citacoes: Citacao[];
+  /** Contratações achadas neste turno, à espera de aprovação por clique. */
+  sugestoes: CandidatoSugerido[];
+  /** Id da mensagem no banco — chave da aprovação. Chega no evento `fim`. */
+  mensagemId?: string | null;
   /** Turno terminou por teto de passos; a UI oferece continuar. */
   orcamentoEsgotado?: boolean;
   erro?: string;
@@ -40,17 +47,84 @@ export function AssistenteChat({
   processoId = null,
   processoNumero,
   className,
+  /**
+   * Retomar do banco a última conversa deste escopo. Desligado por "Nova
+   * conversa", que remonta o componente para começar do zero.
+   */
+  retomarConversa = true,
 }: {
   processoId?: string | null;
   processoNumero?: string;
   className?: string;
+  retomarConversa?: boolean;
 }) {
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [rascunho, setRascunho] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [carregando, setCarregando] = useState(retomarConversa);
+  const [itens, setItens] = useState<{ id: string; descricao: string }[]>([]);
   const conversaId = useRef<string | null>(null);
   const fimDaLista = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // A conversa sempre foi gravada no banco; o que faltava era ler de volta.
+  // Sem isto, fechar o painel (ou recarregar a página) perdia o histórico E
+  // criava uma conversa nova a cada abertura, porque o `conversaId` voltava a
+  // ser nulo.
+  useEffect(() => {
+    if (!retomarConversa) return;
+    let cancelado = false;
+
+    void obterConversaAtiva(processoId)
+      .then((conversa) => {
+        if (cancelado || !conversa) return;
+        conversaId.current = conversa.conversaId;
+        setMensagens(
+          conversa.mensagens.map((m) => ({
+            id: m.id,
+            papel: m.papel,
+            conteudo: m.conteudo,
+            passos: m.passos.map((p) => ({ ...p, emAndamento: false })),
+            citacoes: m.citacoes,
+            // Reabrir a conversa devolve os cartões: uma busca de ontem continua
+            // aprovável hoje, porque as sugestões ficaram gravadas na mensagem.
+            sugestoes: m.passos.flatMap((p) => p.sugestoes ?? []),
+            mensagemId: m.id,
+          })),
+        );
+      })
+      .catch(() => {
+        // Falhar ao retomar não pode impedir uma conversa nova: o chat abre
+        // vazio e segue utilizável.
+      })
+      .finally(() => {
+        if (!cancelado) setCarregando(false);
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [processoId, retomarConversa]);
+
+  // Itens do processo: é o destino de cada candidato aprovado. Fora de um
+  // processo a lista fica vazia e o cartão desabilita o botão com o motivo.
+  useEffect(() => {
+    if (!processoId) {
+      setItens([]);
+      return;
+    }
+    let cancelado = false;
+    void listarItensDoProcesso(processoId)
+      .then((lista) => {
+        if (!cancelado) setItens(lista);
+      })
+      .catch(() => {
+        // Sem a lista o cartão apenas não deixa adicionar; a conversa segue.
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [processoId]);
 
   useEffect(() => {
     fimDaLista.current?.scrollIntoView({ block: "end" });
@@ -78,8 +152,16 @@ export function AssistenteChat({
           conteudo: pergunta,
           passos: [],
           citacoes: [],
+          sugestoes: [],
         },
-        { id: idResposta, papel: "assistant", conteudo: "", passos: [], citacoes: [] },
+        {
+          id: idResposta,
+          papel: "assistant",
+          conteudo: "",
+          passos: [],
+          citacoes: [],
+          sugestoes: [],
+        },
       ]);
 
       /** Atualiza só a mensagem em construção, preservando o resto do histórico. */
@@ -148,7 +230,17 @@ export function AssistenteChat({
                   break;
                 }
               }
-              return { ...m, passos };
+              // As sugestões chegam no passo da busca. Acumular (em vez de
+              // substituir) porque o modelo pode buscar várias vezes no mesmo
+              // turno, e cada busca traz candidatos aprováveis.
+              const novas = Array.isArray(dados.sugestoes)
+                ? (dados.sugestoes as CandidatoSugerido[])
+                : [];
+              return {
+                ...m,
+                passos,
+                sugestoes: novas.length > 0 ? [...m.sugestoes, ...novas] : m.sugestoes,
+              };
             });
             return;
           }
@@ -162,6 +254,9 @@ export function AssistenteChat({
               conteudo: String(dados.texto ?? m.conteudo),
               citacoes: Array.isArray(dados.citacoes) ? (dados.citacoes as Citacao[]) : [],
               orcamentoEsgotado: dados.orcamentoEsgotado === true,
+              // Só agora existe id no banco: é ele que autoriza a aprovação dos
+              // cartões, então os botões ficam desabilitados até chegar aqui.
+              mensagemId: typeof dados.mensagemId === "string" ? dados.mensagemId : null,
               // Passo que ficou aberto por queda no meio não pode girar para sempre.
               passos: m.passos.map((p) => ({ ...p, emAndamento: false })),
             }));
@@ -190,11 +285,15 @@ export function AssistenteChat({
     [enviando, processoId],
   );
 
-  const vazio = mensagens.length === 0;
+  const vazio = !carregando && mensagens.length === 0;
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-2">
+        {carregando && (
+          <p className="px-1 py-2 text-sm text-muted-foreground">Retomando a conversa…</p>
+        )}
+
         {vazio && (
           <div className="space-y-3 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
             <p className="flex items-center gap-2 font-medium text-foreground">
@@ -237,6 +336,15 @@ export function AssistenteChat({
                   tela. A mensagem do usuário segue como texto puro: ele digita
                   texto, não marcação. */}
               {mensagem.conteudo && <RespostaFormatada conteudo={mensagem.conteudo} />}
+
+              {/* O assistente não grava nada sozinho: cada contratação achada
+                  vira um cartão com link para conferência e botão de adicionar.
+                  Quem registra é o clique do servidor. */}
+              <SugestoesCandidatos
+                mensagemId={mensagem.mensagemId ?? null}
+                sugestoes={mensagem.sugestoes}
+                itens={itens}
+              />
 
               {mensagem.citacoes.length > 0 && (
                 <ul className="space-y-1 text-xs">

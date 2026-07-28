@@ -187,10 +187,13 @@ describe("POST /api/assistente/chat", () => {
   });
 
   it("não reenvia ao modelo as mensagens `tool` de turnos anteriores", async () => {
+    // Do MAIS NOVO para o mais antigo: é o que a query devolve, porque o teto
+    // de histórico precisa pegar as últimas N e não as primeiras N. O teste
+    // abaixo prende essa ordenação, para o mock e a query não divergirem.
     mocks.db.mensagemAssistente.findMany.mockResolvedValue([
-      { papel: "user", conteudo: "primeira pergunta" },
-      { papel: "tool", conteudo: '{"json":"gigante do PNCP"}' },
       { papel: "assistant", conteudo: "resposta anterior" },
+      { papel: "tool", conteudo: '{"json":"gigante do PNCP"}' },
+      { papel: "user", conteudo: "primeira pergunta" },
     ]);
     mocks.db.conversaAssistente.findUnique.mockResolvedValue({
       id: "conv-1",
@@ -204,10 +207,33 @@ describe("POST /api/assistente/chat", () => {
       papel: string;
       conteudo: string;
     }>;
+    // Cronológico: o modelo precisa ler a conversa na ordem em que aconteceu.
     expect(historico.map((m) => m.papel)).toEqual(["user", "assistant", "user"]);
     expect(JSON.stringify(historico)).not.toContain("gigante do PNCP");
     // A mensagem nova entra por último.
     expect(historico.at(-1)!.conteudo).toBe("e agora?");
+  });
+
+  // O teto de 30 mensagens só preserva contexto se pegar as MAIS RECENTES. Com
+  // `asc` + `take`, o banco devolveria as 30 mais ANTIGAS e uma conversa longa
+  // reenviaria o começo dela ao modelo, sem nada do que acabou de ser dito — o
+  // teto viraria amnésia. Este teste olha o argumento passado ao Prisma porque
+  // o mock não ordena nada por conta própria.
+  it("busca as mensagens mais recentes, não as mais antigas", async () => {
+    mocks.db.conversaAssistente.findUnique.mockResolvedValue({
+      id: "conv-1",
+      processoId: "proc-1",
+      userId: "user-1",
+    });
+
+    await postCompleto({ mensagem: "e agora?", conversaId: "conv-1" });
+
+    const consulta = mocks.db.mensagemAssistente.findMany.mock.calls[0]![0] as {
+      orderBy: { createdAt: string };
+      take: number;
+    };
+    expect(consulta.orderBy).toEqual({ createdAt: "desc" });
+    expect(consulta.take).toBe(30);
   });
 
   it("propaga orcamentoEsgotado no evento final", async () => {
