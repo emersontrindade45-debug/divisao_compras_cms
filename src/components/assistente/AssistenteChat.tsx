@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { lerStreamSSE } from "@/lib/assistente/sse";
 import { PassoFerramenta, type PassoExibido } from "./PassoFerramenta";
+import { RespostaFormatada } from "./RespostaFormatada";
 
 // Chat do assistente de pesquisa (M13).
 //
@@ -231,9 +232,11 @@ export function AssistenteChat({
                 </ul>
               )}
 
-              {mensagem.conteudo && (
-                <p className="text-sm whitespace-pre-wrap">{mensagem.conteudo}</p>
-              )}
+              {/* O modelo responde em Markdown — o próprio prompt de sistema é
+                  escrito assim — e antes disso os asteriscos apareciam crus na
+                  tela. A mensagem do usuário segue como texto puro: ele digita
+                  texto, não marcação. */}
+              {mensagem.conteudo && <RespostaFormatada conteudo={mensagem.conteudo} />}
 
               {mensagem.citacoes.length > 0 && (
                 <ul className="space-y-1 text-xs">
