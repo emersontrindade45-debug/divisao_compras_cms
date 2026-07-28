@@ -106,216 +106,15 @@ describe("registry de ferramentas do assistente", () => {
     mocks.rankearCandidatos.mockResolvedValue([RANQUEADO]);
   });
 
-  // -------------------------------------------------------------------------
-  // A guarda central: o modelo não pode fabricar um preço.
-  // -------------------------------------------------------------------------
-
-  describe("registrar_candidatos — origem dos dados de preço", () => {
-    it("recusa ids que nenhuma busca desta conversa devolveu", async () => {
-      const registry = montarRegistry(CTX_PROCESSO);
-
-      const resposta = await chamar(registry, "registrar_candidatos", {
-        itemId: "item-1",
-        candidatoIds: ["c1"],
-        termoBuscaUsado: "cadeira",
-      });
-
-      expect(resposta.erro).toMatch(/não reconhecidos/i);
-      expect(mocks.db.resultadoSimilaridade.createMany).not.toHaveBeenCalled();
-    });
-
-    it("aceita apenas ids catalogados por uma busca anterior no mesmo registry", async () => {
-      const registry = montarRegistry(CTX_PROCESSO);
-
-      const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira giratória" });
-      const candidatos = busca.candidatos as Array<{ id: string }>;
-      expect(candidatos).toHaveLength(1);
-
-      const resposta = await chamar(registry, "registrar_candidatos", {
-        itemId: "item-1",
-        candidatoIds: [candidatos[0]!.id],
-        termoBuscaUsado: "cadeira giratória",
-      });
-
-      expect(resposta.erro).toBeUndefined();
-      expect(resposta.registrados).toBe(1);
-    });
-
-    it("um registry não enxerga o catálogo de outro (não vaza entre conversas)", async () => {
-      const primeiro = montarRegistry(CTX_PROCESSO);
-      const busca = await chamar(primeiro, "buscar_pncp", { termo: "cadeira" });
-      const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-      const segundo = montarRegistry({ ...CTX_PROCESSO, conversaId: "conv-2" });
-      const resposta = await chamar(segundo, "registrar_candidatos", {
-        itemId: "item-1",
-        candidatoIds: [id],
-        termoBuscaUsado: "cadeira",
-      });
-
-      expect(resposta.erro).toMatch(/não reconhecidos/i);
-      expect(mocks.db.resultadoSimilaridade.createMany).not.toHaveBeenCalled();
-    });
-
-    it("persiste valor, órgão e data vindos da busca, não do que o modelo mandou", async () => {
-      const registry = montarRegistry(CTX_PROCESSO);
-      const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
-      const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-      await chamar(registry, "registrar_candidatos", {
-        itemId: "item-1",
-        candidatoIds: [id],
-        termoBuscaUsado: "cadeira",
-        // Campos que o modelo poderia tentar contrabandear: o schema os ignora.
-        valorUnitario: 99999,
-        fonteOrgaoOuId: "Órgão Inventado",
-      });
-
-      const gravado = mocks.db.resultadoSimilaridade.createMany.mock.calls[0]![0].data[0];
-      expect(gravado.valorUnitario).toBe(850.5);
-      expect(gravado.fonteOrgaoOuId).toBe("Prefeitura de Exemplo");
-      expect(gravado.dataReferencia).toEqual(new Date("2026-05-10"));
-    });
-
-    it("usa o score do motor de similaridade, não um score informado pelo modelo", async () => {
-      const registry = montarRegistry(CTX_PROCESSO);
-      const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
-      const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-      await chamar(registry, "registrar_candidatos", {
-        itemId: "item-1",
-        candidatoIds: [id],
-        termoBuscaUsado: "cadeira",
-        scoreFinal: 100,
-      });
-
-      expect(mocks.rankearCandidatos).toHaveBeenCalledTimes(1);
-      const gravado = mocks.db.resultadoSimilaridade.createMany.mock.calls[0]![0].data[0];
-      expect(gravado.scoreFinal).toBe(82.5);
-      expect(gravado.scoreDescricao).toBe(88);
-    });
-
-    it("não grava nada quando o motor de similaridade reprova todos os candidatos", async () => {
-      // É o caminho do filtro de recência da IN 65 e do corte por score mínimo:
-      // `rankearCandidatos` devolve vazio e nada pode ser persistido.
-      mocks.rankearCandidatos.mockResolvedValue([]);
-      const registry = montarRegistry(CTX_PROCESSO);
-      const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
-      const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-      const resposta = await chamar(registry, "registrar_candidatos", {
-        itemId: "item-1",
-        candidatoIds: [id],
-        termoBuscaUsado: "cadeira",
-      });
-
-      expect(resposta.registrados).toBe(0);
-      expect(resposta.motivo).toMatch(/365 dias|abaixo do mínimo/i);
-      expect(mocks.db.resultadoSimilaridade.createMany).not.toHaveBeenCalled();
-      expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // O assistente grava candidato, nunca fonte da estimativa.
-  // -------------------------------------------------------------------------
-
-  it("nunca cria Fonte, Evidencia, SeriePreco nem PrecoConsolidado", async () => {
-    const registry = montarRegistry(CTX_PROCESSO);
-    const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
-    const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-    await chamar(registry, "registrar_candidatos", {
-      itemId: "item-1",
-      candidatoIds: [id],
-      termoBuscaUsado: "cadeira",
-    });
-
-    expect(mocks.db.resultadoSimilaridade.createMany).toHaveBeenCalledTimes(1);
-    expect(mocks.db.fonte.create).not.toHaveBeenCalled();
-    expect(mocks.db.evidencia.create).not.toHaveBeenCalled();
-    expect(mocks.db.seriePreco.create).not.toHaveBeenCalled();
-    expect(mocks.db.precoConsolidado.create).not.toHaveBeenCalled();
-  });
-
-  it("marca origem, conversa e termo usado no candidato gravado", async () => {
-    const registry = montarRegistry(CTX_PROCESSO);
-    const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira giratória" });
-    const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-    await chamar(registry, "registrar_candidatos", {
-      itemId: "item-1",
-      candidatoIds: [id],
-      termoBuscaUsado: "cadeira giratória ergonômica",
-    });
-
-    const gravado = mocks.db.resultadoSimilaridade.createMany.mock.calls[0]![0].data[0];
-    expect(gravado.origem).toBe("assistente");
-    expect(gravado.conversaId).toBe("conv-1");
-    expect(gravado.termoBuscaUsado).toBe("cadeira giratória ergonômica");
-    expect(gravado.promovidoParaFonte).toBeUndefined();
-  });
-
-  it("audita a escrita com o processo do item", async () => {
-    const registry = montarRegistry(CTX_PROCESSO);
-    const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
-    const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-    await chamar(registry, "registrar_candidatos", {
-      itemId: "item-1",
-      candidatoIds: [id],
-      termoBuscaUsado: "cadeira",
-    });
-
-    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        processoId: "proc-1",
-        acao: "assistente_registrar_candidatos",
-      }),
-    );
-  });
-
-  it("ignora candidato cuja URL já está registrada no item", async () => {
-    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
-      { fonteUrl: "https://pncp.gov.br/app/contrato/123" },
-    ]);
-    const registry = montarRegistry(CTX_PROCESSO);
-    const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
-    const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-    const resposta = await chamar(registry, "registrar_candidatos", {
-      itemId: "item-1",
-      candidatoIds: [id],
-      termoBuscaUsado: "cadeira",
-    });
-
-    expect(resposta.registrados).toBe(0);
-    expect(resposta.duplicadosIgnorados).toBe(1);
-    expect(mocks.db.resultadoSimilaridade.createMany).not.toHaveBeenCalled();
-  });
+  // As invariantes de origem do preço e de score migraram para
+  // `lib/actions/__tests__/assistente.test.ts` junto com a escrita: o assistente
+  // não grava mais nada por conta própria, quem registra é o clique do servidor.
 
   // -------------------------------------------------------------------------
   // Escopo: uma conversa de processo não alcança outro processo.
   // -------------------------------------------------------------------------
 
   describe("escopo do processo", () => {
-    it("recusa escrever em item de outro processo", async () => {
-      mocks.db.item.findUnique.mockResolvedValue({ ...ITEM, processoId: "proc-OUTRO" });
-      const registry = montarRegistry(CTX_PROCESSO);
-      const busca = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
-      const id = (busca.candidatos as Array<{ id: string }>)[0]!.id;
-
-      const resposta = await chamar(registry, "registrar_candidatos", {
-        itemId: "item-1",
-        candidatoIds: [id],
-        termoBuscaUsado: "cadeira",
-      });
-
-      expect(resposta.erro).toMatch(/outro processo/i);
-      expect(mocks.db.resultadoSimilaridade.createMany).not.toHaveBeenCalled();
-    });
-
     it("recusa ler outro processo quando a conversa está presa a um", async () => {
       const registry = montarRegistry(CTX_PROCESSO);
 
@@ -422,9 +221,9 @@ describe("registry de ferramentas do assistente", () => {
     it("devolve erro legível quando falta campo obrigatório", async () => {
       const registry = montarRegistry(CTX_PROCESSO);
 
-      const resposta = await chamar(registry, "registrar_candidatos", { itemId: "item-1" });
+      const resposta = await chamar(registry, "buscar_pncp", { itemId: "item-1" });
 
-      expect(resposta.erro).toMatch(/candidatoIds/);
+      expect(resposta.erro).toMatch(/termo/);
     });
 
     it("devolve erro em vez de lançar quando a ferramenta externa falha", async () => {

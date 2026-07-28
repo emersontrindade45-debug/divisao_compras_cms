@@ -1,7 +1,6 @@
 import "server-only";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { registrarAuditoria } from "@/lib/auth/audit";
 import { avaliarConformidade } from "@/lib/domain/conformidade";
 import { MIN_FORNECEDORES_PESQUISA_DIRETA } from "@/lib/domain/in65Rules";
 import { CV_ANALISE_CRITICA } from "@/lib/domain/priceStats";
@@ -11,32 +10,36 @@ import {
   perplexityConfigurada,
   type ResultadoWeb,
 } from "@/lib/integracoes/perplexity";
-import { rankearCandidatos } from "@/lib/similaridade/rankearCandidatos";
-import { getProvedorIA } from "@/lib/ia";
-import type { CandidatoSimilaridade, ItemExtraidoTR } from "@/lib/ia/types";
+import type { CandidatoSimilaridade } from "@/lib/ia/types";
 import { filtrarResultadosWeb, resumirDescartes } from "./guardas";
 import type { ChamadaFerramenta, ExecutorFerramenta, ResultadoFerramenta } from "./laco";
+import {
+  MAX_SUGESTOES_POR_BUSCA,
+  paraSugestao,
+  type CandidatoSugerido,
+} from "./sugestoes";
 
 // Registry de ferramentas do assistente (M13).
 //
-// Duas decisões estruturais valem mais que o resto do arquivo:
+// **Todas as ferramentas aqui são de leitura.** O assistente não grava nada:
+// ele busca, comenta e propõe. Quem registra um candidato na lista do processo
+// é o servidor, clicando no cartão que aparece no chat — ver
+// `adicionarCandidatoSugerido` em `lib/actions/assistente.ts`.
 //
-// 1. **O modelo nunca digita um preço.** `registrar_candidatos` não aceita
-//    valor, órgão nem data: aceita apenas IDs de candidatos que uma busca DESTA
-//    conversa devolveu, guardados em `catalogo`. Um id desconhecido é recusado.
-//    Sem isso, "não invente valores" seria só uma frase no prompt — e a §9.33
-//    registra o custo de confundir regra documentada com regra implementada.
+// Foi uma decisão tomada com o usuário: ele quer conferir o link da contratação
+// antes de ela entrar na lista. O efeito colateral é de conformidade e é bem-
+// vindo — a escrita passa a ser ato humano registrado, não decisão do modelo.
 //
-// 2. **O modelo nunca atribui um score.** `registrar_candidatos` roda o mesmo
-//    `rankearCandidatos` do pipeline automático (filtro de recência da IN 65 +
-//    corte por score incluídos), para que candidato do assistente e candidato do
-//    robô fiquem comparáveis lado a lado na mesma tabela.
+// As duas invariantes do M13 continuam valendo, agora do outro lado do clique:
 //
-// A ferramenta de escrita é uma só, e ela cria `ResultadoSimilaridade` — nunca
-// `Fonte`, `Evidencia` ou `PrecoConsolidado`. Promover é clique do servidor.
-
-/** Teto de candidatos aceitos numa única chamada de escrita. */
-const MAX_CANDIDATOS_POR_REGISTRO = 15;
+// 1. **O modelo nunca digita um preço.** `buscar_pncp` devolve as sugestões
+//    junto do passo, e elas são persistidas com a mensagem; a aprovação relê o
+//    candidato de lá pelo id. Nem o modelo nem o navegador conseguem injetar
+//    valor, órgão ou data — o preço só existe onde a fonte o colocou.
+//
+// 2. **O modelo nunca atribui um score.** A aprovação roda o mesmo
+//    `rankearCandidatos` do pipeline automático, para candidato do assistente e
+//    candidato do robô ficarem comparáveis na mesma tabela.
 
 /** Quantos resultados de busca web voltam ao modelo (o resto vira ruído caro). */
 const MAX_RESULTADOS_WEB = 8;
@@ -78,20 +81,13 @@ const buscaGlobalSchema = z.object({
 
 const buscarPncpSchema = z.object({
   termo: z.string().min(2, "O termo de busca precisa de ao menos 2 caracteres."),
+  /** Item para o qual a busca foi feita; vira o destino sugerido nos cartões. */
+  itemId: z.string().min(1).optional(),
 });
 
 const buscarWebSchema = z.object({
   consulta: z.string().min(3, "A consulta precisa de ao menos 3 caracteres."),
   recencia: z.enum(["day", "week", "month", "year"]).optional(),
-});
-
-const registrarSchema = z.object({
-  itemId: z.string().min(1),
-  candidatoIds: z
-    .array(z.string().min(1))
-    .min(1, "Informe ao menos um id de candidato devolvido por uma busca.")
-    .max(MAX_CANDIDATOS_POR_REGISTRO),
-  termoBuscaUsado: z.string().min(1),
 });
 
 const rascunharSchema = z.object({
@@ -380,25 +376,46 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
   // Busca externa
   // -------------------------------------------------------------------------
 
-  async function buscarPncp(termo: string) {
-    const candidatos = await buscarContratosPNCP(termo);
-    if (candidatos.length === 0) {
+  async function buscarPncp(termo: string, itemIdSugerido: string | null) {
+    const encontrados = await buscarContratosPNCP(termo);
+    if (encontrados.length === 0) {
       return {
-        termo,
-        total: 0,
-        candidatos: [],
-        observacao:
-          "O PNCP não devolveu nada para este termo. Tente outro recorte: troque o " +
-          "substantivo-núcleo, remova qualificadores ou use o nome comercial do produto.",
+        resposta: {
+          termo,
+          total: 0,
+          candidatos: [],
+          observacao:
+            "O PNCP não devolveu nada para este termo. Tente outro recorte: troque o " +
+            "substantivo-núcleo, remova qualificadores ou use o nome comercial do produto.",
+        },
+        sugestoes: [] as CandidatoSugerido[],
       };
     }
+
+    // O mesmo corte vale para o que o modelo lê e para o que vira cartão: se o
+    // modelo enxergasse mais do que a tela mostra, ele citaria um candidato sem
+    // botão para aprovar.
+    const candidatos = encontrados.slice(0, MAX_SUGESTOES_POR_BUSCA);
+    const catalogados = catalogar(candidatos);
+
     return {
-      termo,
-      total: candidatos.length,
-      candidatos: catalogar(candidatos),
-      observacao:
-        "Para registrar algum destes, chame `registrar_candidatos` com os ids desta lista. " +
-        "Os scores são calculados pelo sistema — não os estime.",
+      resposta: {
+        termo,
+        total: encontrados.length,
+        exibidos: catalogados.length,
+        candidatos: catalogados,
+        observacao:
+          "Estes candidatos já apareceram na tela do usuário, cada um com link e botão para " +
+          "adicionar à lista do processo. Você NÃO registra nada: comente o que achou de cada " +
+          "um (por que é ou não comparável) e deixe a decisão com o servidor. Os valores vêm " +
+          "da fonte — não os repita de memória nem estime score.",
+      },
+      sugestoes: catalogados.map((c) =>
+        paraSugestao(c.id, catalogo.get(c.id)!, {
+          itemIdSugerido,
+          termoBuscaUsado: termo,
+        }),
+      ),
     };
   }
 
@@ -647,129 +664,6 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
   }
 
   // -------------------------------------------------------------------------
-  // Escrita — única ferramenta que grava
-  // -------------------------------------------------------------------------
-
-  async function registrarCandidatos(args: z.infer<typeof registrarSchema>) {
-    const item = await db.item.findUnique({
-      where: { id: args.itemId },
-      select: {
-        id: true,
-        processoId: true,
-        descricao: true,
-        unidade: true,
-        quantidade: true,
-        caracteristicasTecnicas: true,
-      },
-    });
-    if (!item) throw new ArgumentosInvalidosError("Item não encontrado.");
-
-    // Escopo: numa conversa de processo, não se escreve em item de outro.
-    if (ctx.processoId && item.processoId !== ctx.processoId) {
-      throw new ArgumentosInvalidosError(
-        "Este item pertence a outro processo. Esta conversa só pode registrar candidatos no processo aberto.",
-      );
-    }
-
-    const desconhecidos = args.candidatoIds.filter((id) => !catalogo.has(id));
-    if (desconhecidos.length > 0) {
-      throw new ArgumentosInvalidosError(
-        `Ids não reconhecidos: ${desconhecidos.join(", ")}. Só é possível registrar candidatos ` +
-          "devolvidos por uma busca desta conversa — os dados de preço vêm da fonte, nunca de você.",
-      );
-    }
-
-    const escolhidos = args.candidatoIds.map((id) => catalogo.get(id)!);
-
-    const itemTR: ItemExtraidoTR = {
-      descricao: item.descricao,
-      especificacaoTecnica: item.caracteristicasTecnicas ?? "",
-      unidade: item.unidade,
-      quantidade: item.quantidade,
-    };
-
-    // Mesmo motor do pipeline automático: aplica o filtro de recência da IN 65,
-    // pontua com os mesmos pesos e corta abaixo do score mínimo. O modelo não
-    // participa da nota — só da escolha de quais candidatos submeter.
-    const ranqueados = await rankearCandidatos(itemTR, escolhidos, getProvedorIA());
-
-    if (ranqueados.length === 0) {
-      return {
-        registrados: 0,
-        motivo:
-          "Nenhum dos candidatos passou no corte: ou está fora da janela de 365 dias da IN 65/2021, " +
-          "ou a similaridade com o item ficou abaixo do mínimo. Tente outro termo de busca.",
-      };
-    }
-
-    // Dedupe best-effort por URL dentro do item: registrar o mesmo candidato
-    // duas vezes polui a lista, mas não corrompe a estimativa — o que entra na
-    // série é a Fonte, e *aquela* promoção tem guarda atômica e constraint
-    // @unique (CLAUDE.md §9.14). Não vale uma migration nova só por isto.
-    const urlsExistentes = new Set(
-      (
-        await db.resultadoSimilaridade.findMany({
-          where: { itemId: item.id, fonteUrl: { not: null } },
-          select: { fonteUrl: true },
-        })
-      ).map((r) => r.fonteUrl),
-    );
-
-    const novos = ranqueados.filter(
-      (r) => !r.candidato.fonteUrl || !urlsExistentes.has(r.candidato.fonteUrl),
-    );
-
-    if (novos.length > 0) {
-      await db.resultadoSimilaridade.createMany({
-        data: novos.map((r) => ({
-          itemId: item.id,
-          tipoCandidato: r.candidato.tipoCandidato,
-          fonteDescricao: r.candidato.fonteDescricao,
-          fonteOrgaoOuId: r.candidato.fonteOrgaoOuId,
-          fonteUrl: r.candidato.fonteUrl ?? null,
-          valorUnitario: r.candidato.valorUnitario,
-          dataReferencia: r.candidato.dataReferencia,
-          scoreFinal: r.scoreFinal,
-          scoreDescricao: r.scoreDescricao,
-          scoreEspecificacao: r.scoreEspecificacao,
-          scoreUnidadeQuantidade: r.scoreUnidadeQuantidade,
-          adaptado: r.adaptado,
-          justificativa: r.justificativa,
-          origem: "assistente" as const,
-          conversaId: ctx.conversaId,
-          termoBuscaUsado: args.termoBuscaUsado,
-        })),
-      });
-
-      await registrarAuditoria({
-        userId: ctx.userId,
-        processoId: item.processoId,
-        acao: "assistente_registrar_candidatos",
-        detalhes: {
-          itemId: item.id,
-          conversaId: ctx.conversaId,
-          termoBuscaUsado: args.termoBuscaUsado,
-          total: novos.length,
-        },
-      });
-    }
-
-    return {
-      registrados: novos.length,
-      duplicadosIgnorados: ranqueados.length - novos.length,
-      candidatos: novos.map((r) => ({
-        descricao: r.candidato.fonteDescricao,
-        orgao: r.candidato.fonteOrgaoOuId,
-        valorUnitario: r.candidato.valorUnitario,
-        score: r.scoreFinal,
-      })),
-      lembrete:
-        "Registrado como CANDIDATO. Ele ainda não é fonte da estimativa: quem promove é o " +
-        "servidor, clicando na aba de similaridade do processo.",
-    };
-  }
-
-  // -------------------------------------------------------------------------
   // Montagem
   // -------------------------------------------------------------------------
 
@@ -824,7 +718,9 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       descricao:
         "Busca contratações públicas no PNCP — a fonte prioritária da IN 65/2021. Devolve " +
         "candidatos com id, valor unitário, órgão e data. Contratações da própria Câmara já são " +
-        "excluídas. Varie o termo entre chamadas em vez de repetir o mesmo.",
+        "excluídas. Varie o termo entre chamadas em vez de repetir o mesmo. Cada candidato já " +
+        "aparece na tela do usuário como cartão com link e botão de adicionar — você não " +
+        "registra nada, apenas ajuda a avaliar.",
       parametros: {
         type: "object",
         properties: {
@@ -834,31 +730,15 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
               "Termo curto, com o substantivo que nomeia o produto primeiro. Ex.: 'cadeira " +
               "giratória ergonômica', não 'aquisição de mobiliário para escritório'.",
           },
+          itemId: {
+            type: "string",
+            description:
+              "Id do item que você está pesquisando, vindo de `ler_processo`. Informe sempre " +
+              "que souber: é ele que deixa o cartão do candidato já apontando para o item " +
+              "certo quando o servidor for adicionar à lista.",
+          },
         },
         required: ["termo"],
-      },
-    },
-    {
-      nome: "registrar_candidatos",
-      descricao:
-        "Registra candidatos no item. Aceita SOMENTE ids devolvidos por `buscar_pncp` nesta " +
-        "conversa — você não informa valor, órgão nem data, e não atribui score: o sistema " +
-        "recalcula tudo com o mesmo motor do pipeline automático. Não cria fonte da estimativa.",
-      parametros: {
-        type: "object",
-        properties: {
-          itemId: { type: "string", description: "Id do item, vindo de `ler_processo`." },
-          candidatoIds: {
-            type: "array",
-            items: { type: "string" },
-            description: "Ids dos candidatos (ex.: ['c1','c4']) devolvidos por `buscar_pncp`.",
-          },
-          termoBuscaUsado: {
-            type: "string",
-            description: "O termo que produziu estes candidatos. Fica registrado para análise.",
-          },
-        },
-        required: ["itemId", "candidatoIds", "termoBuscaUsado"],
       },
     },
     {
@@ -939,15 +819,14 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         }
         case "buscar_pncp": {
           const args = parseArgumentos(buscarPncpSchema, chamada.argumentos);
-          return ok(await buscarPncp(args.termo));
+          const { resposta, sugestoes } = await buscarPncp(args.termo, args.itemId ?? null);
+          // As sugestões viajam FORA do conteúdo devolvido ao modelo: elas são
+          // para a tela e para a aprovação por clique, não para o prompt.
+          return { conteudo: JSON.stringify(resposta), sugestoes };
         }
         case "buscar_web": {
           const args = parseArgumentos(buscarWebSchema, chamada.argumentos);
           return ok(await buscarWeb(args.consulta, args.recencia));
-        }
-        case "registrar_candidatos": {
-          const args = parseArgumentos(registrarSchema, chamada.argumentos);
-          return ok(await registrarCandidatos(args));
         }
         case "rascunhar_justificativa": {
           const args = parseArgumentos(rascunharSchema, chamada.argumentos);
@@ -981,4 +860,4 @@ function falha(mensagem: string): ResultadoFerramenta {
   return { conteudo: JSON.stringify({ erro: mensagem }), erro: mensagem };
 }
 
-export { MAX_CANDIDATOS_POR_REGISTRO, MAX_RESULTADOS_WEB };
+export { MAX_RESULTADOS_WEB };

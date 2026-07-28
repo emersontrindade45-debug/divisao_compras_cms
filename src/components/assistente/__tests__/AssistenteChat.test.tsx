@@ -1,10 +1,36 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistenteChat } from "../AssistenteChat";
+import { obterConversaAtiva } from "@/lib/actions/assistente";
+
+// A server action que retoma a conversa do banco. Por padrão não há conversa
+// anterior, que é o cenário da maioria dos casos; quem testa a retomada
+// sobrescreve o retorno.
+vi.mock("@/lib/actions/assistente", () => ({
+  obterConversaAtiva: vi.fn(async () => null),
+  listarItensDoProcesso: vi.fn(async () => []),
+  adicionarCandidatoSugerido: vi.fn(async () => ({ ok: true, mensagem: "ok" })),
+}));
+
+// `SugestoesCandidatos` chama `useRouter().refresh()` para a tabela de
+// candidatos atualizar depois da aprovação. Fora do App Router o hook lança
+// "invariant expected app router to be mounted" e derruba a árvore inteira.
+const refreshMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: refreshMock }),
+}));
+
+const obterConversaAtivaMock = vi.mocked(obterConversaAtiva);
 
 // `scrollIntoView` não existe no jsdom.
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
+  // `mockClear` explícito: `restoreAllMocks` do afterEach restaura implementações
+  // espionadas, mas NÃO zera o histórico de chamadas de um mock de fábrica
+  // (`vi.mock`). Sem isto, a asserção de "não foi chamada" enxerga as chamadas
+  // dos casos anteriores e falha por vazamento, não por defeito.
+  obterConversaAtivaMock.mockClear();
+  obterConversaAtivaMock.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -55,14 +81,59 @@ const TURNO_SIMPLES = [
 ];
 
 describe("AssistenteChat", () => {
-  it("mostra o que o assistente faz e o que não faz antes da primeira pergunta", () => {
+  // `findByText` e não `getByText`: a tela agora consulta o banco antes de
+  // decidir se mostra a apresentação ou o histórico retomado.
+  it("mostra o que o assistente faz e o que não faz antes da primeira pergunta", async () => {
     render(<AssistenteChat processoId="proc-1" processoNumero="2026/0042" />);
 
-    expect(screen.getByText(/2026\/0042/)).toBeInTheDocument();
+    expect(await screen.findByText(/2026\/0042/)).toBeInTheDocument();
     // A promessa da tela precisa bater com a regra: o assistente grava
     // candidato, não fonte da estimativa.
     expect(screen.getByText("candidato")).toBeInTheDocument();
     expect(screen.getByText(/Promover candidato a fonte da estimativa/i)).toBeInTheDocument();
+  });
+
+  // O defeito que motivou a mudança: a conversa sempre foi gravada, mas nada
+  // lia de volta. Fechar o painel perdia o histórico E criava conversa nova a
+  // cada abertura, porque o `conversaId` voltava a ser nulo.
+  it("retoma a conversa anterior do banco e continua nela", async () => {
+    obterConversaAtivaMock.mockResolvedValue({
+      conversaId: "conv-antiga",
+      mensagens: [
+        { id: "m1", papel: "user", conteudo: "procure brises", passos: [], citacoes: [] },
+        { id: "m2", papel: "assistant", conteudo: "achei 5 contratos", passos: [], citacoes: [] },
+      ],
+    });
+    const fetchMock = mockFetch(respostaSSE(TURNO_SIMPLES));
+
+    render(<AssistenteChat processoId="proc-1" />);
+
+    expect(await screen.findByText("procure brises")).toBeInTheDocument();
+    expect(screen.getByText("achei 5 contratos")).toBeInTheDocument();
+
+    // O que prova a continuidade não é o texto na tela, é o id que vai junto da
+    // próxima mensagem: sem ele o servidor abriria outra conversa.
+    perguntar("e agora?");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const corpo = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)) as {
+      conversaId: string | null;
+    };
+    expect(corpo.conversaId).toBe("conv-antiga");
+  });
+
+  it("não retoma nada quando o painel pede conversa nova", async () => {
+    obterConversaAtivaMock.mockResolvedValue({
+      conversaId: "conv-antiga",
+      mensagens: [
+        { id: "m1", papel: "user", conteudo: "procure brises", passos: [], citacoes: [] },
+      ],
+    });
+
+    render(<AssistenteChat processoId="proc-1" retomarConversa={false} />);
+
+    expect(await screen.findByText(/Assistente de pesquisa/)).toBeInTheDocument();
+    expect(obterConversaAtivaMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("procure brises")).not.toBeInTheDocument();
   });
 
   it("envia a pergunta e exibe a resposta do turno", async () => {

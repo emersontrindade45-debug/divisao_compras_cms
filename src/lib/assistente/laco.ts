@@ -1,3 +1,5 @@
+import type { CandidatoSugerido } from "./sugestoes";
+
 // Laço agentico do assistente (M13).
 //
 // Deliberadamente agnóstico de provedor: recebe um `ModeloConversacional` e um
@@ -37,6 +39,12 @@ export interface ResultadoFerramenta {
   conteudo: string;
   /** Preenchido quando a ferramenta falhou; o laço segue, o modelo decide o quê fazer. */
   erro?: string;
+  /**
+   * Candidatos que a busca achou e que o usuário pode aprovar por clique.
+   * Trafegam pelo passo porque precisam ser persistidos com a mensagem: é de lá
+   * que o servidor relê o preço na hora da aprovação, nunca do navegador.
+   */
+  sugestoes?: CandidatoSugerido[];
 }
 
 /** Registro de um passo, exibido na UI e persistido em `ferramentasUsadas`. */
@@ -46,6 +54,7 @@ export interface PassoRegistrado {
   resumo: string;
   duracaoMs: number;
   erro?: string;
+  sugestoes?: CandidatoSugerido[];
 }
 
 export interface TurnoMensagem {
@@ -187,6 +196,7 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
         resumo: resumir(resultado.conteudo),
         duracaoMs: agora() - inicio,
         ...(resultado.erro ? { erro: resultado.erro } : {}),
+        ...(resultado.sugestoes?.length ? { sugestoes: resultado.sugestoes } : {}),
       };
       passos.push(passo);
       onEvento?.({ tipo: "passo_fim", passo });
