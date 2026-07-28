@@ -8,7 +8,10 @@ Briefing técnico: [CLAUDE.md](CLAUDE.md) · Roadmap: [docs/PLAN.md](docs/PLAN.m
 
 - Node.js 20+ e pnpm 9+
 - PostgreSQL 15+ (local via Docker ou instância gerenciada)
-- Conta Resend para disparo de e-mails
+
+> **O sistema não envia e-mail.** O disparo de cotação é feito pela Câmara, fora da plataforma —
+> aqui só se registra status e SLA. Não configure provedor de envio; a dependência do Resend foi
+> removida no M11 e a regra está no [CLAUDE.md §9.3](CLAUDE.md).
 
 ## Desenvolvimento local
 
@@ -102,7 +105,8 @@ pnpm dev
 
 1. Conta na Vercel e CLI instalada: `npm i -g vercel`
 2. Banco PostgreSQL de produção (ex.: Neon, Supabase, Railway)
-3. API key do Resend configurada
+3. Chaves de API: `OPENAI_API_KEY` (extração do TR e ranking de similaridade) e, opcionalmente,
+   `PERPLEXITY_API_KEY` (busca web do assistente)
 
 ### Passo a passo
 
@@ -116,10 +120,8 @@ vercel link
 # 3. Configurar variáveis de ambiente de produção
 vercel env add DATABASE_URL production
 vercel env add AUTH_SECRET production
-vercel env add RESEND_API_KEY production
-vercel env add EMAIL_RESPONSAVEL production
+vercel env add OPENAI_API_KEY production
 vercel env add CRON_SECRET production
-vercel env add NEXT_PUBLIC_APP_URL production
 
 # 4. Aplicar migrations no banco de produção
 DATABASE_URL="<url-producao>" pnpm exec prisma migrate deploy
@@ -132,11 +134,11 @@ vercel --prod
 
 Veja `.env.example` para a lista completa. As mínimas obrigatórias são:
 
-- `DATABASE_URL`
+- `DATABASE_URL` — pooler de transação (porta 6543 no Supabase); ver CLAUDE.md §9.32
+- `DIRECT_URL` — conexão direta, usada só pelo CLI de migrations
 - `AUTH_SECRET`
-- `RESEND_API_KEY`
-- `EMAIL_RESPONSAVEL`
-- `NEXT_PUBLIC_APP_URL`
+- `OPENAI_API_KEY`
+- `CRON_SECRET` — sem ela a rota de lembretes fica pública (§9.45)
 
 ## Deploy em hospedagem própria (Node.js)
 
@@ -164,7 +166,8 @@ Login → Dashboard → Processos → [Detalhe: Fontes / Evidências / Série de
 - **Contratações** — busca de contratos públicos similares (fonte prioritária IN 65/2021)
 - **Sites** — validador de sites admissíveis com listas branca/cinza/vermelha
 - **Fornecedores** — cadastro vivo com score operacional e histórico
-- **Cotações** — disparo de e-mails via Resend, controle de SLA e checklist de propostas
+- **Cotações** — registro de envio, controle de SLA e checklist de propostas (o e-mail é
+  disparado pela Câmara, fora do sistema)
 - **Relatórios** — memória de cálculo em PDF e série de preços em Excel
 
 ### Stack
@@ -175,7 +178,6 @@ Login → Dashboard → Processos → [Detalhe: Fontes / Evidências / Série de
 | UI | React + TypeScript + Tailwind CSS + shadcn/ui |
 | Backend | Server Actions + Route Handlers |
 | Banco | PostgreSQL + Prisma ORM |
-| E-mail | Resend |
 | Testes unitários | Vitest + Testing Library |
 | Testes E2E | Playwright + axe-core |
 | Deploy | Vercel (compatível com Node.js autônomo) |
