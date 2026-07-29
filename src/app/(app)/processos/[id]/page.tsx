@@ -10,6 +10,7 @@ import {
 } from "@/components/processos/ProcessoTabs";
 import { AssistenteToggle } from "@/components/assistente/AssistenteDock";
 import { ConformidadePanel } from "@/components/processos/ConformidadePanel";
+import { ExcluirProcessoDialog } from "@/components/processos/ExcluirProcessoDialog";
 import { FontesSimilaridadeList } from "@/components/processos/FontesSimilaridadeList";
 import { obterProcessoDetalhado } from "@/lib/actions/listar";
 import { avaliarConformidade } from "@/lib/domain/conformidade";
@@ -176,8 +177,12 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
     <div className="space-y-6">
       <ProcessoHeader
         processo={processoMapeado}
-        // O escopo vem da rota, então o gatilho não precisa passar o processo.
-        acoes={<AssistenteToggle rotulo="Assistente" />}
+        acoes={
+          <>
+            <ExcluirProcessoDialog processoId={processo.id} numero={processo.numero} />
+            <AssistenteToggle rotulo="Assistente" />
+          </>
+        }
       />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <ProcessoTabs

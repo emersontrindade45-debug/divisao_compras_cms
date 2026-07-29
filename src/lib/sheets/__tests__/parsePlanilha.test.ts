@@ -6,7 +6,7 @@ import {
   estatisticaDoItem,
   isDataSheet,
 } from "../parsePlanilha";
-import { extrairSpreadsheetId, extrairNumeroProcesso } from "../googleSheets";
+import { extrairSpreadsheetId, extrairNumeroProcesso, extrairObjetoDoTitulo } from "../googleSheets";
 
 // CSV real exportado da planilha do processo (aba "Modelo"), com cabeçalho
 // multilinha ("QTDE.\nMÍN") e colunas deslocadas por células mescladas.
@@ -22,6 +22,15 @@ const csvComGrupo = [
   '"LOTE 01","","","","","","","","","",""',
   '"700,00","1.000,00","1.300,00","","1","1","2","Bomba vácuo 2 a 5 litros","998,81","1.267,24","1.290,00"',
   '"447,99","639,98","831,97","","2","1","8","Caixa de filtragem FILBOX","453,83","639,98","765,96"',
+].join("\n");
+
+// Planilha no estado inicial: itens cadastrados, pesquisa ainda não realizada
+// (mediana e limites zerados — §9.10: deve importar mesmo assim)
+const csvMedianaZero = [
+  '"LIMITE INFERIOR","MEDIANA","LIMITE SUPERIOR","","ITEM","QTDE.","MATERIAL","ORÇAMENTO"',
+  '"0,00","0,00","0,00","","1","15","e-CPF Tipo A3 c/ Token – Validade Mínima de 36 meses",""',
+  '"0,00","0,00","0,00","","2","6","e-CNPJ Tipo A3 c/ Token – Validade Mínima de 36 meses",""',
+  '"Em conformidade com o inciso III do Art. 57 do ato 17/2023","","","","","","",""',
 ].join("\n");
 
 describe("parseNumberBR", () => {
@@ -106,6 +115,33 @@ describe("parsePlanilha — com grupo/lote", () => {
   });
 });
 
+describe("parsePlanilha — estatística zerada (§9.10)", () => {
+  const { itens } = parsePlanilha(parseCsv(csvMedianaZero));
+
+  it("importa itens mesmo com mediana = 0 (pesquisa ainda não feita)", () => {
+    expect(itens).toHaveLength(2);
+  });
+
+  it("preserva material e quantidade corretos", () => {
+    expect(itens[0]!.material).toContain("e-CPF");
+    expect(itens[0]!.quantidade).toBe(15);
+    expect(itens[1]!.material).toContain("e-CNPJ");
+    expect(itens[1]!.quantidade).toBe(6);
+  });
+
+  it("importa com mediana e limites zerados, sem preços", () => {
+    expect(itens[0]!.mediana).toBe(0);
+    expect(itens[0]!.limiteInferior).toBe(0);
+    expect(itens[0]!.precos).toHaveLength(0);
+  });
+
+  it("ignora o rodapé de conformidade mesmo com zeros", () => {
+    // linha de legenda não deve virar item — confirmar por mutação:
+    // se removêssemos o filtro LEGEND_PATTERNS, teríamos 3 itens
+    expect(itens).toHaveLength(2);
+  });
+});
+
 describe("googleSheets — helpers puros", () => {
   it("extrai o ID da planilha da URL", () => {
     expect(
@@ -117,5 +153,40 @@ describe("googleSheets — helpers puros", () => {
   it("extrai o número do processo do título", () => {
     expect(extrairNumeroProcesso("Planilha_Mediana Proc_2433/2025")).toBe("2433/2025");
     expect(extrairNumeroProcesso("Sem número")).toBeNull();
+  });
+});
+
+describe("extrairObjetoDoTitulo", () => {
+  it("retorna a parte descritiva removendo o número do processo", () => {
+    expect(extrairObjetoDoTitulo("e-CPF e e-CNPJ - Proc_2433/2025")).toBe("e-CPF e e-CNPJ");
+    expect(extrairObjetoDoTitulo("Pesquisa de Preços - e-CPF - Proc_2433/2025")).toBe(
+      "Pesquisa de Preços - e-CPF",
+    );
+  });
+
+  it("suporta variações de separador e formato do número", () => {
+    expect(extrairObjetoDoTitulo("Aquisição de Selos – Proc. 12/2026")).toBe("Aquisição de Selos");
+    expect(extrairObjetoDoTitulo("Uniformes Proc 55/2025")).toBe("Uniformes");
+    expect(extrairObjetoDoTitulo("Material de Escritório_Proc_100/2024")).toBe(
+      "Material de Escritório",
+    );
+  });
+
+  it("retorna null quando não há conteúdo descritivo além do número", () => {
+    expect(extrairObjetoDoTitulo("Proc_2433/2025")).toBeNull();
+    expect(extrairObjetoDoTitulo(null)).toBeNull();
+    expect(extrairObjetoDoTitulo("")).toBeNull();
+  });
+
+  it('retorna null para título genérico "Pesquisa de Preços"', () => {
+    expect(extrairObjetoDoTitulo("Pesquisa de Preços - Proc_2433/2025")).toBeNull();
+    expect(extrairObjetoDoTitulo("Pesquisa de Preço")).toBeNull();
+  });
+
+  it("usa a mutação inversa: sem o return null não protege o caso genérico", () => {
+    // confirma que o filtro de genérico está ativo — se removermos a guarda,
+    // "Pesquisa de Preços" seria retornado e este teste quebraria
+    const resultado = extrairObjetoDoTitulo("Pesquisa de Preços - Proc_99/2025");
+    expect(resultado).toBeNull();
   });
 });

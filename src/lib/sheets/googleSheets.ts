@@ -33,6 +33,29 @@ export function extrairNumeroProcesso(titulo: string | null): string | null {
   return null;
 }
 
+/**
+ * Extrai a parte descritiva do título da planilha removendo o número do processo
+ * e prefixos genéricos. Retorna null se não restar conteúdo útil.
+ *
+ * Exemplos:
+ *   "e-CPF e e-CNPJ - Proc_2433/2025"             → "e-CPF e e-CNPJ"
+ *   "Pesquisa de Preços - e-CPF - Proc_2433/2025"  → "Pesquisa de Preços - e-CPF"
+ *   "Proc_2433/2025"                               → null (sem descrição)
+ *   "Pesquisa de Preços - Proc_2433/2025"          → null (genérico demais)
+ */
+export function extrairObjetoDoTitulo(titulo: string | null): string | null {
+  if (!titulo) return null;
+  // Remove o trecho do número de processo e separadores adjacentes
+  const semNumero = titulo
+    .replace(/\s*[-–_]?\s*proc[._\s-]*\d{1,6}\s*\/\s*\d{2,4}/gi, "")
+    .trim();
+  // Remove separadores residuais no final
+  const limpo = semNumero.replace(/[-–_\s]+$/, "").trim();
+  // Muito curto ou apenas "Pesquisa de Preços" → genérico demais
+  if (limpo.length < 5 || /^pesquisa\s+de\s+preços?$/i.test(limpo)) return null;
+  return limpo;
+}
+
 function extrairAbas(html: string): Array<{ name: string; gid: string }> {
   const abas: Array<{ name: string; gid: string }> = [];
   const re = /name:\s*"((?:[^"\\]|\\.)*)"[^}]*?gid:\s*"(\d+)"/g;

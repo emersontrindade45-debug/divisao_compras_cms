@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
-import { carregarPlanilha } from "@/lib/sheets/googleSheets";
+import { carregarPlanilha, extrairObjetoDoTitulo } from "@/lib/sheets/googleSheets";
 import { parsePlanilha, estatisticaDoItem } from "@/lib/sheets/parsePlanilha";
 
 export interface SincronizacaoResultado {
@@ -47,8 +47,12 @@ export async function sincronizarPlanilha(
     return { error: "Nenhum item encontrado na planilha." };
   }
 
-  const objeto =
-    itens.length === 1
+  // Preferência: parte descritiva do título do arquivo do Google Sheets.
+  // Fallback: primeiro material (comportamento anterior).
+  const tituloDescritivo = extrairObjetoDoTitulo(carregada.titulo);
+  const objeto = tituloDescritivo
+    ? tituloDescritivo.slice(0, 240)
+    : itens.length === 1
       ? itens[0]!.material.slice(0, 240)
       : `${itens[0]!.material.slice(0, 200)} (+${itens.length - 1} itens)`;
   const quantidadeTotal = itens.reduce((acc, it) => acc + (it.quantidade || 0), 0) || itens.length;
