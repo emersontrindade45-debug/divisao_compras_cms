@@ -6,7 +6,7 @@ import {
   estatisticaDoItem,
   isDataSheet,
 } from "../parsePlanilha";
-import { extrairSpreadsheetId, extrairNumeroProcesso } from "../googleSheets";
+import { extrairSpreadsheetId, extrairNumeroProcesso, extrairObjetoDoTitulo } from "../googleSheets";
 
 // CSV real exportado da planilha do processo (aba "Modelo"), com cabeçalho
 // multilinha ("QTDE.\nMÍN") e colunas deslocadas por células mescladas.
@@ -117,5 +117,40 @@ describe("googleSheets — helpers puros", () => {
   it("extrai o número do processo do título", () => {
     expect(extrairNumeroProcesso("Planilha_Mediana Proc_2433/2025")).toBe("2433/2025");
     expect(extrairNumeroProcesso("Sem número")).toBeNull();
+  });
+});
+
+describe("extrairObjetoDoTitulo", () => {
+  it("retorna a parte descritiva removendo o número do processo", () => {
+    expect(extrairObjetoDoTitulo("e-CPF e e-CNPJ - Proc_2433/2025")).toBe("e-CPF e e-CNPJ");
+    expect(extrairObjetoDoTitulo("Pesquisa de Preços - e-CPF - Proc_2433/2025")).toBe(
+      "Pesquisa de Preços - e-CPF",
+    );
+  });
+
+  it("suporta variações de separador e formato do número", () => {
+    expect(extrairObjetoDoTitulo("Aquisição de Selos – Proc. 12/2026")).toBe("Aquisição de Selos");
+    expect(extrairObjetoDoTitulo("Uniformes Proc 55/2025")).toBe("Uniformes");
+    expect(extrairObjetoDoTitulo("Material de Escritório_Proc_100/2024")).toBe(
+      "Material de Escritório",
+    );
+  });
+
+  it("retorna null quando não há conteúdo descritivo além do número", () => {
+    expect(extrairObjetoDoTitulo("Proc_2433/2025")).toBeNull();
+    expect(extrairObjetoDoTitulo(null)).toBeNull();
+    expect(extrairObjetoDoTitulo("")).toBeNull();
+  });
+
+  it('retorna null para título genérico "Pesquisa de Preços"', () => {
+    expect(extrairObjetoDoTitulo("Pesquisa de Preços - Proc_2433/2025")).toBeNull();
+    expect(extrairObjetoDoTitulo("Pesquisa de Preço")).toBeNull();
+  });
+
+  it("usa a mutação inversa: sem o return null não protege o caso genérico", () => {
+    // confirma que o filtro de genérico está ativo — se removermos a guarda,
+    // "Pesquisa de Preços" seria retornado e este teste quebraria
+    const resultado = extrairObjetoDoTitulo("Pesquisa de Preços - Proc_99/2025");
+    expect(resultado).toBeNull();
   });
 });
