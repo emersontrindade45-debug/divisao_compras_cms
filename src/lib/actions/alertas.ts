@@ -28,10 +28,17 @@ export async function buscarAlertas(): Promise<Alerta[]> {
       // Processos sem nenhuma fonte do tipo contratacao_publica
       db.processo.findMany({
         where: { status: { in: ["pendente", "parcial"] } },
-        include: {
+        select: {
+          id: true,
+          numero: true,
+          objeto: true,
+          status: true,
+          dataAbertura: true,
+          responsavel: true,
           itens: {
-            include: {
-              fontes: { where: { tipo: "contratacao_publica" }, take: 1 },
+            select: {
+              id: true,
+              fontes: { where: { tipo: "contratacao_publica" }, take: 1, select: { id: true } },
             },
           },
         },

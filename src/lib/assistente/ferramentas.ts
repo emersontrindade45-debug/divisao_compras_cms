@@ -229,7 +229,6 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         status: true,
         responsavel: true,
         dataAbertura: true,
-        trContexto: true,
         itens: {
           select: {
             id: true,
@@ -253,8 +252,6 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       status: processo.status,
       responsavel: processo.responsavel,
       dataAbertura: processo.dataAbertura.toISOString().slice(0, 10),
-      // Indica se o TR foi processado. Use `ler_tr` para acessar o conteúdo completo.
-      trDisponivel: processo.trContexto !== null,
       itens: processo.itens.map((item) => ({
         itemId: item.id,
         descricao: item.descricao,
@@ -716,8 +713,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       nome: "ler_processo",
       descricao:
         "Lê o processo e seus itens (descrição, unidade, quantidade, especificação, palavras-chave) " +
-        "e quantas fontes e candidatos cada item já tem. Indica também se o TR foi processado " +
-        "(campo trDisponivel). Use SEMPRE antes de buscar.",
+        "e quantas fontes e candidatos cada item já tem. Use SEMPRE antes de buscar.",
       parametros: escopoProcessoParams,
     },
     {

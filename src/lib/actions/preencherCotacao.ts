@@ -22,7 +22,10 @@ export async function preencherCotacao(
 ): Promise<ActionResult<PreencherCotacaoResultado>> {
   const user = await requireAuth();
 
-  const processo = await db.processo.findUnique({ where: { id: processoId } });
+  const processo = await db.processo.findUnique({
+    where: { id: processoId },
+    select: { id: true, planilhaOrigemUrl: true },
+  });
   if (!processo) {
     return { error: "Processo não encontrado." };
   }

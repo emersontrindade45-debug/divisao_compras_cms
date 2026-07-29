@@ -36,7 +36,23 @@ export async function listarProcessos(filtros?: FiltrosProcessoServer) {
           }
         : {}),
     },
-    include: {
+    // select explícito: §9.46 — coluna nova (trContexto) não pode ser buscada
+    // antes da migration ser aplicada em produção.
+    select: {
+      id: true,
+      numero: true,
+      objeto: true,
+      unidade: true,
+      quantidade: true,
+      caracteristicasTecnicas: true,
+      palavrasChave: true,
+      classificacao: true,
+      responsavel: true,
+      status: true,
+      dataAbertura: true,
+      planilhaOrigemUrl: true,
+      createdAt: true,
+      updatedAt: true,
       itens: { take: 1, select: { descricao: true, classificacao: true } },
     },
     orderBy: { dataAbertura: "desc" },
@@ -47,16 +63,55 @@ export async function listarProcessosComSerie() {
   await requireAuth();
 
   return db.processo.findMany({
-    include: {
+    // select explícito: §9.46
+    select: {
+      id: true,
+      numero: true,
+      objeto: true,
+      unidade: true,
+      quantidade: true,
+      caracteristicasTecnicas: true,
+      palavrasChave: true,
+      classificacao: true,
+      responsavel: true,
+      status: true,
+      dataAbertura: true,
+      planilhaOrigemUrl: true,
+      createdAt: true,
+      updatedAt: true,
       itens: {
-        include: {
+        take: 1,
+        select: {
+          id: true,
+          descricao: true,
+          unidade: true,
+          quantidade: true,
+          classificacao: true,
+          caracteristicasTecnicas: true,
+          palavrasChave: true,
+          createdAt: true,
+          updatedAt: true,
+          processoId: true,
           seriePrecos: {
-            include: { precos: { orderBy: { dataReferencia: "asc" } } },
             take: 1,
-            orderBy: { createdAt: "desc" },
+            orderBy: { createdAt: "desc" as const },
+            select: {
+              id: true,
+              itemId: true,
+              metodo: true,
+              valorEstimado: true,
+              media: true,
+              mediana: true,
+              menorValor: true,
+              coeficienteVariacao: true,
+              totalPrecos: true,
+              precosIncluidos: true,
+              createdAt: true,
+              updatedAt: true,
+              precos: { orderBy: { dataReferencia: "asc" as const } },
+            },
           },
         },
-        take: 1,
       },
     },
     orderBy: { dataAbertura: "desc" },
@@ -99,9 +154,34 @@ export async function obterProcessoDetalhado(id: string) {
 
   return db.processo.findUnique({
     where: { id },
-    include: {
+    // select explícito: §9.46
+    select: {
+      id: true,
+      numero: true,
+      objeto: true,
+      unidade: true,
+      quantidade: true,
+      caracteristicasTecnicas: true,
+      palavrasChave: true,
+      classificacao: true,
+      responsavel: true,
+      status: true,
+      dataAbertura: true,
+      planilhaOrigemUrl: true,
+      createdAt: true,
+      updatedAt: true,
       itens: {
-        include: {
+        select: {
+          id: true,
+          descricao: true,
+          unidade: true,
+          quantidade: true,
+          classificacao: true,
+          caracteristicasTecnicas: true,
+          palavrasChave: true,
+          processoId: true,
+          createdAt: true,
+          updatedAt: true,
           fontes: { include: { evidencias: true } },
           seriePrecos: { include: { precos: { orderBy: { dataReferencia: "asc" } } } },
         },

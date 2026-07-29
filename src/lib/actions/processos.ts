@@ -28,7 +28,10 @@ export async function atualizarStatusProcesso(
 
   const { processoId, status, justificativa } = parsed.data;
 
-  const processo = await db.processo.findUnique({ where: { id: processoId } });
+  const processo = await db.processo.findUnique({
+    where: { id: processoId },
+    select: { id: true, status: true },
+  });
   if (!processo) return { error: "Processo não encontrado" };
 
   await db.processo.update({
@@ -49,7 +52,10 @@ export async function atualizarStatusProcesso(
 export async function aprovarProcesso(processoId: string): Promise<ActionResult> {
   const user = await requireRole("aprovacao");
 
-  const processo = await db.processo.findUnique({ where: { id: processoId } });
+  const processo = await db.processo.findUnique({
+    where: { id: processoId },
+    select: { id: true, status: true },
+  });
   if (!processo) return { error: "Processo não encontrado" };
 
   await db.processo.update({
