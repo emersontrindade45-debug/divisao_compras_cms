@@ -722,8 +722,9 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         "Lê o conteúdo do Termo de Referência extraído e salvo no processo: tabela de itens, " +
         "modelo de execução do objeto e materiais/equipamentos. Use quando o usuário perguntar " +
         "sobre especificações técnicas, exigências de execução ou materiais do TR, ou quando " +
-        "precisar das especificações para avaliar candidatos de similaridade.",
-      parametros: escopoProcessoParams,
+        "precisar das especificações para avaliar candidatos de similaridade. " +
+        "Não aceita processoId — opera sempre sobre o processo desta conversa.",
+      parametros: { type: "object", properties: {} },
     },
     {
       nome: "ler_candidatos",
@@ -843,8 +844,13 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           return ok(await lerProcesso(resolverProcesso(ctx, args.processoId)));
         }
         case "ler_tr": {
-          const args = parseArgumentos(comProcesso, chamada.argumentos);
-          return ok(await lerTR(resolverProcesso(ctx, args.processoId)));
+          if (!ctx.processoId) {
+            return ok({
+              disponivel: false,
+              mensagem: "ler_tr só funciona dentro de um processo. Abra o processo e use o assistente de lá.",
+            });
+          }
+          return ok(await lerTR(ctx.processoId));
         }
         case "ler_candidatos": {
           const args = parseArgumentos(comProcesso, chamada.argumentos);
