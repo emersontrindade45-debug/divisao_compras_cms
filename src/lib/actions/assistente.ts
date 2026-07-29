@@ -262,8 +262,8 @@ export async function adicionarCandidatoSugerido(
     return {
       ok: false,
       mensagem:
-        "O candidato não passou no corte: ou está fora da janela de 365 dias da IN 65/2021, " +
-        "ou a similaridade com este item ficou abaixo do mínimo.",
+      "O candidato não passou no corte: ou está fora da janela de 730 dias (2 anos) " +
+      "admitida para serviços, ou a similaridade com este item ficou abaixo do mínimo.",
     };
   }
 
