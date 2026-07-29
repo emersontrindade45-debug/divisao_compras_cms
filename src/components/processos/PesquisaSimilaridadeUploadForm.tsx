@@ -32,17 +32,24 @@ export function PesquisaSimilaridadeUploadForm({ processoId }: { processoId: str
       const sucesso = itens.filter((i) => i.status === "sucesso").length;
       const erro = itens.filter((i) => i.status === "erro").length;
       const ignorado = itens.filter((i) => i.status === "ignorado").length;
+      const comResultado = itens.filter((i) => i.status === "sucesso" && i.totalCandidatos > 0).length;
+      const semResultado = itens.filter((i) => i.status === "sucesso" && i.totalCandidatos === 0).length;
 
       const detalhes = [
         erro > 0 ? `${erro} erro${erro > 1 ? "s" : ""}` : null,
         ignorado > 0 ? `${ignorado} ignorado${ignorado > 1 ? "s" : ""}` : null,
+        semResultado > 0
+          ? `${semResultado} sem contrato similar encontrado no PNCP — use o assistente de IA para refinar a busca`
+          : null,
       ].filter(Boolean);
 
-      const mensagem = `${sucesso} de ${itens.length} item(ns) processado(s) com sucesso${
-        detalhes.length > 0 ? ` (${detalhes.join(", ")})` : ""
-      }.`;
+      const mensagem = `${sucesso} de ${itens.length} item(ns) processado(s)${
+        comResultado > 0 ? `, ${comResultado} com contratos similares` : ""
+      }${detalhes.length > 0 ? `. ${detalhes.join(". ")}` : "."}`;
 
       if (erro > 0) {
+        toast.warning(mensagem);
+      } else if (comResultado === 0) {
         toast.warning(mensagem);
       } else {
         toast.success(mensagem);

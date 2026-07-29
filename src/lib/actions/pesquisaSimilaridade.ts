@@ -22,6 +22,8 @@ export interface ItemProcessadoSimilaridade {
   itemId: string;
   descricao: string;
   totalCandidatos: number;
+  /** Candidatos encontrados antes do filtro de score mínimo. */
+  totalCandidatosEncontrados?: number;
   status: "sucesso" | "erro" | "ignorado";
   erro?: string;
 }
@@ -110,12 +112,23 @@ export async function processarPesquisaSimilaridade(
         };
       }
 
-      const itemTR = casarItemComExtrato(item.descricao, extratos) ?? {
+      const extratoTR = casarItemComExtrato(item.descricao, extratos);
+      const itemTR = extratoTR ?? {
         descricao: item.descricao,
         especificacaoTecnica: item.caracteristicasTecnicas ?? "",
         unidade: item.unidade,
         quantidade: item.quantidade,
       };
+
+      // Persiste a especificação técnica extraída do TR no item para que o
+      // assistente de IA sempre tenha acesso às especificações do TR via
+      // ler_processo, mesmo após o PDF ser descartado.
+      if (extratoTR?.especificacaoTecnica && extratoTR.especificacaoTecnica !== item.caracteristicasTecnicas) {
+        await db.item.update({
+          where: { id: item.id },
+          data: { caracteristicasTecnicas: extratoTR.especificacaoTecnica },
+        });
+      }
 
       const termoBusca = resolverTermoBusca({
         descricao: item.descricao,
@@ -156,6 +169,7 @@ export async function processarPesquisaSimilaridade(
         itemId: item.id,
         descricao: item.descricao,
         totalCandidatos: ranqueados.length,
+        totalCandidatosEncontrados: candidatosFiltrados.length,
         status: "sucesso",
       };
     },
