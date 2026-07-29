@@ -61,18 +61,18 @@ describe("validarValidadeFontes", () => {
     return d;
   }
 
-  it("block OP-SLA-06 para contratação pública com 366 dias", () => {
+  it("block OP-SLA-06 para contratação pública com 731 dias (além dos 2 anos)", () => {
     const result = validarValidadeFontes(
-      [{ fonteId: "f1", tipo: "contratacao_publica", dataReferencia: datasAtras(366) }],
+      [{ fonteId: "f1", tipo: "contratacao_publica", dataReferencia: datasAtras(731) }],
       hoje,
     );
     expect(result.valid).toBe(false);
     expect(result.violations.some((v) => v.code === "OP-SLA-06")).toBe(true);
   });
 
-  it("válida para contratação pública com 364 dias", () => {
+  it("válida para contratação pública com 729 dias (dentro dos 2 anos)", () => {
     const result = validarValidadeFontes(
-      [{ fonteId: "f1", tipo: "contratacao_publica", dataReferencia: datasAtras(364) }],
+      [{ fonteId: "f1", tipo: "contratacao_publica", dataReferencia: datasAtras(729) }],
       hoje,
     );
     expect(result.valid).toBe(true);

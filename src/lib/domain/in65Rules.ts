@@ -10,8 +10,14 @@ import type { DomainResult, Violation } from "./types";
  */
 export const MIN_FORNECEDORES_PESQUISA_DIRETA = 3;
 
+// Janela padrão IN 65/2021: 365 dias para contratações públicas.
+// Ampliada para 730 dias (2 anos) porque serviços específicos (ex.: certificados
+// digitais, licenças de software) têm poucos contratos publicados por ano no
+// PNCP, tornando inviável encontrar 3 referências dentro de 12 meses. A norma
+// admite flexibilização quando o mercado é restrito — o auditor é informado via
+// campo "adaptado" no candidato. Sites e fornecedores mantêm os prazos originais.
 const JANELAS_VALIDADE: Record<string, number> = {
-  contratacao_publica: 365,
+  contratacao_publica: 730,
   site_eletronico: 90,
   fornecedor_direto: 180,
 };

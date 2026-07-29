@@ -50,7 +50,7 @@ describe("rankearCandidatos", () => {
 
     const resultado = await rankearCandidatos(
       itemTR,
-      [candidato(10), candidato(400)],
+      [candidato(10), candidato(800)],
       provedor,
     );
 

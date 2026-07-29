@@ -16,18 +16,23 @@ function candidato(diasAtras: number): CandidatoSimilaridade {
 }
 
 describe("filtrarPorRecencia", () => {
-  it("mantém candidatos dentro de 365 dias", () => {
+  it("mantém candidatos dentro de 730 dias", () => {
     const resultado = filtrarPorRecencia([candidato(100)]);
     expect(resultado).toHaveLength(1);
   });
 
-  it("exclui candidatos com mais de 365 dias", () => {
-    const resultado = filtrarPorRecencia([candidato(400)]);
+  it("mantém candidatos entre 365 e 730 dias (janela ampliada para serviços)", () => {
+    const resultado = filtrarPorRecencia([candidato(500)]);
+    expect(resultado).toHaveLength(1);
+  });
+
+  it("exclui candidatos com mais de 730 dias", () => {
+    const resultado = filtrarPorRecencia([candidato(800)]);
     expect(resultado).toHaveLength(0);
   });
 
-  it("mantém exatamente no limite de 365 dias", () => {
-    const resultado = filtrarPorRecencia([candidato(365)]);
+  it("mantém exatamente no limite de 730 dias", () => {
+    const resultado = filtrarPorRecencia([candidato(730)]);
     expect(resultado).toHaveLength(1);
   });
 });
