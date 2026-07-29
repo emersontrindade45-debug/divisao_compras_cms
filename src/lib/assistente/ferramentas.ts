@@ -191,6 +191,34 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
   // Leitura
   // -------------------------------------------------------------------------
 
+  async function lerTR(processoId: string) {
+    const processo = await db.processo.findUnique({
+      where: { id: processoId },
+      select: { id: true, numero: true, trContexto: true },
+    });
+    if (!processo) throw new ArgumentosInvalidosError("Processo não encontrado.");
+    if (!processo.trContexto) {
+      return {
+        disponivel: false,
+        mensagem:
+          "Nenhum TR foi processado para este processo ainda. " +
+          "Peça ao servidor para fazer upload do PDF do Termo de Referência na aba de Pesquisa.",
+      };
+    }
+    const contexto = JSON.parse(processo.trContexto) as {
+      tabelaItens: string;
+      modeloExecucao: string;
+      materiaisEquipamentos: string;
+    };
+    return {
+      disponivel: true,
+      numero: processo.numero,
+      tabelaItens: contexto.tabelaItens,
+      modeloExecucao: contexto.modeloExecucao,
+      materiaisEquipamentos: contexto.materiaisEquipamentos || "(não consta no TR)",
+    };
+  }
+
   async function lerProcesso(processoId: string) {
     const processo = await db.processo.findUnique({
       where: { id: processoId },
@@ -201,6 +229,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         status: true,
         responsavel: true,
         dataAbertura: true,
+        trContexto: true,
         itens: {
           select: {
             id: true,
@@ -224,6 +253,8 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       status: processo.status,
       responsavel: processo.responsavel,
       dataAbertura: processo.dataAbertura.toISOString().slice(0, 10),
+      // Indica se o TR foi processado. Use `ler_tr` para acessar o conteúdo completo.
+      trDisponivel: processo.trContexto !== null,
       itens: processo.itens.map((item) => ({
         itemId: item.id,
         descricao: item.descricao,
@@ -685,7 +716,17 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       nome: "ler_processo",
       descricao:
         "Lê o processo e seus itens (descrição, unidade, quantidade, especificação, palavras-chave) " +
-        "e quantas fontes e candidatos cada item já tem. Use SEMPRE antes de buscar.",
+        "e quantas fontes e candidatos cada item já tem. Indica também se o TR foi processado " +
+        "(campo trDisponivel). Use SEMPRE antes de buscar.",
+      parametros: escopoProcessoParams,
+    },
+    {
+      nome: "ler_tr",
+      descricao:
+        "Lê o conteúdo do Termo de Referência extraído e salvo no processo: tabela de itens, " +
+        "modelo de execução do objeto e materiais/equipamentos. Use quando o usuário perguntar " +
+        "sobre especificações técnicas, exigências de execução ou materiais do TR, ou quando " +
+        "precisar das especificações para avaliar candidatos de similaridade.",
       parametros: escopoProcessoParams,
     },
     {
@@ -804,6 +845,10 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         case "ler_processo": {
           const args = parseArgumentos(comProcesso, chamada.argumentos);
           return ok(await lerProcesso(resolverProcesso(ctx, args.processoId)));
+        }
+        case "ler_tr": {
+          const args = parseArgumentos(comProcesso, chamada.argumentos);
+          return ok(await lerTR(resolverProcesso(ctx, args.processoId)));
         }
         case "ler_candidatos": {
           const args = parseArgumentos(comProcesso, chamada.argumentos);

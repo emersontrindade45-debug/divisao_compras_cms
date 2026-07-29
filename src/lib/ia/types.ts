@@ -28,8 +28,22 @@ export interface ScoreSimilaridade {
   justificativa: string;
 }
 
+/**
+ * Contexto extraído do TR para referência permanente do assistente.
+ * Armazenado como JSON em Processo.trContexto.
+ */
+export interface ContextoTR {
+  /** Tabela de itens do objeto (item, especificação, frequência, unidade, quantidade). */
+  tabelaItens: string;
+  /** Seção de modelo de execução do objeto (prazos, dinâmica, especificações técnicas por área). */
+  modeloExecucao: string;
+  /** Seção de materiais e equipamentos. Vazio quando não constar no TR. */
+  materiaisEquipamentos: string;
+}
+
 export interface ProvedorIA {
   extrairEspecificacaoTR(pdfBuffer: Buffer): Promise<ItemExtraidoTR[]>;
+  extrairContextoTR(pdfBuffer: Buffer): Promise<ContextoTR>;
   rankearSimilaridade(
     itemTR: ItemExtraidoTR,
     candidatos: CandidatoSimilaridade[],
