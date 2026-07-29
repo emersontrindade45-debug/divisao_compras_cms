@@ -86,16 +86,40 @@ export async function POST(request: Request) {
   // Conversa: reaproveita a existente (validando dono) ou cria uma nova.
   // Validar o dono importa — o id vem do cliente, e sem a checagem qualquer
   // usuário autenticado leria a conversa de outro pelo id.
+  //
+  // Guarda de escopo: se a conversa existente pertence a um processo diferente
+  // do processo atual na URL, descarta o id informado e cria uma conversa nova.
+  // Isso evita o travamento "presa a outro processo" quando o usuário navega
+  // entre processos com conversas persistidas de sessões anteriores.
   let conversa: { id: string; processoId: string | null };
   if (conversaInformada) {
     const existente = await db.conversaAssistente.findUnique({
       where: { id: conversaInformada },
       select: { id: true, processoId: true, userId: true },
     });
-    if (!existente || existente.userId !== user.id) {
+    const pertenceAoUsuario = existente && existente.userId === user.id;
+    const escopoCompativel =
+      pertenceAoUsuario && existente.processoId === processoIdInformado;
+
+    if (!pertenceAoUsuario) {
       return NextResponse.json({ error: "Conversa não encontrada" }, { status: 404 });
     }
-    conversa = { id: existente.id, processoId: existente.processoId };
+
+    if (escopoCompativel) {
+      conversa = { id: existente.id, processoId: existente.processoId };
+    } else {
+      // Escopo diverge (conversa presa a outro processo ou era global).
+      // Cria uma nova conversa para o processo/escopo atual.
+      const criada = await db.conversaAssistente.create({
+        data: {
+          userId: user.id,
+          processoId: processoIdInformado,
+          titulo: mensagem.slice(0, 80),
+        },
+        select: { id: true, processoId: true },
+      });
+      conversa = criada;
+    }
   } else {
     const criada = await db.conversaAssistente.create({
       data: {

@@ -285,18 +285,28 @@ describe("POST /api/assistente/chat", () => {
     );
   });
 
-  it("usa o processo da conversa, não o que o cliente mandou no corpo", async () => {
-    // A conversa já existe e está presa a proc-1; o corpo tenta apontar outro.
+  it("cria conversa nova quando o processo da conversa existente não bate com o processo atual", async () => {
+    // A conversa conv-1 está presa a proc-1; o cliente está agora em proc-2.
+    // O comportamento correto é criar uma conversa nova para proc-2 em vez de
+    // travar o usuário no contexto de proc-1 (o bug do "presa a outro processo").
     mocks.db.conversaAssistente.findUnique.mockResolvedValue({
       id: "conv-1",
       processoId: "proc-1",
       userId: "user-1",
     });
+    mocks.db.conversaAssistente.create.mockResolvedValue({
+      id: "conv-nova",
+      processoId: "proc-2",
+    });
 
-    await POST(requisicao({ mensagem: "oi", conversaId: "conv-1", processoId: "proc-INVASOR" }));
+    await POST(requisicao({ mensagem: "oi", conversaId: "conv-1", processoId: "proc-2" }));
 
+    // Deve criar conversa nova para proc-2, não reusar conv-1 presa a proc-1.
+    expect(mocks.db.conversaAssistente.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ processoId: "proc-2" }) }),
+    );
     expect(mocks.montarRegistry).toHaveBeenCalledWith(
-      expect.objectContaining({ processoId: "proc-1", conversaId: "conv-1" }),
+      expect.objectContaining({ processoId: "proc-2", conversaId: "conv-nova" }),
     );
   });
 
