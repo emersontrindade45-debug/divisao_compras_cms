@@ -67,6 +67,29 @@ export async function aprovarProcesso(processoId: string): Promise<ActionResult>
   return {};
 }
 
+export async function excluirProcesso(processoId: string): Promise<ActionResult> {
+  const user = await requireRole("aprovacao");
+
+  const processo = await db.processo.findUnique({
+    where: { id: processoId },
+    select: { id: true, numero: true, objeto: true },
+  });
+  if (!processo) return { error: "Processo não encontrado." };
+
+  await registrarAuditoria({
+    userId: user.id,
+    acao: "excluir_processo",
+    processoId,
+    detalhes: { numero: processo.numero, objeto: processo.objeto },
+  });
+
+  // Cascade definido no schema: itens, fontes, evidências, cotações e série de
+  // preços são removidos em cascata pelo banco.
+  await db.processo.delete({ where: { id: processoId } });
+
+  return {};
+}
+
 export async function listarAuditLogs(processoId: string) {
   await requireAuth();
 
