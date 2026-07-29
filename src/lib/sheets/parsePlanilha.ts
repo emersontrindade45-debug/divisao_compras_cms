@@ -123,7 +123,10 @@ export function parsePlanilha(rows: string[][]): PlanilhaParseResult {
     if (LEGEND_PATTERNS.test(linhaToda)) continue;
 
     const mediana = parseNumberBR(row[1]);
-    const ehLinhaDeDados = material.length > 0 && Number.isFinite(mediana) && mediana > 0;
+    // §9.10: tolerar linhas com estatística zerada (pesquisa ainda não feita).
+    // Distinguimos linha de dados de cabeçalho de grupo pela presença de um
+    // número finito na coluna de mediana — mesmo que seja 0.
+    const ehLinhaDeDados = material.length > 0 && Number.isFinite(mediana);
 
     if (!ehLinhaDeDados) {
       // possível linha de grupo (texto mesclado, sem mediana numérica)

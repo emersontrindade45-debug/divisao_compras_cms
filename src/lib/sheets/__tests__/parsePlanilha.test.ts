@@ -24,6 +24,15 @@ const csvComGrupo = [
   '"447,99","639,98","831,97","","2","1","8","Caixa de filtragem FILBOX","453,83","639,98","765,96"',
 ].join("\n");
 
+// Planilha no estado inicial: itens cadastrados, pesquisa ainda não realizada
+// (mediana e limites zerados — §9.10: deve importar mesmo assim)
+const csvMedianaZero = [
+  '"LIMITE INFERIOR","MEDIANA","LIMITE SUPERIOR","","ITEM","QTDE.","MATERIAL","ORÇAMENTO"',
+  '"0,00","0,00","0,00","","1","15","e-CPF Tipo A3 c/ Token – Validade Mínima de 36 meses",""',
+  '"0,00","0,00","0,00","","2","6","e-CNPJ Tipo A3 c/ Token – Validade Mínima de 36 meses",""',
+  '"Em conformidade com o inciso III do Art. 57 do ato 17/2023","","","","","","",""',
+].join("\n");
+
 describe("parseNumberBR", () => {
   it("converte formatos pt-BR", () => {
     expect(parseNumberBR("2.327,18")).toBeCloseTo(2327.18, 2);
@@ -103,6 +112,33 @@ describe("parsePlanilha — com grupo/lote", () => {
     expect(itens[0]!.precos).toHaveLength(3);
     expect(itens[0]!.precos.every((p) => p.incluido)).toBe(true);
     expect(itens[0]!.precos[0]!.label).toBe("PREÇO PÚBLICO I");
+  });
+});
+
+describe("parsePlanilha — estatística zerada (§9.10)", () => {
+  const { itens } = parsePlanilha(parseCsv(csvMedianaZero));
+
+  it("importa itens mesmo com mediana = 0 (pesquisa ainda não feita)", () => {
+    expect(itens).toHaveLength(2);
+  });
+
+  it("preserva material e quantidade corretos", () => {
+    expect(itens[0]!.material).toContain("e-CPF");
+    expect(itens[0]!.quantidade).toBe(15);
+    expect(itens[1]!.material).toContain("e-CNPJ");
+    expect(itens[1]!.quantidade).toBe(6);
+  });
+
+  it("importa com mediana e limites zerados, sem preços", () => {
+    expect(itens[0]!.mediana).toBe(0);
+    expect(itens[0]!.limiteInferior).toBe(0);
+    expect(itens[0]!.precos).toHaveLength(0);
+  });
+
+  it("ignora o rodapé de conformidade mesmo com zeros", () => {
+    // linha de legenda não deve virar item — confirmar por mutação:
+    // se removêssemos o filtro LEGEND_PATTERNS, teríamos 3 itens
+    expect(itens).toHaveLength(2);
   });
 });
 
