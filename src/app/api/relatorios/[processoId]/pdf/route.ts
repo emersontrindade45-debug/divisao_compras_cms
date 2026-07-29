@@ -21,16 +21,19 @@ export async function GET(
 
   const processo = await db.processo.findUnique({
     where: { id: processoId },
-    include: {
+    select: {
+      id: true, numero: true, objeto: true, responsavel: true,
+      dataAbertura: true, status: true, unidade: true, quantidade: true,
       itens: {
-        include: {
+        take: 1,
+        select: {
+          id: true, descricao: true, unidade: true, quantidade: true,
           seriePrecos: {
-            include: { precos: { orderBy: { dataReferencia: "asc" } } },
             take: 1,
-            orderBy: { createdAt: "desc" },
+            orderBy: { createdAt: "desc" as const },
+            include: { precos: { orderBy: { dataReferencia: "asc" } } },
           },
         },
-        take: 1,
       },
     },
   });

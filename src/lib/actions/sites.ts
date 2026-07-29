@@ -50,7 +50,10 @@ export async function criarCaptura(
     };
   }
 
-  const processo = await db.processo.findUnique({ where: { id: parsed.data.processoId } });
+  const processo = await db.processo.findUnique({
+    where: { id: parsed.data.processoId },
+    select: { id: true },
+  });
   if (!processo) return { error: "Processo não encontrado" };
 
   const captura = await db.capturaEvidencia.create({ data: parsed.data });
