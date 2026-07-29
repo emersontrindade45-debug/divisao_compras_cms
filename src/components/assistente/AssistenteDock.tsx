@@ -27,6 +27,8 @@ interface AssistenteContexto {
   abrir: () => void;
   fechar: () => void;
   alternar: () => void;
+  /** Força o chat a rebuscar a lista de itens do processo — chamar após sync. */
+  recarregarItens: () => void;
 }
 
 const Contexto = createContext<AssistenteContexto | null>(null);
@@ -49,6 +51,7 @@ function processoDaRota(pathname: string): string | null {
 
 export function AssistenteProvider({ children }: { children: React.ReactNode }) {
   const [aberto, setAberto] = useState(false);
+  const [itensKey, setItensKey] = useState(0);
   const pathname = usePathname();
   const processoId = processoDaRota(pathname);
 
@@ -58,6 +61,7 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
       abrir: () => setAberto(true),
       fechar: () => setAberto(false),
       alternar: () => setAberto((atual) => !atual),
+      recarregarItens: () => setItensKey((k) => k + 1),
     }),
     [aberto],
   );
@@ -76,6 +80,7 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
           // seguiria em modo "começar do zero" para sempre.
           key={processoId ?? "global"}
           processoId={processoId}
+          itensKey={itensKey}
           aoFechar={contexto.fechar}
         />
       )}
@@ -85,9 +90,11 @@ export function AssistenteProvider({ children }: { children: React.ReactNode }) 
 
 function PainelAssistente({
   processoId,
+  itensKey,
   aoFechar,
 }: {
   processoId: string | null;
+  itensKey: number;
   aoFechar: () => void;
 }) {
   const [reinicios, setReinicios] = useState(0);
@@ -136,6 +143,7 @@ function PainelAssistente({
         <AssistenteChat
           key={chave}
           processoId={processoId}
+          itensKey={itensKey}
           // Só a primeira montagem de um escopo retoma do banco. Depois de
           // "Nova conversa", retomar traria de volta exatamente a conversa que
           // o usuário acabou de pedir para deixar de lado.
