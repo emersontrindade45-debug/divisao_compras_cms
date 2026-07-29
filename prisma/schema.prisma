@@ -150,6 +150,9 @@ model Processo {
   status                  StatusProcesso    @default(pendente)
   dataAbertura            DateTime
   planilhaOrigemUrl       String?
+  // JSON serializado de ContextoTR: tabelaItens, modeloExecucao, materiaisEquipamentos.
+  // Preenchido quando o TR é processado; permanece como referência permanente para o assistente.
+  trContexto              String?
   createdAt               DateTime          @default(now())
   updatedAt               DateTime          @updatedAt
 

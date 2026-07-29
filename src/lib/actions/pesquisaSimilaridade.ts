@@ -67,9 +67,21 @@ export async function processarPesquisaSimilaridade(
 
   const provedor = getProvedorIA();
 
+  // Executa as duas extrações em paralelo: itens (para similaridade) e contexto
+  // (tabela de itens + modelo de execução + materiais, para o assistente).
   let extratos: ItemExtraidoTR[];
   try {
-    extratos = await provedor.extrairEspecificacaoTR(trPdfBuffer);
+    const [itensExtraidos, contextoTR] = await Promise.all([
+      provedor.extrairEspecificacaoTR(trPdfBuffer),
+      provedor.extrairContextoTR(trPdfBuffer),
+    ]);
+    extratos = itensExtraidos;
+
+    // Persiste o contexto do TR no processo para referência permanente do assistente.
+    await db.processo.update({
+      where: { id: processoId },
+      data: { trContexto: JSON.stringify(contextoTR) },
+    });
   } catch (err) {
     return {
       error: err instanceof Error ? `Falha ao processar o TR: ${err.message}` : "Falha ao processar o TR.",
