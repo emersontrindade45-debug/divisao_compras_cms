@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sincronizarPlanilha } from "@/lib/actions/sincronizarPlanilha";
+import { useAssistente } from "@/components/assistente/AssistenteDock";
 
 const REGRAS_FORMATO = [
   'A planilha deve estar compartilhada como "qualquer pessoa com o link pode visualizar".',
@@ -23,6 +24,7 @@ export function SincronizarPlanilhaForm({ defaultUrl }: { defaultUrl?: string })
   const [pending, startTransition] = useTransition();
   const [mostrarRegras, setMostrarRegras] = useState(false);
   const router = useRouter();
+  const assistente = useAssistente();
 
   function handleSincronizar() {
     if (!url.trim()) {
@@ -40,6 +42,9 @@ export function SincronizarPlanilhaForm({ defaultUrl }: { defaultUrl?: string })
         `Processo ${d.numero} sincronizado: ${d.itensImportados} item(ns) e ${d.precosImportados} preço(s).`,
       );
       router.refresh();
+      // Notifica o assistente para recarregar a lista de itens — sem isso o
+      // botão "Adicionar à lista" continua desabilitado até F5.
+      assistente?.recarregarItens();
     });
   }
 

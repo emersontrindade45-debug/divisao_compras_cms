@@ -47,6 +47,7 @@ export function AssistenteChat({
   processoId = null,
   processoNumero,
   className,
+  itensKey = 0,
   /**
    * Retomar do banco a última conversa deste escopo. Desligado por "Nova
    * conversa", que remonta o componente para começar do zero.
@@ -56,6 +57,8 @@ export function AssistenteChat({
   processoId?: string | null;
   processoNumero?: string;
   className?: string;
+  /** Incrementar força o recarregamento dos itens (ex.: após sync da planilha). */
+  itensKey?: number;
   retomarConversa?: boolean;
 }) {
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
@@ -108,6 +111,8 @@ export function AssistenteChat({
 
   // Itens do processo: é o destino de cada candidato aprovado. Fora de um
   // processo a lista fica vazia e o cartão desabilita o botão com o motivo.
+  // `itensKey` é incrementado pelo AssistenteProvider após a sync da planilha,
+  // forçando o recarregamento sem precisar de F5.
   useEffect(() => {
     if (!processoId) {
       setItens([]);
@@ -124,7 +129,7 @@ export function AssistenteChat({
     return () => {
       cancelado = true;
     };
-  }, [processoId]);
+  }, [processoId, itensKey]);
 
   useEffect(() => {
     fimDaLista.current?.scrollIntoView({ block: "end" });
