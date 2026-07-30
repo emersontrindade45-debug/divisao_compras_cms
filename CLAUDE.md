@@ -669,3 +669,47 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     método de escrita × todo model) e reporta o nome exato do que escreveu. Regra geral: quando o
     teste afirma "nunca faz X", ele precisa observar todas as formas de fazer X, não uma lista de
     formas lembradas na hora de escrever.
+57. **`sslmode=require` não desliga a verificação de certificado no `pg` — o valor correto é
+    `sslmode=no-verify`.** O mesmo nome significa coisas diferentes no libpq e no node-postgres, e
+    é por isso que copiar a string do `psql`/painel do Supabase falha. Em
+    `pg-connection-string@2.13.0`, fora do modo `useLibpqCompat` (que é o padrão, e o que tanto
+    `new Client({ connectionString })` quanto `PrismaPg({ connectionString })` usam), o `case
+    'require'` **não** seta `rejectUnauthorized: false`; sobra o padrão do Node, `true`, que valida
+    contra a trust store dele. O pooler do Supabase apresenta certificado de CA própria, que o Node
+    não traz embutida — resultado: `self-signed certificate in certificate chain`. Só
+    `case 'no-verify'` seta `rejectUnauthorized = false`. A conexão segue criptografada nos dois
+    casos; o que muda é a validação da cadeia. Em 2026-07-30 este erro derrubou a aplicação inteira,
+    porque a mesma string errada foi para `DATABASE_URL`, `DIRECT_URL` e `MIGRATE_URL` de uma vez.
+    O comentário do `.env.example` dizia `sslmode=require` e foi a origem do erro — **documentação
+    interna também precisa ser verificada contra a lib instalada** (§9.4), não copiada por inércia.
+58. **Nome de usuário sem o project-ref na mensagem de erro do Supavisor não significa ref
+    ausente.** A §9.43 desta lista havia registrado a heurística "`password authentication failed
+    for user "postgres"` = falta o `.<project-ref>`". Ela está **errada** e custou uma rodada de
+    diagnóstico na direção errada: o Supavisor usa o ref apenas para rotear o tenant e autentica o
+    usuário real (`postgres`) no banco, então a mensagem nomeia o usuário sem o ref mesmo quando o
+    ref está presente e correto. Ref ausente produz outro erro — **`Tenant or user not found`**.
+    Logo: `password authentication failed` ⇒ ref ok, senha errada. Regra mais ampla: heurística
+    registrada a partir de **uma** observação é hipótese, não regra; ao anotar uma, escrever qual
+    experimento a confirmaria (§9.35).
+59. **O Supabase nunca reexibe a senha do banco — campo vazio ao reabrir é o comportamento
+    esperado, não falha de salvamento.** A senha é write-only: depois do reset, o painel mostra
+    para sempre o literal `[YOUR-PASSWORD]` nas connection strings, e o campo aparece em branco.
+    Em 2026-07-30 isso foi lido como "não está salvando" e levou a resets repetidos. Mesmo padrão
+    das variáveis Sensitive da Vercel (§9.32). Consequências: (a) guardar a senha **no momento** em
+    que é definida, porque é irrecuperável — foi a perda dela que forçou a criação do papel
+    `migrator` em julho; (b) resetar a senha do banco troca a do papel `postgres` e **não** toca em
+    papéis criados à parte, então não conserta uma `MIGRATE_URL` que use `migrator`; (c) o reset
+    invalida **todas** as variáveis que carregam aquela senha — `DATABASE_URL` inclusive, o que
+    derruba a aplicação. Ao propor um reset de senha, enumerar antes tudo que vai quebrar junto.
+60. **Credencial de banco se valida localmente com o mesmo cliente da produção, antes de gastar
+    ciclo de deploy.** O WSL tem IPv4 e alcança o Session/Transaction pooler
+    (`aws-0-<região>.pooler.supabase.com`), então um script CJS de ~40 linhas com o `pg` do próprio
+    `node_modules` responde em segundos o que a rota serverless levava um redeploy para dizer — e
+    responde **mais**: além de autenticar, lê `_prisma_migrations` e `information_schema` direto.
+    Nesta sessão quatro ciclos de deploy foram gastos numa cadeia de erros
+    (`ENOTFOUND` → `password authentication failed` → `self-signed certificate`) que um único teste
+    local teria resolvido. Detalhes que custam tempo: `NODE_PATH` **só vale para `require()` do
+    CJS**, não para `import` ESM — script fora do projeto precisa ser `.cjs`; e a máscara da senha
+    na saída é obrigatória desde a primeira execução, não só no caminho de erro (§9.50). Corolário
+    da §9.23: verificação local não substitui a real quando o defeito é de empacotamento, **mas
+    substitui muito bem quando o defeito é de credencial ou de string de conexão**.

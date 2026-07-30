@@ -465,9 +465,15 @@ fornecedor/sites documentadas acima.
   >
   > **Progresso do diagnóstico (cada erro foi um passo à frente, não um retrocesso):**
   > `401` (sem segredo) → `ENOTFOUND` (rede: host IPv6-only, §9.43) → `password authentication
-  > failed for user "postgres"` (autenticou e conectou; só falta o ref no usuário). O próximo erro,
-  > se houver, deve ser lido do mesmo jeito: **como** a mensagem nomeia o usuário diz se o problema
-  > é o ref (`"postgres"` = falta o ref) ou a senha (`"postgres.bybkh…"` = ref ok).
+  > failed for user "postgres"`.
+  >
+  > ⚠️ **A leitura registrada aqui estava ERRADA — ver CLAUDE.md §9.58.** O texto original dizia
+  > que a mensagem nomear o usuário sem o ref (`"postgres"`) indicaria ref faltando, e que com o
+  > ref presente ela viria como `"postgres.bybkh…"`. Não é assim: o Supavisor usa o ref só para
+  > rotear o tenant e autentica o usuário real no banco, então a mensagem **sempre** nomeia
+  > `postgres`, com ou sem ref na string. Ref ausente produz `Tenant or user not found`, que é
+  > outro erro. Logo `password authentication failed` ⇒ ref correto, **senha errada** — foi
+  > exatamente esse o caso, e a heurística mandou procurar no lugar errado em 2026-07-30.
   >
   > **DEPLOY CONFIRMADO (2026-07-25, 23:38 UTC): a rota nova está no ar.**
   > `dpl_7r3Ke8JVbepAre1eu5RwMRV9s6GP`, `readyState: "READY"` **e** `alias` contendo
@@ -876,9 +882,14 @@ evidência de sucesso é o `✓ Compiled successfully` seguido da tabela de rota
    - `prisma db seed` rodou **a partir do Windows** contra o Postgres do WSL: 8 processos,
      8 fornecedores, 12 sites (5 na lista vermelha). Confirma que a app alcança o banco.
 
-   **Continua aberto:** aplicar em **produção**. Depende da correção da `MIGRATE_URL` na Vercel
+   ~~**Continua aberto:** aplicar em **produção**. Depende da correção da `MIGRATE_URL` na Vercel
    (porta 6543 → 5432, usuário `postgres.projeto` → `postgres.bybkhnxxtbdcggfuatxc`), que é ação
-   do usuário no painel (§8). Só então vale a §9.19.
+   do usuário no painel (§8). Só então vale a §9.19.~~
+   **RESOLVIDO (2026-07-30).** `MIGRATE_URL` corrigida e `GET /api/admin/migrate` responde
+   `200` com `pendentes: []`. As **6 migrations estão aplicadas** em produção, incluindo
+   `20260727104500_add_assistente_pesquisa` (M13) e `20260729161500_add_tr_contexto_to_processo`.
+   Confirmado por dois caminhos independentes: a rota, e conexão direta pelo Session pooler lendo
+   `_prisma_migrations` e `information_schema`. Ver o registro de 2026-07-30 no fim deste arquivo.
 
 3. **`PERPLEXITY_API_KEY`** no `.env` e na Vercel — depende do usuário. Sem ela a ferramenta se
    auto-desabilita e o assistente segue com PNCP e busca web da OpenAI, então não bloqueia.
@@ -1009,8 +1020,33 @@ reais. Isso confirma que a regressão do `promoverFonte` (§9.46) era real, não
 O projeto Supabase se chama **"Atendimento Whats"**: nome herdado de um uso anterior, reaproveitado
 para esta aplicação. Confirmado com o usuário — não é apontamento para o projeto errado.
 
-Aplicar a migration continua sendo ação do usuário, por decisão dele (§8 exige autorização explícita
-para DDL em produção).
+~~Aplicar a migration continua sendo ação do usuário, por decisão dele (§8 exige autorização
+explícita para DDL em produção).~~
+
+**Estado do banco de produção em 2026-07-30 — SUPERA o levantamento de 27/07 acima.** As migrations
+foram aplicadas em algum ponto entre as duas datas, durante o trabalho feito na nuvem. Lido por dois
+caminhos independentes (a rota `/api/admin/migrate` e conexão direta pelo Session pooler):
+
+```
+[ok] 20260614155015_init
+[ok] 20260616003933_add_resultado_similaridade
+[ok] 20260617134642_add_planilha_origem_url
+[ok] 20260724115912_add_fonte_resultado_similaridade_unique
+[ok] 20260727104500_add_assistente_pesquisa       ← M13
+[ok] 20260729161500_add_tr_contexto_to_processo   ← veio da nuvem em 29/07
+```
+
+`pendentes: []`, `orfas: []`, 6 de 6. Colunas confirmadas presentes: `processos.trContexto`,
+`resultados_similaridade.origem`/`conversaId`/`termoBuscaUsado`, `mensagens_assistente.conversaId`.
+**A regressão do §9.46 não está viva em produção.** PostgreSQL 15.8, 52 tabelas (a maioria da
+aplicação anterior que divide este projeto Supabase), **4 processos** — contra os 11 de 27/07, queda
+provavelmente explicada pela funcionalidade de exclusão de processo que veio da nuvem (`5741fb7`),
+não confirmada individualmente.
+
+Incidente do mesmo dia, resolvido: o reset da senha do banco invalidou `DATABASE_URL`, `DIRECT_URL`
+e `MIGRATE_URL` de uma vez e **derrubou a aplicação**; a correção passou ainda por um erro de TLS
+(`sslmode=require` → `no-verify`). Lições em CLAUDE.md §9.57 a §9.60. Aplicação verificada de volta
+ao ar exercitando o dashboard com dados reais, não por build verde (§9.30).
 
 **~~Ausentes para o M13:~~** `PERPLEXITY_API_KEY` **criada em Production em 2026-07-27** e ativa
 desde o deploy do merge do PR #10. Validada contra a API real antes de subir (HTTP 200, modelo
@@ -1063,8 +1099,40 @@ aparece no rastro de ferramentas.
 6. **13 branches remotas** de milestones antigas nunca podadas (o `--prune` desta sessão removeu 3
    já apagadas no servidor; as demais continuam vivas no remoto).
 
+### PR #9 — analisado e fechado em 2026-07-30
+
+O branch `cursor/planilha-sync-fields-in-processo-tabs-dab4` (8 commits de 20/07, PR #9 em draft) é
+o mesmo citado na §9.33 do CLAUDE.md. Ficou 108 commits atrás da `main` e foi **fechado sem
+mesclar**, por análise commit a commit:
+
+| Commit | Estado na `main` |
+|---|---|
+| `d781a16` links PNCP + exclui CNPJ do órgão | já reimplementado (`lib/domain/orgaoProprio.ts`, `lib/integracoes/pncp.ts`) — a lacuna da §9.33 está fechada |
+| `b247b3e` rota `/api/admin/migrate` | já existe, em versão melhor (via `pg`, sem CLI do Prisma — §9.18/26/28/29) |
+| `1690076` parser flexível de colunas | já na `main` (§9.10) |
+| `ed16d05` parser aceita mediana zero | já na `main` (`000a083`) |
+| `aee1fc9` fix Server Component / migration pendente | já na `main` (`b87009a`, §9.46) |
+| `b24a3a7` campos de planilha | superado por **design diferente**: o PR criava `planilhaCotacaoUrl` (planilha separada de destino); a `main` consolidou em `planilhaOrigemUrl` e `preencherCotacao` escreve de volta na própria planilha de origem |
+
+Merge direto produzia **11 conflitos** e ressuscitaria `src/lib/ia/geminiProvider.ts`, apagado da
+`main` na migração para OpenAI — regressão do provedor de IA. Rebasear custava mais que reescrever.
+
+**Três itens do PR ainda têm valor e não existem na `main`** — candidatos a tarefa nova:
+
+1. **Editor de palavras-chave por item** (`PalavrasChaveItemForm.tsx` + `salvarPalavrasChaveItem.ts`).
+   Hoje a `main` só **exibe** as palavras-chave, read-only, em `ProcessoTabs.tsx:115`. O campo
+   existe no schema e o usuário não tem como corrigi-lo quando a extração erra.
+2. **Sub-scores e justificativa** em `FontesSimilaridadeList`. A `main` mostra só o `scoreFinal`
+   como número solto, sem dizer **por quê** — fraco para uma ferramenta cuja regra de negócio
+   (IN 65/2021) exige análise crítica registrada.
+3. **`error.tsx`** em `processos/[id]` — error boundary que a `main` não tem.
+
+Descartados por superação: `expandirTermosBusca.ts` e o "score mínimo 85" (a `main` usa 70 em
+`rankearCandidatos.ts:20`). O M13 refina termos iterativamente pelo assistente, que era exatamente
+o problema que essa expansão heurística tentava resolver.
+
 ### Fase seguinte
 
 Não há milestone pendente no plano: M0 a M13 estão concluídos. Próximo trabalho é decisão do
 usuário — usar o sistema em processos reais e deixar o uso apontar o que falta é o caminho mais
-provável de render um M14 útil.
+provável de render um M14 útil. Os três itens do PR #9 acima são o candidato mais concreto a M14.
