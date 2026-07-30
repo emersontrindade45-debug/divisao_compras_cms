@@ -1,7 +1,13 @@
 # CLAUDE.md — Plataforma de Pesquisa de Preços (Divisão de Compras / CMS)
 
 Briefing operacional do projeto para o Claude Code. Leia antes de qualquer tarefa.
-Fonte de verdade do escopo: [PRD-Claude_divisão_compras.md](PRD-Claude_divisão_compras.md).
+
+Fonte de verdade do escopo: [PRD-Claude_divisão_compras.md](PRD-Claude_divisão_compras.md) — visão
+condensada de arquitetura e requisitos.
+Especificação detalhada do produto: [PRD_divisao_compras.md](PRD_divisao_compras.md) — os 8 módulos
+com regras de negócio, fluxo operacional alvo e métricas. Consulte-o ao desenhar funcionalidade
+nova: há requisito ali que ainda não virou código (ex.: o Módulo 8, repositório de inteligência de
+mercado, do qual só existe a semente no campo `ResultadoSimilaridade.termoBuscaUsado`).
 
 ---
 
@@ -42,7 +48,7 @@ instrução processual.
 | Backend | **Node.js** (runtime do Next) | Server actions + route handlers; serviços isolados |
 | Banco | **PostgreSQL** | Processos, fontes, fornecedores, respostas, logs |
 | ORM | **Prisma** | Schema único em `prisma/schema.prisma`; migrations versionadas |
-| E-mail | **Resend** | Disparo de cotações e lembretes (SLA) |
+| IA | **OpenAI** | Extração do TR, ranking de similaridade e assistente; Perplexity opcional para busca web |
 | Deploy | **Vercel** | Padrão; manter compatível com hospedagem própria (Node) |
 
 **Decisões fixadas** (o PRD deixava em aberto):
@@ -101,8 +107,9 @@ Não confirme versões de bibliotecas de memória — verifique `package.json` a
 │   │   │   ├── contratacoes/  # Módulo de contratações públicas similares
 │   │   │   ├── sites/         # Validador de sites admissíveis (listas branca/cinza/vermelha)
 │   │   │   ├── fornecedores/  # Cadastro vivo + score + histórico
-│   │   │   ├── cotacoes/      # Disparo e controle de e-mails (SLA, lembretes)
-│   │   │   └── relatorios/    # Relatório resumido/completo + memória de cálculo
+│   │   │   ├── cotacoes/      # Registro e controle de cotações (SLA) — o envio é externo (§9.3)
+│   │   │   ├── relatorios/    # Relatório resumido/completo + memória de cálculo
+│   │   │   └── assistente/    # Instruções de pesquisa configuráveis (M13)
 │   │   ├── api/               # Route handlers (integrações, webhooks, exportações)
 │   │   └── layout.tsx
 │   ├── components/
@@ -110,9 +117,16 @@ Não confirme versões de bibliotecas de memória — verifique `package.json` a
 │   │   └── <feature>/         # Componentes específicos de cada módulo
 │   ├── lib/
 │   │   ├── domain/            # Regras de negócio + estatística de preços (testado)
-│   │   ├── db.ts             # Cliente Prisma (singleton)
-│   │   ├── auth/              # Sessão + RBAC
-│   │   ├── email/             # Templates + integração Resend
+│   │   ├── actions/           # Server actions (mutações)
+│   │   ├── similaridade/      # Motor de ranqueamento de contratações similares
+│   │   ├── assistente/        # Ferramentas, prompt e laço do assistente (M13)
+│   │   ├── ia/                # Provedores de IA (OpenAI) e tipos
+│   │   ├── integracoes/       # PNCP, Perplexity, Painel de Preços
+│   │   ├── relatorios/        # Memória de cálculo (PDF) e série de preços (Excel)
+│   │   ├── sheets/            # Planilha Google como registro mestre
+│   │   ├── migrations/        # Runner das migrations de produção
+│   │   ├── db.ts             # Cliente Prisma (conexão preguiçosa — ver §9.54)
+│   │   ├── auth/              # Sessão + RBAC + auditoria
 │   │   ├── storage/           # Abstração de upload de arquivos
 │   │   └── validations/       # Schemas Zod compartilhados
 │   ├── hooks/
@@ -122,8 +136,9 @@ Não confirme versões de bibliotecas de memória — verifique `package.json` a
 └── PRD-Claude_divisão_compras.md
 ```
 
-> A estrutura acima é o alvo. Ela ainda **não existe** — o projeto está só com os documentos.
-> Ao iniciar a implementação, scaffold seguindo este layout; não invente pastas paralelas.
+> Esta estrutura **existe e está em produção** (M0 a M13 concluídos — ver [docs/PLAN.md](docs/PLAN.md)).
+> Siga o layout ao acrescentar código; não invente pastas paralelas. Leia o que já existe antes de
+> criar: quase toda necessidade nova já tem um módulo vizinho com a convenção estabelecida.
 
 ### Modelos de domínio centrais (orientação para o schema Prisma)
 `User` · `Processo` · `Item` (objeto cadastrado) · `Fonte` (pública/site/fornecedor) ·

@@ -847,8 +847,11 @@ evidência de sucesso é o `✓ Compiled successfully` seguido da tabela de rota
 
 1. ~~**Ruído de CRLF na árvore de trabalho.**~~ **RESOLVIDA (2026-07-27).** `.gitattributes` com
    `* text=auto eol=lf`; os 10 arquivos convertidos no mesmo commit. Árvore ficou com 0 arquivos
-   modificados. `text=auto` preserva a detecção de binário do git, o que protege
-   `docs/ATO2017_2023.md` (UTF-8 com 834 bytes NUL). Regra explícita para
+   modificados. ~~`text=auto` preserva a detecção de binário do git, o que protege
+   `docs/ATO2017_2023.md` (UTF-8 com 834 bytes NUL).~~ **Os 834 NUL eram corrupção de extração, não
+   conteúdo: substituíam as ligaduras "ti" e "fí", quebrando 288 palavras e — pior — tornando o
+   arquivo inteiro binário para o `grep`. Reparados em 2026-07-28, e o arquivo renomeado para
+   `docs/ato-mesa-17-2023-cms.md`.** Regra explícita para
    `prisma/migrations/**/*.sql`: o checksum em `_prisma_migrations` é do conteúdo do arquivo, e
    renormalizar migration já aplicada faria o `migrate deploy` recusá-la.
 

@@ -41,7 +41,7 @@ Base legal máxima. Define os princípios e obrigações que nenhuma norma infer
 | Código | Norma | Artigos / Dispositivos relevantes | Status |
 |---|---|---|---|
 | FED-01 | Constituição Federal — art. 37, XXI | Princípio da isonomia e obrigatoriedade de licitação | [ ] |
-| FED-02 | Lei nº 14.133/2021 — Nova Lei de Licitações | Art. 23 (valor estimado e pesquisa de preços); art. 40 (especificações do TR); art. 67–70 (habilitação); art. 74–75 (dispensa e inexigibilidade); art. 156 (sanções) | [x] |
+| FED-02 | [Lei nº 14.133/2021](lei-14133-2021-licitacoes-contratos.md) — Nova Lei de Licitações | Art. 23 (valor estimado e pesquisa de preços); art. 40 (especificações do TR); art. 67–70 (habilitação); art. 74–75 (dispensa e inexigibilidade); art. 156 (sanções) | [x] |
 | FED-03 | Lei nº 8.666/1993 | Dispositivos ainda vigentes em processos iniciados antes de 30/12/2023 | [ ] |
 | FED-04 | Lei Complementar nº 123/2006 — art. 44–45 | Tratamento diferenciado a ME/EPP: empate ficto e preferência na cotação | [ ] |
 | FED-05 | IN SGD/ME nº 94/2022 | Plano de contratações anual para soluções de TIC | [ ] |
@@ -97,8 +97,8 @@ Leis, decretos e portarias do Município de Santos com impacto nas operações d
 
 | Código | Norma | Número/Data | Assunto | Status |
 |---|---|---|---|---|
-| MUN-01 | Decreto da Prefeitura de Santos | nº 10.222 / 20 out 2023 | Normas gerais de licitação e contratos: pesquisa de preços (arts. 24–30), SRP (arts. 77–99), gestão de contratos (arts. 103–106), modalidades e habilitação | [x] |
-| MUN-02 | Decreto da Prefeitura de Santos | nº 10.297 / 29 dez 2023 | Contratação direta (dispensa e inexigibilidade): alçadas de aprovação, instrução processual obrigatória, ratificação do Prefeito para contratos >R$500k | [x] |
+| MUN-01 | [Decreto da Prefeitura de Santos](decreto-10222-2023-prefeitura-santos.md) | nº 10.222 / 20 out 2023 | Normas gerais de licitação e contratos: pesquisa de preços (arts. 24–30), SRP (arts. 77–99), gestão de contratos (arts. 103–106), modalidades e habilitação | [x] |
+| MUN-02 | [Decreto da Prefeitura de Santos](decreto-10297-2023-contratacao-direta.md) | nº 10.297 / 29 dez 2023 | Contratação direta (dispensa e inexigibilidade): alçadas de aprovação, instrução processual obrigatória, ratificação do Prefeito para contratos >R$500k | [x] |
 | MUN-03 | _a verificar_ | _a preencher_ | Decreto Municipal nº 8.179/2018 — Formalização de contratos pelo DERAT/GPM (referenciado pelo Decreto 10.222) | [ ] |
 
 ---
@@ -109,7 +109,7 @@ Resoluções, portarias e manuais emitidos pela própria CMS.
 
 | Código | Documento | Número/Data | Assunto | Status |
 |---|---|---|---|---|
-| CMS-01 | Ato da Mesa | nº 17 / 14 set 2023 (consolidado até 01/04/2024, com alterações do Ato da Mesa nº 4/2024) | **Regulamentação completa da Lei 14.133/2021 no âmbito da CMS**: agentes de contratação, planejamento, ETP, TR, pesquisa de preços (arts. 49–65), modalidades, habilitação, SRP, contratos, sanções | [x] |
+| CMS-01 | [Ato da Mesa](ato-mesa-17-2023-cms.md) | nº 17 / 14 set 2023 (consolidado até 01/04/2024, com alterações do Ato da Mesa nº 4/2024) | **Regulamentação completa da Lei 14.133/2021 no âmbito da CMS**: agentes de contratação, planejamento, ETP, TR, pesquisa de preços (arts. 49–65), modalidades, habilitação, SRP, contratos, sanções | [x] |
 | CMS-02 | Ato da Mesa | nº 4 / 2024 | Altera dispositivos do Ato da Mesa nº 17/2023 (arts. 14, 31, 57, 90, 103 e outros) | [x] |
 | CMS-03 | Resolução | nº 19 / 09 ago 2019 | Designação de gestores e fiscais de contratos (referenciada pelo Ato da Mesa nº 17/2023, art. 7º) | [ ] |
 
@@ -189,7 +189,24 @@ Registra onde as normas de diferentes níveis divergem, são silentes ou exigem 
 
 ---
 
-## 8. Histórico de Atualizações
+## 8. Textos normativos disponíveis localmente
+
+Os documentos citados acima cujo texto integral está neste repositório:
+
+| Código | Arquivo |
+|---|---|
+| FED-02 | [`lei-14133-2021-licitacoes-contratos.md`](lei-14133-2021-licitacoes-contratos.md) |
+| MUN-01 | [`decreto-10222-2023-prefeitura-santos.md`](decreto-10222-2023-prefeitura-santos.md) |
+| MUN-02 | [`decreto-10297-2023-contratacao-direta.md`](decreto-10297-2023-contratacao-direta.md) |
+| CMS-01 | [`ato-mesa-17-2023-cms.md`](ato-mesa-17-2023-cms.md) |
+
+**Ausente:** o texto da **IN SEGES/ME nº 65/2021** (IN-01) — a norma central do sistema — não está
+no repositório. O que existe é o resumo operacional da seção 2 (regras R-01 a R-08), que é o que o
+código implementa. Ao precisar do dispositivo literal, consulte a fonte oficial.
+
+---
+
+## 9. Histórico de Atualizações
 
 | Data | Seção alterada | Descrição da mudança | Responsável |
 | --- | --- | --- | --- |

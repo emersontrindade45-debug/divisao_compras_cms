@@ -13,7 +13,7 @@ Non-obvious setup/run caveats:
 - **Postgres is required and runs locally** (installed via apt in the snapshot; there is no Docker here even though `docker-compose.yml` exists). Start it each session with `sudo pg_ctlcluster 16 main start`. Connection used by `.env`: db `divisao_compras`, user/password `postgres`/`postgres` on `localhost:5432`.
 - **`.env` is required** (gitignored). Copy `.env.example` and set at least `DATABASE_URL`, `DIRECT_URL` and `AUTH_SECRET`. `.env.example` lists 1:1 the variables the code actually reads — there are no others.
 - **First-time DB setup:** `pnpm exec prisma migrate deploy` then `pnpm db:seed`. The data dir persists in the snapshot, so re-seeding is usually unnecessary.
-- **Login note:** the seeded admin (`admin@cms.santos.sp.gov.br`) ships with a placeholder password hash, so login fails out of the box. To log in, set a real bcrypt hash, e.g. `UPDATE users SET "passwordHash"='<hash>' WHERE email='admin@cms.santos.sp.gov.br';` where `<hash>` comes from `node -e "console.log(require('bcryptjs').hashSync('admin123',10))"`.
+- **Login:** the seed creates two admins (`admin@cms.santos.sp.gov.br` and `admin@cms.gov.br`), both with a real bcrypt hash of `teste123` — see `prisma/seed.ts`. No manual `UPDATE` is needed.
 - Dev server runs on port 3000 (`pnpm dev`). All routes except `/login` require an authenticated session (see `src/middleware.ts`).
 
 Deploying to Vercel: requires a `VERCEL_TOKEN` secret (interactive `vercel login` is not possible here). The CLI is installed globally. A preview build also needs the runtime env vars set on Vercel (`DATABASE_URL` pointing at a publicly reachable Postgres, `AUTH_SECRET`, etc.).
