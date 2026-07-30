@@ -476,6 +476,14 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     dá certo. Regra geral: quando existir uma forma de **exercitar** a capacidade, exercitá-la — um
     indicador indireto pode estar ausente com o sistema perfeitamente saudável, e tratar isso como
     falha custa um reboot e uma sessão inteira de diagnóstico na direção errada.
+    **Reincidiu em 2026-07-30, com o mesmo formato:** `powershell.exe` foi procurado pelo nome, deu
+    `command not found`, e daí concluí que o interop do WSL estava indisponível e que a suíte era
+    inexecutável — cheguei a pedir ao usuário que rodasse os testes por conta própria. `cmd.exe` e
+    `powershell.exe` simplesmente **não estão no PATH do WSL**; pelo caminho completo
+    (`/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`) o interop funciona, e por ele
+    rodaram os 602 testes e o `next build`. Antes de declarar uma capacidade ausente, tentar o
+    caminho absoluto e conferir `/proc/sys/fs/binfmt_misc/WSLInterop`. Ausência no PATH nunca é
+    prova de ausência da ferramenta.
 38. **Pacote com `exports` condicional tem APIs diferentes por runtime — conferir no entry point
     que o app realmente usa, não em `node -e`.** Ao integrar `@sentry/nextjs`, um teste rápido em
     CJS mostrou `captureException` como função; o mesmo import via `tsx` (ESM) devolveu
@@ -713,3 +721,20 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     na saída é obrigatória desde a primeira execução, não só no caminho de erro (§9.50). Corolário
     da §9.23: verificação local não substitui a real quando o defeito é de empacotamento, **mas
     substitui muito bem quando o defeito é de credencial ou de string de conexão**.
+61. **No PNCP, preço de referência é o HOMOLOGADO, e `/itens` pagina de 10 em 10 por padrão.** Duas
+    armadilhas independentes do mesmo endpoint, ambas medidas contra a API real em 2026-07-30.
+    (a) `/itens` devolve apenas `valorUnitarioEstimado` — o orçamento feito **antes** do certame.
+    O preço efetivamente contratado está em
+    `/itens/{numeroItem}/resultados` → `valorUnitarioHomologado`, com `quantidadeHomologada` e
+    `dataResultado` junto. Na compra `83021857000115/2024/207` a média estimada era R$ 150,97
+    contra R$ 74,00 homologada: **51% de inflação** na série de preços. Usar estimado como
+    referência de preço praticado é erro de conformidade, não só de precisão. Descartar resultado
+    com `dataCancelamento`, e em item de SRP com vários fornecedores classificados vale o primeiro
+    por `ordemClassificacaoSrp`.
+    (b) O tamanho de página padrão de `/itens` é **10**, e isso não está documentado — a resposta
+    vem como array simples, sem envelope nem contador, então o truncamento é **silencioso**. Uma
+    compra de 418 itens devolvia 10. Sempre paginar com `tamanhoPagina=500` (o teto) até a página
+    vir incompleta. Regra geral para API que devolve lista nua: **nunca assumir que o array é a
+    coleção inteira** — confirmar contra um caso grande conhecido antes de confiar, porque sem
+    envelope não há como distinguir "acabou" de "cortou". A descrição do item vem com HTML e
+    entidades numéricas embutidos e precisa de limpeza antes de tokenizar ou exibir.
