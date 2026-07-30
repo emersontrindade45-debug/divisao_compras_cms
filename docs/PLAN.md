@@ -1131,6 +1131,58 @@ Descartados por superação: `expandirTermosBusca.ts` e o "score mínimo 85" (a 
 `rankearCandidatos.ts:20`). O M13 refina termos iterativamente pelo assistente, que era exatamente
 o problema que essa expansão heurística tentava resolver.
 
+### M14.0 — Valor homologado do PNCP e paginação dos itens ✅ MESCLADO em 2026-07-30 (PR #17)
+
+Primeira melhoria nascida de uso real: o usuário notou que os valores trazidos do PNCP não batiam
+com o que era efetivamente contratado. Dois defeitos independentes, ambos medidos contra a API real
+(não deduzidos). Detalhes e regra anti-regressão em CLAUDE.md §9.61.
+
+**Defeito 1 — preço estimado em vez de homologado.** `/itens` só devolve `valorUnitarioEstimado`,
+que é o orçamento feito **antes** do certame. O preço contratado vive em
+`/itens/{numeroItem}/resultados` → `valorUnitarioHomologado`. Na compra do exemplo do usuário
+(`83021857000115/2024/207`), a média estimada era R$ 150,97 contra R$ 74,00 homologada: **51% de
+inflação** na série de preços.
+
+**Defeito 2 — só os 10 primeiros itens.** O tamanho de página padrão de `/itens` é 10, não
+documentado, e a resposta é um array nu (sem envelope nem contador) — o truncamento era
+**silencioso**. Medido em 16 contratações: uma de 418 itens devolvia 10.
+
+Decisões tomadas com o usuário nesta sessão:
+
+| Decisão | Escolha | Consequência aceita |
+|---|---|---|
+| Item sem valor homologado | **descartar** | editais ainda não julgados somem dos candidatos; série menor e mais limpa |
+| Volume de requisições | **filtrar por relevância antes** de consultar o resultado | teto de 40 itens/contratação; risco baixo de perder item com descrição atípica |
+
+Também limpa HTML e entidades numéricas da descrição, que entravam cruas na tokenização e na
+evidência exibida.
+
+Verificação: typecheck limpo, ESLint 0 erros, **602 testes / 70 arquivos** (30 novos neste módulo),
+`next build` compilando, e a lógica validada ponta a ponta contra a API real. Produção exercitada
+após o deploy (`/api/admin/migrate` → 200, atravessando o banco).
+
+> **EM ABERTO — verificação funcional pelo usuário.** Falta abrir um processo em produção, rodar a
+> pesquisa por similaridade num item e confirmar que (a) os valores exibidos são os homologados,
+> conferindo contra o edital pelo link da evidência; (b) a redução no número de candidatos é a
+> esperada, e não sintoma de filtro agressivo demais. Se o teto de 40 itens/contratação cortar
+> contratação relevante, é só um número em `pncp.ts`. Rollback, se preciso: `git revert 08f4cf7` —
+> não há migration nem mudança de schema envolvida.
+
+### Pendência de processo — não há ambiente de teste antes de produção
+
+O 500 no preview do PR #17 expôs isso: **nenhum deploy de preview deste projeto alcança o banco**,
+porque `DATABASE_URL` e as demais variáveis existem só no target Production (§9.55). O preview
+builda e serve páginas estáticas, mas qualquer Server Component que leia do Postgres falha com
+`digest`. Consequência prática: todo PR daqui pra frente só pode ser validado depois do merge.
+
+Não foi confirmado por teste comparativo (abrir o preview de um PR só-documentação e ver se falha
+igual) — o usuário optou por mesclar e testar em produção. A hipótese do ambiente ficou mais forte
+depois do merge, já que o mesmo código roda são em produção.
+
+Correção, quando o usuário autorizar: criar `DATABASE_URL` (Transaction pooler, 6543),
+`DIRECT_URL`/`MIGRATE_URL` (Session pooler, 5432) e as chaves de API no target **Preview**, todas
+com `?sslmode=no-verify` (§9.57).
+
 ### Fase seguinte
 
 Não há milestone pendente no plano: M0 a M13 estão concluídos. Próximo trabalho é decisão do
