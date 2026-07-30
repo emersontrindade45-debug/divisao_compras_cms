@@ -1099,8 +1099,40 @@ aparece no rastro de ferramentas.
 6. **13 branches remotas** de milestones antigas nunca podadas (o `--prune` desta sessão removeu 3
    já apagadas no servidor; as demais continuam vivas no remoto).
 
+### PR #9 — analisado e fechado em 2026-07-30
+
+O branch `cursor/planilha-sync-fields-in-processo-tabs-dab4` (8 commits de 20/07, PR #9 em draft) é
+o mesmo citado na §9.33 do CLAUDE.md. Ficou 108 commits atrás da `main` e foi **fechado sem
+mesclar**, por análise commit a commit:
+
+| Commit | Estado na `main` |
+|---|---|
+| `d781a16` links PNCP + exclui CNPJ do órgão | já reimplementado (`lib/domain/orgaoProprio.ts`, `lib/integracoes/pncp.ts`) — a lacuna da §9.33 está fechada |
+| `b247b3e` rota `/api/admin/migrate` | já existe, em versão melhor (via `pg`, sem CLI do Prisma — §9.18/26/28/29) |
+| `1690076` parser flexível de colunas | já na `main` (§9.10) |
+| `ed16d05` parser aceita mediana zero | já na `main` (`000a083`) |
+| `aee1fc9` fix Server Component / migration pendente | já na `main` (`b87009a`, §9.46) |
+| `b24a3a7` campos de planilha | superado por **design diferente**: o PR criava `planilhaCotacaoUrl` (planilha separada de destino); a `main` consolidou em `planilhaOrigemUrl` e `preencherCotacao` escreve de volta na própria planilha de origem |
+
+Merge direto produzia **11 conflitos** e ressuscitaria `src/lib/ia/geminiProvider.ts`, apagado da
+`main` na migração para OpenAI — regressão do provedor de IA. Rebasear custava mais que reescrever.
+
+**Três itens do PR ainda têm valor e não existem na `main`** — candidatos a tarefa nova:
+
+1. **Editor de palavras-chave por item** (`PalavrasChaveItemForm.tsx` + `salvarPalavrasChaveItem.ts`).
+   Hoje a `main` só **exibe** as palavras-chave, read-only, em `ProcessoTabs.tsx:115`. O campo
+   existe no schema e o usuário não tem como corrigi-lo quando a extração erra.
+2. **Sub-scores e justificativa** em `FontesSimilaridadeList`. A `main` mostra só o `scoreFinal`
+   como número solto, sem dizer **por quê** — fraco para uma ferramenta cuja regra de negócio
+   (IN 65/2021) exige análise crítica registrada.
+3. **`error.tsx`** em `processos/[id]` — error boundary que a `main` não tem.
+
+Descartados por superação: `expandirTermosBusca.ts` e o "score mínimo 85" (a `main` usa 70 em
+`rankearCandidatos.ts:20`). O M13 refina termos iterativamente pelo assistente, que era exatamente
+o problema que essa expansão heurística tentava resolver.
+
 ### Fase seguinte
 
 Não há milestone pendente no plano: M0 a M13 estão concluídos. Próximo trabalho é decisão do
 usuário — usar o sistema em processos reais e deixar o uso apontar o que falta é o caminho mais
-provável de render um M14 útil.
+provável de render um M14 útil. Os três itens do PR #9 acima são o candidato mais concreto a M14.
