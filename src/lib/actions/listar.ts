@@ -130,6 +130,7 @@ export async function obterFontesSimilaridade(processoId: string) {
       unidade: true,
       quantidade: true,
       resultadosSimilaridade: {
+        where: { descartado: false },
         orderBy: { scoreFinal: "desc" },
         take: 5,
         select: {
