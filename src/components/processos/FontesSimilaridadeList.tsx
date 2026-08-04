@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PromoverFonteButton } from "@/components/processos/PromoverFonteButton";
+import { DescartarResultadoButton } from "@/components/processos/DescartarResultadoButton";
 import { obterFontesSimilaridade } from "@/lib/actions/listar";
 
 function formatarMoeda(valor: number): string {
@@ -95,10 +96,15 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
                       )}
                     </TableCell>
                     <TableCell>
-                      <PromoverFonteButton
-                        resultadoId={fonte.id}
-                        jaPromovido={fonte.promovidoParaFonte}
-                      />
+                      <div className="flex items-center gap-1">
+                        <PromoverFonteButton
+                          resultadoId={fonte.id}
+                          jaPromovido={fonte.promovidoParaFonte}
+                        />
+                        {!fonte.promovidoParaFonte && (
+                          <DescartarResultadoButton resultadoId={fonte.id} />
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

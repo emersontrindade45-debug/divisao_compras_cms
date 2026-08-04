@@ -204,6 +204,9 @@ model ResultadoSimilaridade {
   adaptado               Boolean                   @default(false)
   justificativa          String
   promovidoParaFonte     Boolean                   @default(false)
+  // Descartado manualmente pelo usuário na lista de resultados (não entra mais
+  // em obterFontesSimilaridade). Reaparece se uma nova busca recriar as linhas.
+  descartado             Boolean                   @default(false)
   // Origem do candidato (M13). O default mantém válidas as linhas gravadas pelo
   // pipeline automático antes desta migration.
   origem                 OrigemResultado           @default(pipeline_automatico)
