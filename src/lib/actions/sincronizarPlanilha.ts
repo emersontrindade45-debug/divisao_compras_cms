@@ -18,6 +18,15 @@ export interface ActionResult<T> {
   error?: string;
 }
 
+/** Normaliza a descrição do item para casamento sem distinção de maiúsculas/acentos. */
+function normalizarDescricao(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 export async function sincronizarPlanilha(
   url: string,
 ): Promise<ActionResult<SincronizacaoResultado>> {
@@ -78,28 +87,74 @@ export async function sincronizarPlanilha(
       },
     });
 
-    // a planilha é a fonte de verdade dos itens/preços: recria a partir do zero
-    await db.item.deleteMany({ where: { processoId: processo.id } });
+    // Carrega os itens que já existem no banco para este processo.
+    // A planilha é fonte de verdade para descrições e preços, mas os
+    // ResultadoSimilaridade (pesquisa PNCP) são trabalho do analista e devem
+    // ser preservados quando o item ainda existe na nova versão da planilha.
+    const itensExistentes = await db.item.findMany({
+      where: { processoId: processo.id },
+      select: { id: true, descricao: true },
+    });
 
+    const existentePorDescricao = new Map(
+      itensExistentes.map((it) => [normalizarDescricao(it.descricao), it.id]),
+    );
+
+    // Descobre quais itens existentes não aparecem mais na planilha nova e os apaga.
+    // O cascade do banco remove os ResultadoSimilaridade associados — o que é correto,
+    // pois a pesquisa de similaridade perde o sentido para um item removido.
+    const descricoesPlanilha = new Set(itens.map((it) => normalizarDescricao(it.material)));
+    const idsParaDeletar = itensExistentes
+      .filter((it) => !descricoesPlanilha.has(normalizarDescricao(it.descricao)))
+      .map((it) => it.id);
+    if (idsParaDeletar.length > 0) {
+      await db.item.deleteMany({ where: { id: { in: idsParaDeletar } } });
+    }
+
+    // Upsert cada item da planilha:
+    // – item já existe → atualiza metadados + recria SeriePreco (preserva similaridade)
+    // – item novo      → cria
     for (const item of itens) {
-      const criado = await db.item.create({
-        data: {
-          processoId: processo.id,
-          descricao: item.material,
-          unidade: "unidade",
-          quantidade: item.quantidade || 1,
-          classificacao: "comum",
-          caracteristicasTecnicas: item.grupo ? `Grupo: ${item.grupo}` : null,
-          palavrasChave: item.grupo ? [item.grupo] : [],
-        },
-      });
+      const chave = normalizarDescricao(item.material);
+      const idExistente = existentePorDescricao.get(chave);
+
+      let itemId: string;
+
+      if (idExistente) {
+        // Preserva o Item (e seus ResultadoSimilaridade associados) — atualiza só
+        // os metadados que a planilha controla.
+        await db.item.update({
+          where: { id: idExistente },
+          data: {
+            quantidade: item.quantidade || 1,
+            caracteristicasTecnicas: item.grupo ? `Grupo: ${item.grupo}` : null,
+            palavrasChave: item.grupo ? [item.grupo] : [],
+          },
+        });
+        // A planilha é fonte de verdade dos preços: recria a série de preços.
+        await db.seriePreco.deleteMany({ where: { itemId: idExistente } });
+        itemId = idExistente;
+      } else {
+        const criado = await db.item.create({
+          data: {
+            processoId: processo.id,
+            descricao: item.material,
+            unidade: "unidade",
+            quantidade: item.quantidade || 1,
+            classificacao: "comum",
+            caracteristicasTecnicas: item.grupo ? `Grupo: ${item.grupo}` : null,
+            palavrasChave: item.grupo ? [item.grupo] : [],
+          },
+        });
+        itemId = criado.id;
+      }
 
       const estat = estatisticaDoItem(item);
       if (!estat || item.precos.length === 0) continue;
 
       await db.seriePreco.create({
         data: {
-          itemId: criado.id,
+          itemId,
           metodo: "mediana",
           valorEstimado: estat.valorEstimado,
           media: estat.media,
