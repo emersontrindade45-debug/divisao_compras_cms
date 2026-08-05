@@ -39,7 +39,7 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
         Fontes utilizadas no preenchimento da cotação, para comprovação junto ao auditor. Itens
-        sem candidato suficientemente similar (score abaixo de 40) não aparecem aqui — exigem
+        sem candidato suficientemente similar (score abaixo de 70) não aparecem aqui — exigem
         pesquisa direta com fornecedores.
       </p>
       {itensComFontes.map((item) => (
