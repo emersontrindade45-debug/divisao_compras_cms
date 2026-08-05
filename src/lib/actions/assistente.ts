@@ -361,3 +361,113 @@ export async function adicionarCandidatoSugerido(
     mensagem: `Adicionado à lista com score ${Math.round(scoreFinal)}${avisoAdaptado}. Promover a fonte da estimativa continua sendo um clique seu, na aba de similaridade.`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Descarte de candidato sugerido pelo assistente
+// ---------------------------------------------------------------------------
+
+const descartarSchema = z.object({
+  mensagemId: z.string().min(1),
+  candidatoId: z.string().min(1),
+  itemId: z.string().min(1),
+});
+
+export interface ResultadoDescarte {
+  ok: boolean;
+  mensagem: string;
+}
+
+/**
+ * Persiste o descarte de um candidato sugerido pelo assistente.
+ *
+ * Grava um `ResultadoSimilaridade` com `descartado = true` para que buscas
+ * futuras no PNCP via `buscar_pncp` filtrem contratos já vistos e descartados
+ * pelo analista — sem precisar que ele guarde esse contexto na cabeça ou repita
+ * o julgamento a cada nova busca.
+ *
+ * Não chama a IA para pontuar (o descarte é uma recusa, não uma avaliação):
+ * os scores ficam zerados e a justificativa explica o motivo.
+ */
+export async function descartarCandidatoAssistente(
+  entrada: z.input<typeof descartarSchema>,
+): Promise<ResultadoDescarte> {
+  const user = await requireRole("pesquisa");
+  const { mensagemId, candidatoId, itemId } = descartarSchema.parse(entrada);
+
+  const mensagem = await db.mensagemAssistente.findUnique({
+    where: { id: mensagemId },
+    select: {
+      ferramentasUsadas: true,
+      conversa: { select: { id: true, userId: true, processoId: true } },
+    },
+  });
+
+  if (!mensagem || mensagem.conversa.userId !== user.id) {
+    return { ok: false, mensagem: "Sugestão não encontrada nesta conversa." };
+  }
+
+  const sugestao = acharSugestao(mensagem.ferramentasUsadas, candidatoId);
+  if (!sugestao) {
+    return { ok: false, mensagem: "Candidato não encontrado na mensagem." };
+  }
+
+  const item = await db.item.findUnique({
+    where: { id: itemId },
+    select: { id: true, processoId: true },
+  });
+  if (!item) return { ok: false, mensagem: "Item não encontrado." };
+
+  if (mensagem.conversa.processoId && item.processoId !== mensagem.conversa.processoId) {
+    return { ok: false, mensagem: "Item pertence a outro processo." };
+  }
+
+  // Se a URL já está registrada para este item (adicionado ou descartado antes),
+  // não cria duplicata — o cliente já vai esconder o card pelo state local.
+  if (sugestao.fonteUrl) {
+    const jaExiste = await db.resultadoSimilaridade.findFirst({
+      where: { itemId: item.id, fonteUrl: sugestao.fonteUrl },
+      select: { id: true },
+    });
+    if (jaExiste) {
+      return { ok: true, mensagem: "Candidato já registrado." };
+    }
+  }
+
+  await db.resultadoSimilaridade.create({
+    select: { id: true },
+    data: {
+      itemId: item.id,
+      tipoCandidato: sugestao.tipoCandidato,
+      fonteDescricao: sugestao.fonteDescricao,
+      fonteOrgaoOuId: sugestao.fonteOrgaoOuId,
+      fonteUrl: sugestao.fonteUrl ?? null,
+      valorUnitario: sugestao.valorUnitario,
+      dataReferencia: new Date(sugestao.dataReferencia),
+      scoreFinal: 0,
+      scoreDescricao: 0,
+      scoreEspecificacao: 0,
+      scoreUnidadeQuantidade: 0,
+      adaptado: false,
+      justificativa: "Descartado pelo analista no assistente de pesquisa.",
+      descartado: true,
+      origem: "assistente",
+      conversaId: mensagem.conversa.id,
+      termoBuscaUsado: sugestao.termoBuscaUsado,
+    },
+  });
+
+  await registrarAuditoria({
+    userId: user.id,
+    processoId: item.processoId,
+    acao: "assistente_descartar_candidato",
+    detalhes: {
+      itemId: item.id,
+      conversaId: mensagem.conversa.id,
+      mensagemId,
+      candidatoId,
+      fonteUrl: sugestao.fonteUrl ?? null,
+    },
+  });
+
+  return { ok: true, mensagem: "Candidato descartado." };
+}

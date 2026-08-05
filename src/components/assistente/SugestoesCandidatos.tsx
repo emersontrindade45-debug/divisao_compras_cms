@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { adicionarCandidatoSugerido } from "@/lib/actions/assistente";
+import { adicionarCandidatoSugerido, descartarCandidatoAssistente } from "@/lib/actions/assistente";
 import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 
 // Cartões dos candidatos que a busca do assistente encontrou.
@@ -45,8 +45,26 @@ export function SugestoesCandidatos({
 
   if (sugestoes.length === 0) return null;
 
-  const descartar = (id: string) => {
-    setDescartados((atual) => new Set([...atual, id]));
+  const descartar = (sugestao: CandidatoSugerido) => {
+    // Atualização imediata do estado local para UX instantânea.
+    setDescartados((atual) => new Set([...atual, sugestao.id]));
+
+    // Persiste o descarte no banco (fire-and-forget): buscas futuras do assistente
+    // não reapresentarão contratos que o analista já descartou.
+    if (mensagemId && itens.length > 0) {
+      const itemIdSugeridoValido =
+        sugestao.itemIdSugerido && idsItens.has(sugestao.itemIdSugerido)
+          ? sugestao.itemIdSugerido
+          : null;
+      const itemId = itemIdSugeridoValido ?? itens[0]?.id;
+      if (itemId) {
+        void descartarCandidatoAssistente({
+          mensagemId,
+          candidatoId: sugestao.id,
+          itemId,
+        });
+      }
+    }
   };
 
   const idsItens = new Set(itens.map((it) => it.id));
@@ -123,9 +141,9 @@ export function SugestoesCandidatos({
               {!jaAdicionado && (
                 <button
                   type="button"
-                  onClick={() => descartar(sugestao.id)}
+                  onClick={() => descartar(sugestao)}
                   aria-label="Descartar candidato"
-                  title="Descartar este candidato da lista"
+                  title="Descartar — não voltará em buscas futuras"
                   className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <X className="size-3.5" aria-hidden />
