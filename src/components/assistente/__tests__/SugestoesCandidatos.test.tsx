@@ -64,10 +64,12 @@ describe("SugestoesCandidatos", () => {
 
     await waitFor(() => expect(adicionarMock).toHaveBeenCalled());
     // Nem valor, nem órgão, nem data: o servidor relê tudo da mensagem gravada.
+    // tipoObjeto padrão "servico" é sempre enviado (janela de recência do servidor).
     expect(adicionarMock).toHaveBeenCalledWith({
       mensagemId: "msg-1",
       candidatoId: "c1",
       itemId: "item-1",
+      tipoObjeto: "servico",
     });
   });
 

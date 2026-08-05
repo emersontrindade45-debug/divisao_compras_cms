@@ -6,8 +6,9 @@ import { db } from "@/lib/db";
 import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { acharSugestao, paraCandidato, listaSugestoesSchema } from "@/lib/assistente/sugestoes";
-import { rankearCandidatos } from "@/lib/similaridade/rankearCandidatos";
 import { getProvedorIA } from "@/lib/ia";
+import { candidatoEstaNoTempo } from "@/lib/similaridade/filtroRecencia";
+import { calcularScoreFinal } from "@/lib/similaridade/scoreFinal";
 import type { ItemExtraidoTR } from "@/lib/ia/types";
 
 // Leitura da conversa do assistente (M13).
@@ -164,6 +165,13 @@ const aprovarSchema = z.object({
   /** Id curto do candidato dentro daquela busca (`c1`, `c2`...). */
   candidatoId: z.string().min(1),
   itemId: z.string().min(1),
+  /**
+   * Tipo do objeto: define a janela de recência aceita.
+   * - servico  → 730 dias (2 anos), conforme IN 65/2021 para serviços contínuos.
+   * - consumo  → 365 dias (1 ano), para aquisições/bens de consumo.
+   * Padrão "servico" (janela mais ampla) para compatibilidade.
+   */
+  tipoObjeto: z.enum(["servico", "consumo"]).default("servico"),
 });
 
 export interface ResultadoAprovacao {
@@ -171,27 +179,33 @@ export interface ResultadoAprovacao {
   mensagem: string;
 }
 
+// Score mínimo para adição manual via assistente (humano no loop).
+// O pipeline automático usa 70; aqui o analista já leu o edital e
+// decidiu que o candidato é pertinente — não faz sentido bloquear com
+// o mesmo corte de triagem automática. 40 garante alguma relação com o
+// objeto sem impedir escolhas informadas do analista.
+const SCORE_MINIMO_MANUAL = 40;
+
 /**
  * Adiciona à lista do processo um candidato que o assistente encontrou.
  *
  * É o único caminho de escrita do assistente, e ele começa num clique humano —
- * o modelo propõe, o servidor decide. Duas garantias que não dependem do
+ * o modelo propõe, o servidor decide. Três garantias que não dependem do
  * navegador:
  *
- * - **o preço vem da mensagem gravada**, não do corpo da requisição. O cliente
- *   manda três identificadores; qualquer valor que ele inventasse seria
- *   ignorado, porque nem chega a ser lido;
- * - **o score é recalculado** pelo mesmo `rankearCandidatos` do pipeline
- *   automático, com o filtro de recência da IN 65 — candidato do assistente e
- *   candidato do robô ficam comparáveis na mesma tabela.
+ * - **o preço vem da mensagem gravada**, não do corpo da requisição;
+ * - **o score é recalculado** pelo provedor de IA, com rastreabilidade igual
+ *   ao pipeline automático;
+ * - **a janela de recência** respeita o tipo escolhido pelo analista
+ *   (serviço 730 dias / consumo 365 dias).
  */
 export async function adicionarCandidatoSugerido(
-  entrada: z.infer<typeof aprovarSchema>,
+  entrada: z.input<typeof aprovarSchema>,
 ): Promise<ResultadoAprovacao> {
   // Mesma exigência de papel da promoção a fonte: adicionar candidato mexe na
   // instrução do processo.
   const user = await requireRole("pesquisa");
-  const { mensagemId, candidatoId, itemId } = aprovarSchema.parse(entrada);
+  const { mensagemId, candidatoId, itemId, tipoObjeto } = aprovarSchema.parse(entrada);
 
   const mensagem = await db.mensagemAssistente.findUnique({
     where: { id: mensagemId },
@@ -245,6 +259,21 @@ export async function adicionarCandidatoSugerido(
     }
   }
 
+  // ── 1. Validar recência com a janela do tipo escolhido pelo analista ──────
+  const janelaDias = tipoObjeto === "consumo" ? 365 : 730;
+  const candidato = paraCandidato(sugestao);
+  if (!candidatoEstaNoTempo(candidato, janelaDias)) {
+    const anos = tipoObjeto === "consumo" ? "1 ano" : "2 anos";
+    return {
+      ok: false,
+      mensagem:
+        `Contrato fora da janela de ${janelaDias} dias (${anos}) para ` +
+        `${tipoObjeto === "consumo" ? "aquisição/consumo" : "serviço continuado"}. ` +
+        `Se o objeto for de outro tipo, altere a seleção acima do botão e tente novamente.`,
+    };
+  }
+
+  // ── 2. Calcular score via IA (rastreabilidade e auditoria) ────────────────
   const itemTR: ItemExtraidoTR = {
     descricao: item.descricao,
     especificacaoTecnica: item.caracteristicasTecnicas ?? "",
@@ -252,37 +281,50 @@ export async function adicionarCandidatoSugerido(
     quantidade: item.quantidade,
   };
 
-  const [ranqueado] = await rankearCandidatos(
-    itemTR,
-    [paraCandidato(sugestao)],
-    getProvedorIA(),
-  );
+  const provedor = getProvedorIA();
+  const avaliacoes = await provedor.rankearSimilaridade(itemTR, [candidato]);
+  const avaliacao = avaliacoes[0];
 
-  if (!ranqueado) {
+  if (!avaliacao) {
+    return { ok: false, mensagem: "Não foi possível avaliar a similaridade do candidato." };
+  }
+
+  const scoreFinal = calcularScoreFinal({
+    scoreDescricao: avaliacao.scoreDescricao,
+    scoreEspecificacao: avaliacao.scoreEspecificacao,
+    scoreUnidadeQuantidade: avaliacao.scoreUnidadeQuantidade,
+  });
+
+  // ── 3. Aplicar limiar reduzido para adição manual (humano no loop) ────────
+  if (scoreFinal < SCORE_MINIMO_MANUAL) {
     return {
       ok: false,
       mensagem:
-      "O candidato não passou no corte: ou está fora da janela de 730 dias (2 anos) " +
-      "admitida para serviços, ou a similaridade com este item ficou abaixo do mínimo.",
+        `Score ${Math.round(scoreFinal)}/100 — abaixo de ${SCORE_MINIMO_MANUAL} mesmo para adição manual. ` +
+        `O candidato tem relação muito baixa com este item; verifique se selecionou o item correto.`,
     };
   }
+
+  // Candidato adicionado manualmente com score abaixo do corte automático (70):
+  // registrado como "adaptado" para o auditor saber que foi escolha do analista.
+  const adaptado = scoreFinal < 70;
 
   await db.resultadoSimilaridade.create({
     select: { id: true },
     data: {
       itemId: item.id,
-      tipoCandidato: ranqueado.candidato.tipoCandidato,
-      fonteDescricao: ranqueado.candidato.fonteDescricao,
-      fonteOrgaoOuId: ranqueado.candidato.fonteOrgaoOuId,
-      fonteUrl: ranqueado.candidato.fonteUrl ?? null,
-      valorUnitario: ranqueado.candidato.valorUnitario,
-      dataReferencia: ranqueado.candidato.dataReferencia,
-      scoreFinal: ranqueado.scoreFinal,
-      scoreDescricao: ranqueado.scoreDescricao,
-      scoreEspecificacao: ranqueado.scoreEspecificacao,
-      scoreUnidadeQuantidade: ranqueado.scoreUnidadeQuantidade,
-      adaptado: ranqueado.adaptado,
-      justificativa: ranqueado.justificativa,
+      tipoCandidato: avaliacao.candidato.tipoCandidato,
+      fonteDescricao: avaliacao.candidato.fonteDescricao,
+      fonteOrgaoOuId: avaliacao.candidato.fonteOrgaoOuId,
+      fonteUrl: avaliacao.candidato.fonteUrl ?? null,
+      valorUnitario: avaliacao.candidato.valorUnitario,
+      dataReferencia: avaliacao.candidato.dataReferencia,
+      scoreFinal,
+      scoreDescricao: avaliacao.scoreDescricao,
+      scoreEspecificacao: avaliacao.scoreEspecificacao,
+      scoreUnidadeQuantidade: avaliacao.scoreUnidadeQuantidade,
+      adaptado,
+      justificativa: avaliacao.justificativa,
       origem: "assistente",
       conversaId: mensagem.conversa.id,
       termoBuscaUsado: sugestao.termoBuscaUsado,
@@ -298,8 +340,11 @@ export async function adicionarCandidatoSugerido(
       conversaId: mensagem.conversa.id,
       mensagemId: mensagem.id,
       candidatoId,
+      tipoObjeto,
+      janelaDias,
       termoBuscaUsado: sugestao.termoBuscaUsado,
-      scoreFinal: ranqueado.scoreFinal,
+      scoreFinal,
+      adaptado,
     },
   });
 
@@ -307,8 +352,12 @@ export async function adicionarCandidatoSugerido(
   // alguém recarregar a página.
   revalidatePath(`/processos/${item.processoId}`);
 
+  const avisoAdaptado = adaptado
+    ? ` (score ${Math.round(scoreFinal)}, abaixo do corte automático de 70 — marcado como adaptado para o auditor)`
+    : "";
+
   return {
     ok: true,
-    mensagem: `Adicionado à lista com score ${Math.round(ranqueado.scoreFinal)}. Promover a fonte da estimativa continua sendo um clique seu, na aba de similaridade.`,
+    mensagem: `Adicionado à lista com score ${Math.round(scoreFinal)}${avisoAdaptado}. Promover a fonte da estimativa continua sendo um clique seu, na aba de similaridade.`,
   };
 }
