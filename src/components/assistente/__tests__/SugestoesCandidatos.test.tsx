@@ -6,6 +6,7 @@ import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 
 vi.mock("@/lib/actions/assistente", () => ({
   adicionarCandidatoSugerido: vi.fn(async () => ({ ok: true, mensagem: "Adicionado" })),
+  descartarCandidatoAssistente: vi.fn(async () => ({ ok: true, mensagem: "Descartado" })),
 }));
 
 const refreshMock = vi.fn();
