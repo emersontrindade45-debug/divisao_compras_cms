@@ -1,21 +1,22 @@
 import "server-only";
+import { buscarContratosComprasGov } from "./comprasGov";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 
-let avisoEmitido = false;
-
 /**
- * Integração desativada: a API pública de pesquisa de preços (dadosabertos.compras.gov.br,
- * módulo "pesquisa-preco") exige um codigoItemCatalogo exato do catálogo SIASG, e o endpoint
- * que deveria resolver descrição → código (consultarItemMaterial?descricaoItem=) não retorna
- * resultados mesmo com correspondência exata. Sem busca por texto livre viável, não há como
- * alimentar esta fonte a partir da especificação extraída do TR.
+ * Fonte secundária de preços: Compras.gov.br (dadosabertos.compras.gov.br).
+ *
+ * Complementa o PNCP com dados do SIASG/COMPRASNET, incluindo compras
+ * realizadas antes da obrigatoriedade do PNCP e contratos de órgãos federais
+ * publicados nos dois sistemas em paralelo.
+ *
+ * Estratégia: matching de tokens do termo de busca contra o catálogo CATSER
+ * (3 014 serviços) + consulta ao módulo de pesquisa de preços. Sem busca por
+ * texto livre na API (limitação do fornecedor); cobertura é maior para
+ * serviços com código CATSER bem definido (TI, saúde, alimentação) do que
+ * para serviços de manutenção predial, que usam nomenclatura técnica distinta.
  */
-export async function buscarPrecosPainelPrecos(_termo: string): Promise<CandidatoSimilaridade[]> {
-  if (!avisoEmitido) {
-    console.warn(
-      "[PainelPrecos] Integração desativada — API pública não oferece busca por texto livre. Ver comentário em painelPrecos.ts.",
-    );
-    avisoEmitido = true;
-  }
-  return [];
+export async function buscarPrecosPainelPrecos(
+  termo: string,
+): Promise<CandidatoSimilaridade[]> {
+  return buscarContratosComprasGov(termo);
 }
