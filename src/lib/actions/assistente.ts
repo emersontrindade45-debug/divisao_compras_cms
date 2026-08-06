@@ -6,8 +6,10 @@ import { db } from "@/lib/db";
 import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { acharSugestao, paraCandidato, listaSugestoesSchema } from "@/lib/assistente/sugestoes";
-import { rankearCandidatos } from "@/lib/similaridade/rankearCandidatos";
 import { getProvedorIA } from "@/lib/ia";
+import { candidatoEstaNoTempo } from "@/lib/similaridade/filtroRecencia";
+import { calcularScoreFinal } from "@/lib/similaridade/scoreFinal";
+import { janelaContratacaoPublica } from "@/lib/domain/in65Rules";
 import type { ItemExtraidoTR } from "@/lib/ia/types";
 
 // Leitura da conversa do assistente (M13).
@@ -171,22 +173,29 @@ export interface ResultadoAprovacao {
   mensagem: string;
 }
 
+// Score mínimo para adição manual via assistente (humano no loop).
+// O pipeline automático usa 70; aqui o analista já leu o edital e
+// decidiu que o candidato é pertinente — não faz sentido bloquear com
+// o mesmo corte de triagem automática. 40 garante alguma relação com o
+// objeto sem impedir escolhas informadas do analista.
+const SCORE_MINIMO_MANUAL = 40;
+
 /**
  * Adiciona à lista do processo um candidato que o assistente encontrou.
  *
  * É o único caminho de escrita do assistente, e ele começa num clique humano —
- * o modelo propõe, o servidor decide. Duas garantias que não dependem do
+ * o modelo propõe, o servidor decide. Três garantias que não dependem do
  * navegador:
  *
- * - **o preço vem da mensagem gravada**, não do corpo da requisição. O cliente
- *   manda três identificadores; qualquer valor que ele inventasse seria
- *   ignorado, porque nem chega a ser lido;
- * - **o score é recalculado** pelo mesmo `rankearCandidatos` do pipeline
- *   automático, com o filtro de recência da IN 65 — candidato do assistente e
- *   candidato do robô ficam comparáveis na mesma tabela.
+ * - **o preço vem da mensagem gravada**, não do corpo da requisição;
+ * - **o score é recalculado** pelo provedor de IA, com rastreabilidade igual
+ *   ao pipeline automático;
+ * - **a janela de recência** respeita a natureza cadastrada do item
+ *   (`Item.natureza` — serviço contínuo 730 dias / bem de consumo 365 dias),
+ *   não uma escolha feita no momento do clique.
  */
 export async function adicionarCandidatoSugerido(
-  entrada: z.infer<typeof aprovarSchema>,
+  entrada: z.input<typeof aprovarSchema>,
 ): Promise<ResultadoAprovacao> {
   // Mesma exigência de papel da promoção a fonte: adicionar candidato mexe na
   // instrução do processo.
@@ -222,6 +231,7 @@ export async function adicionarCandidatoSugerido(
       unidade: true,
       quantidade: true,
       caracteristicasTecnicas: true,
+      natureza: true,
     },
   });
   if (!item) return { ok: false, mensagem: "Item não encontrado." };
@@ -245,6 +255,21 @@ export async function adicionarCandidatoSugerido(
     }
   }
 
+  // ── 1. Validar recência com a janela da natureza cadastrada do item ───────
+  const janelaDias = janelaContratacaoPublica(item.natureza);
+  const candidato = paraCandidato(sugestao);
+  if (!candidatoEstaNoTempo(candidato, item.natureza)) {
+    return {
+      ok: false,
+      mensagem:
+        `Contrato fora da janela de ${janelaDias} dias admitida para este item. ` +
+        (item.natureza
+          ? `Se a classificação do item (${item.natureza === "bem_consumo" ? "bem de consumo" : "serviço contínuo"}) estiver errada, ajuste-a na lista de fontes e tente novamente.`
+          : `Item ainda não classificado (usa o teto de ${janelaDias} dias); classifique a natureza na lista de fontes para uma janela mais precisa.`),
+    };
+  }
+
+  // ── 2. Calcular score via IA (rastreabilidade e auditoria) ────────────────
   const itemTR: ItemExtraidoTR = {
     descricao: item.descricao,
     especificacaoTecnica: item.caracteristicasTecnicas ?? "",
@@ -252,37 +277,50 @@ export async function adicionarCandidatoSugerido(
     quantidade: item.quantidade,
   };
 
-  const [ranqueado] = await rankearCandidatos(
-    itemTR,
-    [paraCandidato(sugestao)],
-    getProvedorIA(),
-  );
+  const provedor = getProvedorIA();
+  const avaliacoes = await provedor.rankearSimilaridade(itemTR, [candidato]);
+  const avaliacao = avaliacoes[0];
 
-  if (!ranqueado) {
+  if (!avaliacao) {
+    return { ok: false, mensagem: "Não foi possível avaliar a similaridade do candidato." };
+  }
+
+  const scoreFinal = calcularScoreFinal({
+    scoreDescricao: avaliacao.scoreDescricao,
+    scoreEspecificacao: avaliacao.scoreEspecificacao,
+    scoreUnidadeQuantidade: avaliacao.scoreUnidadeQuantidade,
+  });
+
+  // ── 3. Aplicar limiar reduzido para adição manual (humano no loop) ────────
+  if (scoreFinal < SCORE_MINIMO_MANUAL) {
     return {
       ok: false,
       mensagem:
-      "O candidato não passou no corte: ou está fora da janela de 730 dias (2 anos) " +
-      "admitida para serviços, ou a similaridade com este item ficou abaixo do mínimo.",
+        `Score ${Math.round(scoreFinal)}/100 — abaixo de ${SCORE_MINIMO_MANUAL} mesmo para adição manual. ` +
+        `O candidato tem relação muito baixa com este item; verifique se selecionou o item correto.`,
     };
   }
+
+  // Candidato adicionado manualmente com score abaixo do corte automático (70):
+  // registrado como "adaptado" para o auditor saber que foi escolha do analista.
+  const adaptado = scoreFinal < 70;
 
   await db.resultadoSimilaridade.create({
     select: { id: true },
     data: {
       itemId: item.id,
-      tipoCandidato: ranqueado.candidato.tipoCandidato,
-      fonteDescricao: ranqueado.candidato.fonteDescricao,
-      fonteOrgaoOuId: ranqueado.candidato.fonteOrgaoOuId,
-      fonteUrl: ranqueado.candidato.fonteUrl ?? null,
-      valorUnitario: ranqueado.candidato.valorUnitario,
-      dataReferencia: ranqueado.candidato.dataReferencia,
-      scoreFinal: ranqueado.scoreFinal,
-      scoreDescricao: ranqueado.scoreDescricao,
-      scoreEspecificacao: ranqueado.scoreEspecificacao,
-      scoreUnidadeQuantidade: ranqueado.scoreUnidadeQuantidade,
-      adaptado: ranqueado.adaptado,
-      justificativa: ranqueado.justificativa,
+      tipoCandidato: avaliacao.candidato.tipoCandidato,
+      fonteDescricao: avaliacao.candidato.fonteDescricao,
+      fonteOrgaoOuId: avaliacao.candidato.fonteOrgaoOuId,
+      fonteUrl: avaliacao.candidato.fonteUrl ?? null,
+      valorUnitario: avaliacao.candidato.valorUnitario,
+      dataReferencia: avaliacao.candidato.dataReferencia,
+      scoreFinal,
+      scoreDescricao: avaliacao.scoreDescricao,
+      scoreEspecificacao: avaliacao.scoreEspecificacao,
+      scoreUnidadeQuantidade: avaliacao.scoreUnidadeQuantidade,
+      adaptado,
+      justificativa: avaliacao.justificativa,
       origem: "assistente",
       conversaId: mensagem.conversa.id,
       termoBuscaUsado: sugestao.termoBuscaUsado,
@@ -298,8 +336,11 @@ export async function adicionarCandidatoSugerido(
       conversaId: mensagem.conversa.id,
       mensagemId: mensagem.id,
       candidatoId,
+      naturezaObjeto: item.natureza,
+      janelaDias,
       termoBuscaUsado: sugestao.termoBuscaUsado,
-      scoreFinal: ranqueado.scoreFinal,
+      scoreFinal,
+      adaptado,
     },
   });
 
@@ -307,8 +348,122 @@ export async function adicionarCandidatoSugerido(
   // alguém recarregar a página.
   revalidatePath(`/processos/${item.processoId}`);
 
+  const avisoAdaptado = adaptado
+    ? ` (score ${Math.round(scoreFinal)}, abaixo do corte automático de 70 — marcado como adaptado para o auditor)`
+    : "";
+
   return {
     ok: true,
-    mensagem: `Adicionado à lista com score ${Math.round(ranqueado.scoreFinal)}. Promover a fonte da estimativa continua sendo um clique seu, na aba de similaridade.`,
+    mensagem: `Adicionado à lista com score ${Math.round(scoreFinal)}${avisoAdaptado}. Promover a fonte da estimativa continua sendo um clique seu, na aba de similaridade.`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Descarte de candidato sugerido pelo assistente
+// ---------------------------------------------------------------------------
+
+const descartarSchema = z.object({
+  mensagemId: z.string().min(1),
+  candidatoId: z.string().min(1),
+  itemId: z.string().min(1),
+});
+
+export interface ResultadoDescarte {
+  ok: boolean;
+  mensagem: string;
+}
+
+/**
+ * Persiste o descarte de um candidato sugerido pelo assistente.
+ *
+ * Grava um `ResultadoSimilaridade` com `descartado = true` para que buscas
+ * futuras no PNCP via `buscar_pncp` filtrem contratos já vistos e descartados
+ * pelo analista — sem precisar que ele guarde esse contexto na cabeça ou repita
+ * o julgamento a cada nova busca.
+ *
+ * Não chama a IA para pontuar (o descarte é uma recusa, não uma avaliação):
+ * os scores ficam zerados e a justificativa explica o motivo.
+ */
+export async function descartarCandidatoAssistente(
+  entrada: z.input<typeof descartarSchema>,
+): Promise<ResultadoDescarte> {
+  const user = await requireRole("pesquisa");
+  const { mensagemId, candidatoId, itemId } = descartarSchema.parse(entrada);
+
+  const mensagem = await db.mensagemAssistente.findUnique({
+    where: { id: mensagemId },
+    select: {
+      ferramentasUsadas: true,
+      conversa: { select: { id: true, userId: true, processoId: true } },
+    },
+  });
+
+  if (!mensagem || mensagem.conversa.userId !== user.id) {
+    return { ok: false, mensagem: "Sugestão não encontrada nesta conversa." };
+  }
+
+  const sugestao = acharSugestao(mensagem.ferramentasUsadas, candidatoId);
+  if (!sugestao) {
+    return { ok: false, mensagem: "Candidato não encontrado na mensagem." };
+  }
+
+  const item = await db.item.findUnique({
+    where: { id: itemId },
+    select: { id: true, processoId: true },
+  });
+  if (!item) return { ok: false, mensagem: "Item não encontrado." };
+
+  if (mensagem.conversa.processoId && item.processoId !== mensagem.conversa.processoId) {
+    return { ok: false, mensagem: "Item pertence a outro processo." };
+  }
+
+  // Se a URL já está registrada para este item (adicionado ou descartado antes),
+  // não cria duplicata — o cliente já vai esconder o card pelo state local.
+  if (sugestao.fonteUrl) {
+    const jaExiste = await db.resultadoSimilaridade.findFirst({
+      where: { itemId: item.id, fonteUrl: sugestao.fonteUrl },
+      select: { id: true },
+    });
+    if (jaExiste) {
+      return { ok: true, mensagem: "Candidato já registrado." };
+    }
+  }
+
+  await db.resultadoSimilaridade.create({
+    select: { id: true },
+    data: {
+      itemId: item.id,
+      tipoCandidato: sugestao.tipoCandidato,
+      fonteDescricao: sugestao.fonteDescricao,
+      fonteOrgaoOuId: sugestao.fonteOrgaoOuId,
+      fonteUrl: sugestao.fonteUrl ?? null,
+      valorUnitario: sugestao.valorUnitario,
+      dataReferencia: new Date(sugestao.dataReferencia),
+      scoreFinal: 0,
+      scoreDescricao: 0,
+      scoreEspecificacao: 0,
+      scoreUnidadeQuantidade: 0,
+      adaptado: false,
+      justificativa: "Descartado pelo analista no assistente de pesquisa.",
+      descartado: true,
+      origem: "assistente",
+      conversaId: mensagem.conversa.id,
+      termoBuscaUsado: sugestao.termoBuscaUsado,
+    },
+  });
+
+  await registrarAuditoria({
+    userId: user.id,
+    processoId: item.processoId,
+    acao: "assistente_descartar_candidato",
+    detalhes: {
+      itemId: item.id,
+      conversaId: mensagem.conversa.id,
+      mensagemId,
+      candidatoId,
+      fonteUrl: sugestao.fonteUrl ?? null,
+    },
+  });
+
+  return { ok: true, mensagem: "Candidato descartado." };
 }

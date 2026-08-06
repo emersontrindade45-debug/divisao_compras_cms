@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ExternalLink, Plus } from "lucide-react";
+import { Check, ExternalLink, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { adicionarCandidatoSugerido } from "@/lib/actions/assistente";
+import { adicionarCandidatoSugerido, descartarCandidatoAssistente } from "@/lib/actions/assistente";
 import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 
 // Cartões dos candidatos que a busca do assistente encontrou.
@@ -38,13 +38,46 @@ export function SugestoesCandidatos({
   const [adicionados, setAdicionados] = useState<Record<string, boolean>>({});
   const [emCurso, setEmCurso] = useState<string | null>(null);
   const [itemEscolhido, setItemEscolhido] = useState<Record<string, string>>({});
+  const [descartados, setDescartados] = useState<Set<string>>(new Set());
+
+  const sugestoesVisiveis = sugestoes.filter((s) => !descartados.has(s.id));
 
   if (sugestoes.length === 0) return null;
 
+  const descartar = (sugestao: CandidatoSugerido) => {
+    // Atualização imediata do estado local para UX instantânea.
+    setDescartados((atual) => new Set([...atual, sugestao.id]));
+
+    // Persiste o descarte no banco (fire-and-forget): buscas futuras do assistente
+    // não reapresentarão contratos que o analista já descartou.
+    if (mensagemId && itens.length > 0) {
+      const itemIdSugeridoValido =
+        sugestao.itemIdSugerido && idsItens.has(sugestao.itemIdSugerido)
+          ? sugestao.itemIdSugerido
+          : null;
+      const itemId = itemIdSugeridoValido ?? itens[0]?.id;
+      if (itemId) {
+        void descartarCandidatoAssistente({
+          mensagemId,
+          candidatoId: sugestao.id,
+          itemId,
+        });
+      }
+    }
+  };
+
+  const idsItens = new Set(itens.map((it) => it.id));
+
   const adicionar = async (sugestao: CandidatoSugerido) => {
     if (!mensagemId) return;
+    // Valida que itemIdSugerido ainda existe no banco (pode ter sido deletado numa
+    // re-sincronização anterior à correção). Se inválido, cai para o primeiro item.
+    const itemIdSugeridoValido =
+      sugestao.itemIdSugerido && idsItens.has(sugestao.itemIdSugerido)
+        ? sugestao.itemIdSugerido
+        : null;
     const itemId =
-      itemEscolhido[sugestao.id] ?? sugestao.itemIdSugerido ?? itens[0]?.id ?? null;
+      itemEscolhido[sugestao.id] ?? itemIdSugeridoValido ?? itens[0]?.id ?? null;
     if (!itemId) return;
 
     setEmCurso(sugestao.id);
@@ -72,10 +105,19 @@ export function SugestoesCandidatos({
 
   return (
     <ul className="space-y-2">
-      {sugestoes.map((sugestao) => {
+      {sugestoesVisiveis.length === 0 && (
+        <li className="text-xs text-muted-foreground italic">
+          Todos os candidatos foram descartados.
+        </li>
+      )}
+      {sugestoesVisiveis.map((sugestao) => {
         const jaAdicionado = adicionados[sugestao.id] === true;
+        const itemIdSugeridoValido =
+          sugestao.itemIdSugerido && idsItens.has(sugestao.itemIdSugerido)
+            ? sugestao.itemIdSugerido
+            : null;
         const itemId =
-          itemEscolhido[sugestao.id] ?? sugestao.itemIdSugerido ?? itens[0]?.id ?? "";
+          itemEscolhido[sugestao.id] ?? itemIdSugeridoValido ?? itens[0]?.id ?? "";
         // Botão que não faz nada é pior que botão ausente (CLAUDE.md §9.40):
         // quando falta processo, item ou id de mensagem, ele sai desabilitado
         // com o motivo no title.
@@ -90,7 +132,20 @@ export function SugestoesCandidatos({
             key={sugestao.id}
             className="space-y-2 rounded-lg border bg-background p-2.5 text-xs"
           >
-            <p className="font-medium text-foreground">{sugestao.fonteOrgaoOuId}</p>
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-medium text-foreground">{sugestao.fonteOrgaoOuId}</p>
+              {!jaAdicionado && (
+                <button
+                  type="button"
+                  onClick={() => descartar(sugestao)}
+                  aria-label="Descartar candidato"
+                  title="Descartar — não voltará em buscas futuras"
+                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <X className="size-3.5" aria-hidden />
+                </button>
+              )}
+            </div>
             <p className="line-clamp-3 text-muted-foreground">{sugestao.fonteDescricao}</p>
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -120,7 +175,10 @@ export function SugestoesCandidatos({
                 Na lista do processo
               </p>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="space-y-1.5">
+                {/* A janela de recência aceita pelo servidor vem de Item.natureza
+                    (classificado na lista de fontes do processo), não de uma escolha
+                    feita aqui — evita depender do analista lembrar o tipo a cada clique. */}
                 {itens.length > 1 && (
                   <select
                     value={itemId}
@@ -152,6 +210,17 @@ export function SugestoesCandidatos({
           </li>
         );
       })}
+      {descartados.size > 0 && (
+        <li>
+          <button
+            type="button"
+            onClick={() => setDescartados(new Set())}
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            Restaurar {descartados.size} descartado{descartados.size !== 1 ? "s" : ""}
+          </button>
+        </li>
+      )}
     </ul>
   );
 }

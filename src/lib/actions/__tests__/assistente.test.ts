@@ -24,7 +24,10 @@ const mocks = vi.hoisted(() => ({
   requireAuth: vi.fn(),
   requireRole: vi.fn(),
   registrarAuditoria: vi.fn(),
-  rankearCandidatos: vi.fn(),
+  // Novo fluxo: candidatoEstaNoTempo (recência) e rankearSimilaridade (IA) são
+  // separados — permitem controle independente nos testes.
+  candidatoEstaNoTempo: vi.fn().mockReturnValue(true),
+  rankearSimilaridade: vi.fn(),
   getProvedorIA: vi.fn(),
   revalidatePath: vi.fn(),
 }));
@@ -35,8 +38,9 @@ vi.mock("@/lib/auth/rbac", () => ({
   requireRole: mocks.requireRole,
 }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
-vi.mock("@/lib/similaridade/rankearCandidatos", () => ({
-  rankearCandidatos: mocks.rankearCandidatos,
+vi.mock("@/lib/similaridade/filtroRecencia", () => ({
+  candidatoEstaNoTempo: mocks.candidatoEstaNoTempo,
+  filtrarPorRecencia: vi.fn().mockReturnValue([]),
 }));
 vi.mock("@/lib/ia", () => ({ getProvedorIA: mocks.getProvedorIA }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
@@ -75,9 +79,12 @@ const ITEM = {
   unidade: "unidade",
   quantidade: 50,
   caracteristicasTecnicas: "com apoio lombar",
+  natureza: null as "bem_consumo" | "servico_continuo" | null,
 };
 
-const RANQUEADO = {
+// Resposta que provedor.rankearSimilaridade devolve (antes de recalcular o scoreFinal).
+// scoreFinal gravado no banco = calcularScoreFinal({88, 80, 76}) = 88*0.4+80*0.35+76*0.25 = 82.2
+const AVALIACAO = {
   candidato: {
     tipoCandidato: "contratacao_publica" as const,
     fonteDescricao: "Cadeira giratória ergonômica",
@@ -88,7 +95,7 @@ const RANQUEADO = {
     unidade: "unidade",
     quantidade: 50,
   },
-  scoreFinal: 82.5,
+  scoreFinal: 82.5, // valor do provider; o código recalcula via calcularScoreFinal
   scoreDescricao: 88,
   scoreEspecificacao: 80,
   scoreUnidadeQuantidade: 76,
@@ -107,7 +114,10 @@ describe("adicionarCandidatoSugerido", () => {
     mocks.db.item.findUnique.mockResolvedValue(ITEM);
     mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue(null);
     mocks.db.resultadoSimilaridade.create.mockResolvedValue({ id: "res-1" });
-    mocks.rankearCandidatos.mockResolvedValue([RANQUEADO]);
+    // Novo fluxo: recência aprovada por padrão; IA retorna avaliação com score alto.
+    mocks.candidatoEstaNoTempo.mockReturnValue(true);
+    mocks.rankearSimilaridade.mockResolvedValue([AVALIACAO]);
+    mocks.getProvedorIA.mockReturnValue({ rankearSimilaridade: mocks.rankearSimilaridade });
   });
 
   // ---------------------------------------------------------------------------
@@ -124,12 +134,13 @@ describe("adicionarCandidatoSugerido", () => {
       fonteOrgaoOuId: "Órgão Inventado",
     } as unknown as typeof PEDIDO);
 
-    const enviado = mocks.rankearCandidatos.mock.calls[0]![1] as Array<{
+    // O candidato passado à IA vem da mensagem gravada, não do corpo do request.
+    const candidatosEnviados = mocks.rankearSimilaridade.mock.calls[0]![1] as Array<{
       valorUnitario: number;
       fonteOrgaoOuId: string;
     }>;
-    expect(enviado[0]!.valorUnitario).toBe(850.5);
-    expect(enviado[0]!.fonteOrgaoOuId).toBe("Prefeitura de Exemplo");
+    expect(candidatosEnviados[0]!.valorUnitario).toBe(850.5);
+    expect(candidatosEnviados[0]!.fonteOrgaoOuId).toBe("Prefeitura de Exemplo");
 
     const gravado = mocks.db.resultadoSimilaridade.create.mock.calls[0]![0].data;
     expect(Number(gravado.valorUnitario)).toBe(850.5);
@@ -164,22 +175,62 @@ describe("adicionarCandidatoSugerido", () => {
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
   });
 
-  it("usa o score do motor de similaridade, não um informado de fora", async () => {
+  it("usa o score calculado pelo motor de similaridade, não um informado de fora", async () => {
     await adicionarCandidatoSugerido(PEDIDO);
 
     const gravado = mocks.db.resultadoSimilaridade.create.mock.calls[0]![0].data;
-    expect(Number(gravado.scoreFinal)).toBe(82.5);
+    // scoreFinal é recalculado via calcularScoreFinal: 88*0.4 + 80*0.35 + 76*0.25 = 82.2
+    expect(Number(gravado.scoreFinal)).toBeCloseTo(82.2, 1);
     expect(Number(gravado.scoreDescricao)).toBe(88);
     expect(gravado.justificativa).toBe("Mesmo tipo de produto e unidade compatível");
   });
 
-  it("não grava nada quando o motor de similaridade reprova o candidato", async () => {
-    mocks.rankearCandidatos.mockResolvedValue([]);
+  it("rejeita quando o candidato está fora da janela de recência", async () => {
+    mocks.candidatoEstaNoTempo.mockReturnValue(false);
 
     const r = await adicionarCandidatoSugerido(PEDIDO);
 
     expect(r.ok).toBe(false);
-    expect(r.mensagem).toMatch(/365 dias|abaixo do mínimo/i);
+    expect(r.mensagem).toMatch(/janela|dias/i);
+    expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+  });
+
+  it("rejeita quando o score ficou abaixo de 40 mesmo para adição manual", async () => {
+    // Score muito baixo: scoreDescricao 20, scoreEspecificacao 10, scoreUnidadeQuantidade 5
+    // calcularScoreFinal = 20*0.4 + 10*0.35 + 5*0.25 = 8 + 3.5 + 1.25 = 12.75 < 40
+    mocks.rankearSimilaridade.mockResolvedValue([{
+      ...AVALIACAO,
+      scoreDescricao: 20,
+      scoreEspecificacao: 10,
+      scoreUnidadeQuantidade: 5,
+    }]);
+
+    const r = await adicionarCandidatoSugerido(PEDIDO);
+
+    expect(r.ok).toBe(false);
+    expect(r.mensagem).toMatch(/abaixo de 40|score.*abaixo/i);
+    expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+  });
+
+  it("passa a natureza cadastrada do item para a checagem de recência, não uma escolha do clique", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({ ...ITEM, natureza: "bem_consumo" });
+
+    await adicionarCandidatoSugerido(PEDIDO);
+
+    expect(mocks.candidatoEstaNoTempo).toHaveBeenCalledWith(
+      expect.objectContaining({ valorUnitario: 850.5 }),
+      "bem_consumo",
+    );
+  });
+
+  it("rejeita fora da janela do item classificado como bem de consumo (365 dias)", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({ ...ITEM, natureza: "bem_consumo" });
+    mocks.candidatoEstaNoTempo.mockReturnValue(false);
+
+    const r = await adicionarCandidatoSugerido(PEDIDO);
+
+    expect(r.ok).toBe(false);
+    expect(r.mensagem).toMatch(/365 dias|bem de consumo/i);
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
   });
 

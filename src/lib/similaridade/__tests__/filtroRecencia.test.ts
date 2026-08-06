@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filtrarPorRecencia } from "../filtroRecencia";
+import { filtrarPorRecencia, candidatoEstaNoTempo } from "../filtroRecencia";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 
 function candidato(diasAtras: number): CandidatoSimilaridade {
@@ -56,5 +56,27 @@ describe("filtrarPorRecencia", () => {
       expect(filtrarPorRecencia([candidato(400)])).toHaveLength(1);
       expect(filtrarPorRecencia([candidato(400)], null)).toHaveLength(1);
     });
+  });
+});
+
+describe("candidatoEstaNoTempo", () => {
+  // Usado na adição manual via assistente (um candidato por vez) — mesma regra
+  // de `filtrarPorRecencia`, delegada ao mesmo `validarValidadeFontes`.
+  it("aprova candidato dentro da janela padrão de 730 dias sem natureza", () => {
+    expect(candidatoEstaNoTempo(candidato(700))).toBe(true);
+  });
+
+  it("rejeita candidato além de 730 dias sem natureza", () => {
+    expect(candidatoEstaNoTempo(candidato(800))).toBe(false);
+  });
+
+  it("rejeita bem_consumo além de 365 dias mesmo dentro dos 730 padrão", () => {
+    expect(candidatoEstaNoTempo(candidato(400), "bem_consumo")).toBe(false);
+    expect(candidatoEstaNoTempo(candidato(365), "bem_consumo")).toBe(true);
+  });
+
+  it("aprova servico_continuo até 548 dias e rejeita em 549", () => {
+    expect(candidatoEstaNoTempo(candidato(548), "servico_continuo")).toBe(true);
+    expect(candidatoEstaNoTempo(candidato(549), "servico_continuo")).toBe(false);
   });
 });

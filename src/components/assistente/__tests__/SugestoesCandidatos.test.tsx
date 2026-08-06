@@ -6,6 +6,7 @@ import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 
 vi.mock("@/lib/actions/assistente", () => ({
   adicionarCandidatoSugerido: vi.fn(async () => ({ ok: true, mensagem: "Adicionado" })),
+  descartarCandidatoAssistente: vi.fn(async () => ({ ok: true, mensagem: "Descartado" })),
 }));
 
 const refreshMock = vi.fn();
@@ -64,6 +65,8 @@ describe("SugestoesCandidatos", () => {
 
     await waitFor(() => expect(adicionarMock).toHaveBeenCalled());
     // Nem valor, nem órgão, nem data: o servidor relê tudo da mensagem gravada.
+    // A janela de recência vem da natureza cadastrada do item (Item.natureza),
+    // não de uma escolha feita neste cartão.
     expect(adicionarMock).toHaveBeenCalledWith({
       mensagemId: "msg-1",
       candidatoId: "c1",
@@ -128,5 +131,52 @@ describe("SugestoesCandidatos", () => {
     );
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("exibe botão de descartar em cada cartão não adicionado", () => {
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={ITENS} />);
+
+    expect(screen.getByRole("button", { name: /Descartar candidato/i })).toBeInTheDocument();
+  });
+
+  it("esconde o cartão ao clicar em descartar", () => {
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={ITENS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Descartar candidato/i }));
+
+    expect(screen.queryByText("COMANDO DO EXERCITO")).not.toBeInTheDocument();
+    expect(screen.getByText(/Todos os candidatos foram descartados/)).toBeInTheDocument();
+  });
+
+  it("exibe 'Restaurar' após descartar e restaura ao clicar", () => {
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={ITENS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Descartar candidato/i }));
+
+    const restaurar = screen.getByRole("button", { name: /Restaurar/i });
+    expect(restaurar).toBeInTheDocument();
+
+    fireEvent.click(restaurar);
+
+    expect(screen.getByText("COMANDO DO EXERCITO")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Restaurar/i })).not.toBeInTheDocument();
+  });
+
+  it("usa o primeiro item quando itemIdSugerido não existe nos itens atuais", async () => {
+    const sugestaoStale: CandidatoSugerido = {
+      ...SUGESTAO,
+      id: "c2",
+      itemIdSugerido: "item-deletado-antigo",
+    };
+    // ITENS não tem "item-deletado-antigo" — simula re-sincronização que recriou os itens
+    render(
+      <SugestoesCandidatos mensagemId="msg-1" sugestoes={[sugestaoStale]} itens={ITENS} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar à lista/ }));
+
+    await waitFor(() => expect(adicionarMock).toHaveBeenCalled());
+    // Deve usar o primeiro item válido ("item-1"), não o ID obsoleto
+    expect(adicionarMock.mock.calls[0]![0].itemId).toBe("item-1");
   });
 });

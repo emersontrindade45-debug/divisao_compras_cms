@@ -34,7 +34,7 @@ export const JANELA_SERVICO_CONTINUO_DIAS = 548;
 
 type NaturezaObjetoDominio = "bem_consumo" | "servico_continuo";
 
-function janelaContratacaoPublica(naturezaObjeto?: NaturezaObjetoDominio | null): number {
+export function janelaContratacaoPublica(naturezaObjeto?: NaturezaObjetoDominio | null): number {
   if (naturezaObjeto === "bem_consumo") return JANELA_BEM_CONSUMO_DIAS;
   if (naturezaObjeto === "servico_continuo") return JANELA_SERVICO_CONTINUO_DIAS;
   return JANELAS_VALIDADE["contratacao_publica"]!;
