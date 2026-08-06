@@ -152,6 +152,7 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
         status: f.status,
         dataReferencia: f.dataReferencia,
         totalEvidencias: f.evidencias.length,
+        naturezaObjeto: item.natureza,
       })),
     ),
     capturas: processo.capturas.length,

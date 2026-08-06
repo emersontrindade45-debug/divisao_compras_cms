@@ -26,6 +26,17 @@ enum ClassificacaoItem {
   especifico
 }
 
+// Natureza do objeto pesquisado — determina a janela de validade de uma
+// contratação pública homologada como referência de preço (18 meses para
+// serviço contínuo, 12 meses para bem de consumo). Eixo diferente de
+// `ClassificacaoItem` (que é sobre catálogo/SICAF, não sobre a natureza do
+// objeto). Nullable no model: item sem classificação usa o teto mais
+// permissivo (ver `in65Rules.ts`) até alguém classificar manualmente.
+enum NaturezaObjeto {
+  bem_consumo
+  servico_continuo
+}
+
 enum TipoFonte {
   contratacao_publica
   site_eletronico
@@ -175,6 +186,8 @@ model Item {
   unidade                 String
   quantidade              Int
   classificacao           ClassificacaoItem
+  // Nullable de propósito: ver comentário do enum `NaturezaObjeto`.
+  natureza                NaturezaObjeto?
   caracteristicasTecnicas String?
   palavrasChave           String[]
   createdAt               DateTime          @default(now())

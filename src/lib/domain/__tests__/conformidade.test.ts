@@ -192,6 +192,22 @@ describe("avaliarConformidade — checklist", () => {
     expect(r.itens.find((i) => i.codigo === "OP-SLA")?.estado).toBe("bloqueio");
   });
 
+  it("OP-SLA bloqueia contratação pública de bem_consumo com 400 dias (dentro dos 730 padrão, fora dos 365 de bem de consumo)", () => {
+    const dataAntiga = new Date(AGORA.getTime() - 400 * 24 * 60 * 60 * 1000);
+
+    const semNatureza = avaliarConformidade(
+      base({ fontes: [fonte("f1", { dataReferencia: dataAntiga })] }),
+    );
+    expect(semNatureza.itens.find((i) => i.codigo === "OP-SLA")?.estado).toBe("ok");
+
+    const comNatureza = avaliarConformidade(
+      base({
+        fontes: [fonte("f1", { dataReferencia: dataAntiga, naturezaObjeto: "bem_consumo" })],
+      }),
+    );
+    expect(comNatureza.itens.find((i) => i.codigo === "OP-SLA")?.estado).toBe("bloqueio");
+  });
+
   it("R-03 em atenção com 2 cotações (abaixo do mínimo)", () => {
     const r = avaliarConformidade(
       base({

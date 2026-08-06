@@ -95,6 +95,94 @@ describe("validarValidadeFontes", () => {
     expect(result.valid).toBe(false);
     expect(result.violations.some((v) => v.code === "OP-SLA-03")).toBe(true);
   });
+
+  describe("janela por natureza do objeto", () => {
+    it("block para bem_consumo com 366 dias (além dos 12 meses)", () => {
+      const result = validarValidadeFontes(
+        [
+          {
+            fonteId: "f1",
+            tipo: "contratacao_publica",
+            dataReferencia: datasAtras(366),
+            naturezaObjeto: "bem_consumo",
+          },
+        ],
+        hoje,
+      );
+      expect(result.valid).toBe(false);
+      expect(result.violations.some((v) => v.code === "OP-SLA-06")).toBe(true);
+    });
+
+    it("válida para bem_consumo com 365 dias (limite dos 12 meses)", () => {
+      const result = validarValidadeFontes(
+        [
+          {
+            fonteId: "f1",
+            tipo: "contratacao_publica",
+            dataReferencia: datasAtras(365),
+            naturezaObjeto: "bem_consumo",
+          },
+        ],
+        hoje,
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("block para servico_continuo com 549 dias (além dos 18 meses)", () => {
+      const result = validarValidadeFontes(
+        [
+          {
+            fonteId: "f1",
+            tipo: "contratacao_publica",
+            dataReferencia: datasAtras(549),
+            naturezaObjeto: "servico_continuo",
+          },
+        ],
+        hoje,
+      );
+      expect(result.valid).toBe(false);
+      expect(result.violations.some((v) => v.code === "OP-SLA-06")).toBe(true);
+    });
+
+    it("válida para servico_continuo com 548 dias (limite dos 18 meses)", () => {
+      const result = validarValidadeFontes(
+        [
+          {
+            fonteId: "f1",
+            tipo: "contratacao_publica",
+            dataReferencia: datasAtras(548),
+            naturezaObjeto: "servico_continuo",
+          },
+        ],
+        hoje,
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it("sem naturezaObjeto cai no teto de 730 dias (item não classificado)", () => {
+      // Mesmo caso de fronteira do teste original (731/729), mas explicitando
+      // que o fallback é o comportamento vigente antes desta mudança — a
+      // classificação manual é o único jeito de encurtar a janela.
+      const semNatureza = validarValidadeFontes(
+        [{ fonteId: "f1", tipo: "contratacao_publica", dataReferencia: datasAtras(400) }],
+        hoje,
+      );
+      expect(semNatureza.valid).toBe(true);
+
+      const naturezaNula = validarValidadeFontes(
+        [
+          {
+            fonteId: "f1",
+            tipo: "contratacao_publica",
+            dataReferencia: datasAtras(400),
+            naturezaObjeto: null,
+          },
+        ],
+        hoje,
+      );
+      expect(naturezaNula.valid).toBe(true);
+    });
+  });
 });
 
 describe("validarRegistroNaoRespondentes", () => {

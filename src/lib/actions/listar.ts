@@ -129,6 +129,7 @@ export async function obterFontesSimilaridade(processoId: string) {
       descricao: true,
       unidade: true,
       quantidade: true,
+      natureza: true,
       resultadosSimilaridade: {
         where: { descartado: false },
         orderBy: { scoreFinal: "desc" },
@@ -178,6 +179,7 @@ export async function obterProcessoDetalhado(id: string) {
           unidade: true,
           quantidade: true,
           classificacao: true,
+          natureza: true,
           caracteristicasTecnicas: true,
           palavrasChave: true,
           processoId: true,

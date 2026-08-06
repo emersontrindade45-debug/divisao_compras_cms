@@ -79,11 +79,22 @@ const buscaGlobalSchema = z.object({
   termo: z.string().min(2, "O termo de busca precisa de ao menos 2 caracteres."),
 });
 
-const buscarPncpSchema = z.object({
-  termo: z.string().min(2, "O termo de busca precisa de ao menos 2 caracteres."),
-  /** Item para o qual a busca foi feita; vira o destino sugerido nos cartões. */
-  itemId: z.string().min(1).optional(),
-});
+const buscarPncpSchema = z
+  .object({
+    termo: z.string().min(2, "O termo de busca precisa de ao menos 2 caracteres."),
+    /** Item para o qual a busca foi feita; vira o destino sugerido nos cartões. */
+    itemId: z.string().min(1).optional(),
+    /**
+     * Faixa de valor opcional, aplicada sobre o preço homologado dos
+     * candidatos (o PNCP não tem esse filtro nativamente — ver `pncp.ts`).
+     */
+    valorMinimo: z.number().positive().optional(),
+    valorMaximo: z.number().positive().optional(),
+  })
+  .refine(
+    (v) => v.valorMinimo === undefined || v.valorMaximo === undefined || v.valorMinimo <= v.valorMaximo,
+    { message: "valorMinimo não pode ser maior que valorMaximo.", path: ["valorMinimo"] },
+  );
 
 const buscarWebSchema = z.object({
   consulta: z.string().min(3, "A consulta precisa de ao menos 3 caracteres."),
@@ -318,6 +329,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       select: {
         itens: {
           select: {
+            natureza: true,
             fontes: {
               select: {
                 id: true,
@@ -362,6 +374,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           status: f.status,
           dataReferencia: f.dataReferencia,
           totalEvidencias: f._count.evidencias,
+          naturezaObjeto: item.natureza,
         })),
       ),
       capturas: processo._count.capturas,
@@ -404,17 +417,25 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
   // Busca externa
   // -------------------------------------------------------------------------
 
-  async function buscarPncp(termo: string, itemIdSugerido: string | null) {
-    const encontrados = await buscarContratosPNCP(termo);
+  async function buscarPncp(
+    termo: string,
+    itemIdSugerido: string | null,
+    valorMinimo?: number,
+    valorMaximo?: number,
+  ) {
+    const temFiltroValor = valorMinimo !== undefined || valorMaximo !== undefined;
+    const encontrados = await buscarContratosPNCP(termo, { valorMinimo, valorMaximo });
     if (encontrados.length === 0) {
       return {
         resposta: {
           termo,
           total: 0,
           candidatos: [],
-          observacao:
-            "O PNCP não devolveu nada para este termo. Tente outro recorte: troque o " +
-            "substantivo-núcleo, remova qualificadores ou use o nome comercial do produto.",
+          observacao: temFiltroValor
+            ? "O PNCP não devolveu nada para este termo dentro da faixa de valor informada. " +
+              "Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
+            : "O PNCP não devolveu nada para este termo. Tente outro recorte: troque o " +
+              "substantivo-núcleo, remova qualificadores ou use o nome comercial do produto.",
         },
         sugestoes: [] as CandidatoSugerido[],
       };
@@ -775,6 +796,17 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
               "que souber: é ele que deixa o cartão do candidato já apontando para o item " +
               "certo quando o servidor for adicionar à lista.",
           },
+          valorMinimo: {
+            type: "number",
+            description:
+              "Opcional. Use quando o usuário pedir uma faixa de preço (ex.: 'entre R$ 18 e " +
+              "R$ 25'). Filtra sobre o preço homologado do candidato — o PNCP não tem esse " +
+              "filtro nativamente, é aplicado depois da busca.",
+          },
+          valorMaximo: {
+            type: "number",
+            description: "Opcional, junto de valorMinimo. Mesmo critério: preço homologado.",
+          },
         },
         required: ["termo"],
       },
@@ -866,7 +898,12 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         }
         case "buscar_pncp": {
           const args = parseArgumentos(buscarPncpSchema, chamada.argumentos);
-          const { resposta, sugestoes } = await buscarPncp(args.termo, args.itemId ?? null);
+          const { resposta, sugestoes } = await buscarPncp(
+            args.termo,
+            args.itemId ?? null,
+            args.valorMinimo,
+            args.valorMaximo,
+          );
           // As sugestões viajam FORA do conteúdo devolvido ao modelo: elas são
           // para a tela e para a aprovação por clique, não para o prompt.
           return { conteudo: JSON.stringify(resposta), sugestoes };

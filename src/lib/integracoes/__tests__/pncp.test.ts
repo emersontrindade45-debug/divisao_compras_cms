@@ -430,6 +430,69 @@ describe("filtro de relevância e limpeza da descrição", () => {
   });
 });
 
+// PNCP não tem parâmetro de faixa de valor em nenhum endpoint usado aqui; o
+// filtro é aplicado no lado da aplicação, sobre o preço já homologado.
+describe("filtro de valor (valorMinimo/valorMaximo)", () => {
+  it("mantém só candidatos dentro da faixa [min, max]", async () => {
+    mockPncp({
+      processos: [processoPadrao],
+      resultados: [resultadoDe({ valorUnitarioHomologado: 20 })],
+    });
+
+    const dentro = await buscarContratosPNCP("cadeira", { valorMinimo: 18, valorMaximo: 25 });
+    expect(dentro).toHaveLength(1);
+
+    const fora = await buscarContratosPNCP("cadeira", { valorMinimo: 30, valorMaximo: 40 });
+    expect(fora).toEqual([]);
+  });
+
+  it("aceita só valorMinimo (sem teto)", async () => {
+    mockPncp({
+      processos: [processoPadrao],
+      resultados: [resultadoDe({ valorUnitarioHomologado: 20 })],
+    });
+
+    const abaixo = await buscarContratosPNCP("cadeira", { valorMinimo: 25 });
+    expect(abaixo).toEqual([]);
+
+    const acima = await buscarContratosPNCP("cadeira", { valorMinimo: 15 });
+    expect(acima).toHaveLength(1);
+  });
+
+  it("aceita só valorMaximo (sem piso)", async () => {
+    mockPncp({
+      processos: [processoPadrao],
+      resultados: [resultadoDe({ valorUnitarioHomologado: 20 })],
+    });
+
+    const acima = await buscarContratosPNCP("cadeira", { valorMaximo: 15 });
+    expect(acima).toEqual([]);
+
+    const abaixo = await buscarContratosPNCP("cadeira", { valorMaximo: 25 });
+    expect(abaixo).toHaveLength(1);
+  });
+
+  it("inclui os limites da faixa (comparação inclusiva)", async () => {
+    mockPncp({
+      processos: [processoPadrao],
+      resultados: [resultadoDe({ valorUnitarioHomologado: 25 })],
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira", { valorMinimo: 18, valorMaximo: 25 });
+    expect(resultado).toHaveLength(1);
+  });
+
+  it("sem filtro, comportamento é idêntico ao atual", async () => {
+    mockPncp({
+      processos: [processoPadrao],
+      resultados: [resultadoDe({ valorUnitarioHomologado: 999 })],
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+    expect(resultado).toHaveLength(1);
+  });
+});
+
 // Testes de conformidade (CLAUDE.md §9.8 e §9.9). Devem falhar se as regras forem removidas.
 describe("conformidade da evidência PNCP", () => {
   const CNPJ_PROPRIO = "49203409000102";

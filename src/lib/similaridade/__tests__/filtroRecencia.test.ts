@@ -35,4 +35,26 @@ describe("filtrarPorRecencia", () => {
     const resultado = filtrarPorRecencia([candidato(730)]);
     expect(resultado).toHaveLength(1);
   });
+
+  describe("janela por natureza do objeto", () => {
+    it("bem_consumo: exclui além de 365 dias, mesmo dentro dos 730 padrão", () => {
+      const resultado = filtrarPorRecencia([candidato(400)], "bem_consumo");
+      expect(resultado).toHaveLength(0);
+    });
+
+    it("bem_consumo: mantém no limite de 365 dias", () => {
+      const resultado = filtrarPorRecencia([candidato(365)], "bem_consumo");
+      expect(resultado).toHaveLength(1);
+    });
+
+    it("servico_continuo: mantém no limite de 548 dias e exclui em 549", () => {
+      expect(filtrarPorRecencia([candidato(548)], "servico_continuo")).toHaveLength(1);
+      expect(filtrarPorRecencia([candidato(549)], "servico_continuo")).toHaveLength(0);
+    });
+
+    it("sem natureza (undefined/null) continua usando o teto de 730 dias", () => {
+      expect(filtrarPorRecencia([candidato(400)])).toHaveLength(1);
+      expect(filtrarPorRecencia([candidato(400)], null)).toHaveLength(1);
+    });
+  });
 });

@@ -3,6 +3,7 @@ import type { CandidatoSimilaridade } from "@/lib/ia/types";
 
 export function filtrarPorRecencia(
   candidatos: CandidatoSimilaridade[],
+  naturezaObjeto?: "bem_consumo" | "servico_continuo" | null,
 ): CandidatoSimilaridade[] {
   if (candidatos.length === 0) return [];
 
@@ -10,6 +11,7 @@ export function filtrarPorRecencia(
     fonteId: String(idx),
     tipo: "contratacao_publica" as const,
     dataReferencia: c.dataReferencia,
+    naturezaObjeto,
   }));
 
   const { value } = validarValidadeFontes(fontes, new Date());

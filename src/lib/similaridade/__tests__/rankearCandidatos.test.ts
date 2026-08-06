@@ -189,4 +189,19 @@ describe("rankearCandidatos", () => {
     expect(resultado).toHaveLength(1);
     expect(resultado[0]!.candidato.valorUnitario).toBe(200);
   });
+
+  it("repassa a natureza do objeto ao filtro de recência (janela mais curta para bem_consumo)", async () => {
+    const provedor: ProvedorIA = {
+      extrairEspecificacaoTR: vi.fn(),
+      extrairContextoTR: vi.fn(),
+      rankearSimilaridade: vi.fn().mockResolvedValue([]),
+    };
+
+    // 400 dias: dentro do teto padrão de 730, mas fora dos 365 de bem_consumo —
+    // o candidato é filtrado antes de chegar à IA (nem chama rankearSimilaridade).
+    const resultado = await rankearCandidatos(itemTR, [candidato(400)], provedor, "bem_consumo");
+
+    expect(resultado).toEqual([]);
+    expect(provedor.rankearSimilaridade).not.toHaveBeenCalled();
+  });
 });
