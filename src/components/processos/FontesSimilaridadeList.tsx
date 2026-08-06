@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/common/EmptyState";
 import { PromoverFonteButton } from "@/components/processos/PromoverFonteButton";
 import { DescartarResultadoButton } from "@/components/processos/DescartarResultadoButton";
+import { SeletorNaturezaItem } from "@/components/processos/SeletorNaturezaItem";
 import { obterFontesSimilaridade } from "@/lib/actions/listar";
 
 function formatarMoeda(valor: number): string {
@@ -44,11 +45,14 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
       </p>
       {itensComFontes.map((item) => (
         <Card key={item.id} size="sm">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium leading-snug">{item.descricao}</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              {item.quantidade} {item.unidade}
-            </p>
+          <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-sm font-medium leading-snug">{item.descricao}</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                {item.quantidade} {item.unidade}
+              </p>
+            </div>
+            <SeletorNaturezaItem itemId={item.id} natureza={item.natureza} />
           </CardHeader>
           <CardContent>
             <Table>

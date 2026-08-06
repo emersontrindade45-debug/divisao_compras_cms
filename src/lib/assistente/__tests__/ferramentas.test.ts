@@ -261,4 +261,53 @@ describe("registry de ferramentas do assistente", () => {
     expect(resposta.total).toBe(0);
     expect(resposta.observacao).toMatch(/outro recorte|substantivo/i);
   });
+
+  // -------------------------------------------------------------------------
+  // Filtro de valor: o PNCP não tem esse parâmetro nativamente (ver pncp.ts),
+  // o modelo só pode pedir a faixa — quem filtra é buscarContratosPNCP.
+  // -------------------------------------------------------------------------
+
+  describe("buscar_pncp — faixa de valor", () => {
+    it("repassa valorMinimo/valorMaximo para buscarContratosPNCP", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        valorMinimo: 18,
+        valorMaximo: 25,
+      });
+
+      expect(mocks.buscarContratosPNCP).toHaveBeenCalledWith("cadeira", {
+        valorMinimo: 18,
+        valorMaximo: 25,
+      });
+    });
+
+    it("rejeita valorMinimo maior que valorMaximo", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        valorMinimo: 30,
+        valorMaximo: 10,
+      });
+
+      expect(resposta.erro).toMatch(/valorMinimo/);
+      expect(mocks.buscarContratosPNCP).not.toHaveBeenCalled();
+    });
+
+    it("orienta a ampliar a faixa (não o termo) quando o filtro de valor zera o resultado", async () => {
+      mocks.buscarContratosPNCP.mockResolvedValue([]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        valorMinimo: 18,
+        valorMaximo: 25,
+      });
+
+      expect(resposta.total).toBe(0);
+      expect(resposta.observacao).toMatch(/ampliar a faixa/i);
+    });
+  });
 });

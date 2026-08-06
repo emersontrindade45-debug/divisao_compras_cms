@@ -9,6 +9,7 @@ import { acharSugestao, paraCandidato, listaSugestoesSchema } from "@/lib/assist
 import { getProvedorIA } from "@/lib/ia";
 import { candidatoEstaNoTempo } from "@/lib/similaridade/filtroRecencia";
 import { calcularScoreFinal } from "@/lib/similaridade/scoreFinal";
+import { janelaContratacaoPublica } from "@/lib/domain/in65Rules";
 import type { ItemExtraidoTR } from "@/lib/ia/types";
 
 // Leitura da conversa do assistente (M13).
@@ -165,13 +166,6 @@ const aprovarSchema = z.object({
   /** Id curto do candidato dentro daquela busca (`c1`, `c2`...). */
   candidatoId: z.string().min(1),
   itemId: z.string().min(1),
-  /**
-   * Tipo do objeto: define a janela de recência aceita.
-   * - servico  → 730 dias (2 anos), conforme IN 65/2021 para serviços contínuos.
-   * - consumo  → 365 dias (1 ano), para aquisições/bens de consumo.
-   * Padrão "servico" (janela mais ampla) para compatibilidade.
-   */
-  tipoObjeto: z.enum(["servico", "consumo"]).default("servico"),
 });
 
 export interface ResultadoAprovacao {
@@ -196,8 +190,9 @@ const SCORE_MINIMO_MANUAL = 40;
  * - **o preço vem da mensagem gravada**, não do corpo da requisição;
  * - **o score é recalculado** pelo provedor de IA, com rastreabilidade igual
  *   ao pipeline automático;
- * - **a janela de recência** respeita o tipo escolhido pelo analista
- *   (serviço 730 dias / consumo 365 dias).
+ * - **a janela de recência** respeita a natureza cadastrada do item
+ *   (`Item.natureza` — serviço contínuo 730 dias / bem de consumo 365 dias),
+ *   não uma escolha feita no momento do clique.
  */
 export async function adicionarCandidatoSugerido(
   entrada: z.input<typeof aprovarSchema>,
@@ -205,7 +200,7 @@ export async function adicionarCandidatoSugerido(
   // Mesma exigência de papel da promoção a fonte: adicionar candidato mexe na
   // instrução do processo.
   const user = await requireRole("pesquisa");
-  const { mensagemId, candidatoId, itemId, tipoObjeto } = aprovarSchema.parse(entrada);
+  const { mensagemId, candidatoId, itemId } = aprovarSchema.parse(entrada);
 
   const mensagem = await db.mensagemAssistente.findUnique({
     where: { id: mensagemId },
@@ -236,6 +231,7 @@ export async function adicionarCandidatoSugerido(
       unidade: true,
       quantidade: true,
       caracteristicasTecnicas: true,
+      natureza: true,
     },
   });
   if (!item) return { ok: false, mensagem: "Item não encontrado." };
@@ -259,17 +255,17 @@ export async function adicionarCandidatoSugerido(
     }
   }
 
-  // ── 1. Validar recência com a janela do tipo escolhido pelo analista ──────
-  const janelaDias = tipoObjeto === "consumo" ? 365 : 730;
+  // ── 1. Validar recência com a janela da natureza cadastrada do item ───────
+  const janelaDias = janelaContratacaoPublica(item.natureza);
   const candidato = paraCandidato(sugestao);
-  if (!candidatoEstaNoTempo(candidato, janelaDias)) {
-    const anos = tipoObjeto === "consumo" ? "1 ano" : "2 anos";
+  if (!candidatoEstaNoTempo(candidato, item.natureza)) {
     return {
       ok: false,
       mensagem:
-        `Contrato fora da janela de ${janelaDias} dias (${anos}) para ` +
-        `${tipoObjeto === "consumo" ? "aquisição/consumo" : "serviço continuado"}. ` +
-        `Se o objeto for de outro tipo, altere a seleção acima do botão e tente novamente.`,
+        `Contrato fora da janela de ${janelaDias} dias admitida para este item. ` +
+        (item.natureza
+          ? `Se a classificação do item (${item.natureza === "bem_consumo" ? "bem de consumo" : "serviço contínuo"}) estiver errada, ajuste-a na lista de fontes e tente novamente.`
+          : `Item ainda não classificado (usa o teto de ${janelaDias} dias); classifique a natureza na lista de fontes para uma janela mais precisa.`),
     };
   }
 
@@ -340,7 +336,7 @@ export async function adicionarCandidatoSugerido(
       conversaId: mensagem.conversa.id,
       mensagemId: mensagem.id,
       candidatoId,
-      tipoObjeto,
+      naturezaObjeto: item.natureza,
       janelaDias,
       termoBuscaUsado: sugestao.termoBuscaUsado,
       scoreFinal,

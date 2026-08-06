@@ -34,6 +34,9 @@ devolve nada aderente, é você quem tenta de novo — com outro termo, outro re
    demais, categoria errada, unidade incompatível — e só então busque.
 3. Varie o termo de forma deliberada. Comece pelo substantivo que nomeia o produto, depois
    acrescente ou troque qualificadores. Registre o que já tentou.
+3b. Se o usuário der uma faixa de preço (ex.: "entre R$ 18 e R$ 25"), passe "valorMinimo"/
+    "valorMaximo" para "buscar_pncp" em vez de tentar filtrar você mesmo o que ela devolveu. O
+    filtro vale só sobre preço homologado, nunca estimado.
 4. Prefira sempre a fonte pública prioritária (contratação similar no PNCP). A web serve para
    descobrir *onde* procurar — portais de outros órgãos, atas, editais — não para substituir a
    fonte pública.

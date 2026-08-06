@@ -22,6 +22,24 @@ const JANELAS_VALIDADE: Record<string, number> = {
   fornecedor_direto: 180,
 };
 
+/**
+ * Janelas de contratação pública diferenciadas por natureza do objeto: 18 meses
+ * (≈547,5 dias, arredondado para 548) para serviço contínuo, 12 meses (365 dias)
+ * para bem de consumo. `Item.natureza` no schema é nullable — item ainda não
+ * classificado cai no teto de `JANELAS_VALIDADE.contratacao_publica` (730 dias)
+ * em vez de ser reclassificado silenciosamente com uma janela mais curta.
+ */
+export const JANELA_BEM_CONSUMO_DIAS = 365;
+export const JANELA_SERVICO_CONTINUO_DIAS = 548;
+
+type NaturezaObjetoDominio = "bem_consumo" | "servico_continuo";
+
+export function janelaContratacaoPublica(naturezaObjeto?: NaturezaObjetoDominio | null): number {
+  if (naturezaObjeto === "bem_consumo") return JANELA_BEM_CONSUMO_DIAS;
+  if (naturezaObjeto === "servico_continuo") return JANELA_SERVICO_CONTINUO_DIAS;
+  return JANELAS_VALIDADE["contratacao_publica"]!;
+}
+
 const CODIGOS_VALIDADE: Record<string, string> = {
   contratacao_publica: "OP-SLA-06",
   site_eletronico: "OP-SLA-04",
@@ -117,6 +135,8 @@ export function validarValidadeFontes(
     fonteId: string;
     tipo: "contratacao_publica" | "site_eletronico" | "fornecedor_direto";
     dataReferencia: Date;
+    /** Só usado quando `tipo === "contratacao_publica"`; ver `janelaContratacaoPublica`. */
+    naturezaObjeto?: NaturezaObjetoDominio | null;
   }>,
   dataReferenciaCalculo: Date,
 ): DomainResult<Array<{ fonteId: string; valida: boolean; diasRestantes: number }>> {
@@ -124,7 +144,10 @@ export function validarValidadeFontes(
   const resultado: Array<{ fonteId: string; valida: boolean; diasRestantes: number }> = [];
 
   for (const fonte of fontes) {
-    const janela = JANELAS_VALIDADE[fonte.tipo]!;
+    const janela =
+      fonte.tipo === "contratacao_publica"
+        ? janelaContratacaoPublica(fonte.naturezaObjeto)
+        : JANELAS_VALIDADE[fonte.tipo]!;
     const diffMs = dataReferenciaCalculo.getTime() - fonte.dataReferencia.getTime();
     const diasDecorridos = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     const diasRestantes = janela - diasDecorridos;

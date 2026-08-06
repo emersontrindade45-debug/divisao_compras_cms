@@ -32,6 +32,8 @@ export interface ConformidadeInput {
     status: "incluido" | "excluido";
     dataReferencia: Date;
     totalEvidencias: number;
+    /** Natureza do item dono da fonte; só usada quando `tipo === "contratacao_publica"`. */
+    naturezaObjeto?: "bem_consumo" | "servico_continuo" | null;
   }>;
   /** Capturas de evidência de sites vinculadas ao processo. */
   capturas: number;
@@ -145,6 +147,7 @@ export function avaliarConformidade(input: ConformidadeInput): ConformidadeProce
       fonteId: f.id,
       tipo: f.tipo,
       dataReferencia: f.dataReferencia,
+      naturezaObjeto: f.naturezaObjeto,
     })),
     agora,
   );

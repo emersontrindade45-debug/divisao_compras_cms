@@ -38,7 +38,6 @@ export function SugestoesCandidatos({
   const [adicionados, setAdicionados] = useState<Record<string, boolean>>({});
   const [emCurso, setEmCurso] = useState<string | null>(null);
   const [itemEscolhido, setItemEscolhido] = useState<Record<string, string>>({});
-  const [tipoEscolhido, setTipoEscolhido] = useState<Record<string, "servico" | "consumo">>({});
   const [descartados, setDescartados] = useState<Set<string>>(new Set());
 
   const sugestoesVisiveis = sugestoes.filter((s) => !descartados.has(s.id));
@@ -81,15 +80,12 @@ export function SugestoesCandidatos({
       itemEscolhido[sugestao.id] ?? itemIdSugeridoValido ?? itens[0]?.id ?? null;
     if (!itemId) return;
 
-    const tipoObjeto = tipoEscolhido[sugestao.id] ?? "servico";
-
     setEmCurso(sugestao.id);
     try {
       const resultado = await adicionarCandidatoSugerido({
         mensagemId,
         candidatoId: sugestao.id,
         itemId,
-        tipoObjeto,
       });
       if (resultado.ok) {
         setAdicionados((atual) => ({ ...atual, [sugestao.id]: true }));
@@ -180,41 +176,25 @@ export function SugestoesCandidatos({
               </p>
             ) : (
               <div className="space-y-1.5">
-                {/* Seletor de tipo: controla a janela de recência aceita no servidor.
-                    Serviço continuado → 2 anos (730 dias); Consumo → 1 ano (365 dias).
-                    Também relaxa o limiar de score para adição manual (de 70 para 40). */}
-                <div className="flex items-center gap-2">
+                {/* A janela de recência aceita pelo servidor vem de Item.natureza
+                    (classificado na lista de fontes do processo), não de uma escolha
+                    feita aqui — evita depender do analista lembrar o tipo a cada clique. */}
+                {itens.length > 1 && (
                   <select
-                    value={tipoEscolhido[sugestao.id] ?? "servico"}
+                    value={itemId}
                     onChange={(e) =>
-                      setTipoEscolhido((atual) => ({
-                        ...atual,
-                        [sugestao.id]: e.target.value as "servico" | "consumo",
-                      }))
+                      setItemEscolhido((atual) => ({ ...atual, [sugestao.id]: e.target.value }))
                     }
-                    aria-label="Tipo do objeto contratado"
-                    className="rounded-md border bg-background px-1.5 py-1 text-xs"
+                    aria-label="Item que receberá o candidato"
+                    className="min-w-0 flex-1 rounded-md border bg-background px-1.5 py-1 text-xs"
                   >
-                    <option value="servico">Serviço cont. (até 2 anos)</option>
-                    <option value="consumo">Aquisição/Consumo (até 1 ano)</option>
+                    {itens.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.descricao}
+                      </option>
+                    ))}
                   </select>
-                  {itens.length > 1 && (
-                    <select
-                      value={itemId}
-                      onChange={(e) =>
-                        setItemEscolhido((atual) => ({ ...atual, [sugestao.id]: e.target.value }))
-                      }
-                      aria-label="Item que receberá o candidato"
-                      className="min-w-0 flex-1 rounded-md border bg-background px-1.5 py-1 text-xs"
-                    >
-                      {itens.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.descricao}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                )}
                 <Button
                   size="sm"
                   variant="outline"

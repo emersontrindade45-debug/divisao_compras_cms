@@ -28,11 +28,14 @@ export async function rankearCandidatos(
   itemTR: ItemExtraidoTR,
   candidatos: CandidatoSimilaridade[],
   provedor: ProvedorIA,
+  naturezaObjeto?: "bem_consumo" | "servico_continuo" | null,
 ): Promise<ScoreSimilaridade[]> {
   // Ordena por sobreposição lexical antes do corte: sem isso o slice pega os N
   // primeiros na ordem de chegada da API, podendo descartar os melhores em silêncio.
-  const candidatosValidos = ordenarPorSobreposicaoLexical(itemTR, filtrarPorRecencia(candidatos))
-    .slice(0, MAX_CANDIDATOS_POR_CHAMADA);
+  const candidatosValidos = ordenarPorSobreposicaoLexical(
+    itemTR,
+    filtrarPorRecencia(candidatos, naturezaObjeto),
+  ).slice(0, MAX_CANDIDATOS_POR_CHAMADA);
   if (candidatosValidos.length === 0) return [];
 
   const avaliacoes = await provedor.rankearSimilaridade(itemTR, candidatosValidos);

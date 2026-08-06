@@ -153,7 +153,12 @@ export async function processarPesquisaSimilaridade(
       // candidato antes de gastar tokens de IA com itens de outra categoria.
       const candidatosFiltrados = filtrarPorPalavrasChave(candidatosPublicos, termoBusca.split(/\s+/));
 
-      const ranqueados = await rankearCandidatos(itemTR, candidatosFiltrados, provedor);
+      const ranqueados = await rankearCandidatos(
+        itemTR,
+        candidatosFiltrados,
+        provedor,
+        item.natureza,
+      );
 
       await db.resultadoSimilaridade.deleteMany({ where: { itemId: item.id } });
 

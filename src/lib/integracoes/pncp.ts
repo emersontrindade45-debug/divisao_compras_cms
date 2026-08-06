@@ -288,6 +288,33 @@ async function buscarItensDaCompra(
   }
 }
 
+export interface FiltroValorPNCP {
+  valorMinimo?: number;
+  valorMaximo?: number;
+}
+
+/**
+ * Aplica a faixa de valor sobre os candidatos já buscados. O PNCP não tem
+ * parâmetro de faixa de valor em nenhum dos endpoints usados aqui (busca
+ * textual e itens/resultados de uma compra) — o filtro só existe no lado da
+ * aplicação, depois que o preço homologado já foi resolvido. Como
+ * `buscarItensDaCompra` já descarta todo item sem homologado, `valorUnitario`
+ * aqui é sempre o preço efetivamente contratado, nunca o estimado.
+ */
+function filtrarPorValor(
+  candidatos: CandidatoSimilaridade[],
+  filtro?: FiltroValorPNCP,
+): CandidatoSimilaridade[] {
+  if (!filtro || (filtro.valorMinimo === undefined && filtro.valorMaximo === undefined)) {
+    return candidatos;
+  }
+  return candidatos.filter(
+    (c) =>
+      (filtro.valorMinimo === undefined || c.valorUnitario >= filtro.valorMinimo) &&
+      (filtro.valorMaximo === undefined || c.valorUnitario <= filtro.valorMaximo),
+  );
+}
+
 /**
  * Busca contratações públicas relevantes ao termo informado, usando a busca
  * textual do PNCP para encontrar processos prováveis e depois lendo os itens
@@ -297,7 +324,10 @@ async function buscarItensDaCompra(
  * Devolve **apenas preços homologados**: o valor estimado do edital é o orçamento
  * feito antes do certame e não serve como referência de preço praticado.
  */
-export async function buscarContratosPNCP(termo: string): Promise<CandidatoSimilaridade[]> {
+export async function buscarContratosPNCP(
+  termo: string,
+  filtroValor?: FiltroValorPNCP,
+): Promise<CandidatoSimilaridade[]> {
   if (!termo.trim()) return [];
 
   try {
@@ -309,7 +339,7 @@ export async function buscarContratosPNCP(termo: string): Promise<CandidatoSimil
         ...(await Promise.all(lote.map((processo) => buscarItensDaCompra(processo, termo)))),
       );
     }
-    return itensPorProcesso.flat();
+    return filtrarPorValor(itensPorProcesso.flat(), filtroValor);
   } catch (err) {
     console.error(`[PNCP] Erro inesperado ao buscar contratações para "${termo}":`, err);
     return [];

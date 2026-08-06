@@ -123,6 +123,7 @@ export async function consolidarSeriePreco(
     fonteId: f.id,
     tipo: f.tipo as "contratacao_publica" | "site_eletronico" | "fornecedor_direto",
     dataReferencia: f.dataReferencia,
+    naturezaObjeto: serie.item.natureza,
   }));
   const validadeResult = validarValidadeFontes(fontesParaValidar, today);
   if (!validadeResult.valid) {

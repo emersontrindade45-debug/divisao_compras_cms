@@ -79,6 +79,7 @@ const ITEM = {
   unidade: "unidade",
   quantidade: 50,
   caracteristicasTecnicas: "com apoio lombar",
+  natureza: null as "bem_consumo" | "servico_continuo" | null,
 };
 
 // Resposta que provedor.rankearSimilaridade devolve (antes de recalcular o scoreFinal).
@@ -211,15 +212,26 @@ describe("adicionarCandidatoSugerido", () => {
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
   });
 
-  it("rejeita consumo fora de 365 dias mas aceita para serviço (730 dias)", async () => {
-    mocks.candidatoEstaNoTempo.mockImplementation((_candidato, dias: number) => dias === 730);
+  it("passa a natureza cadastrada do item para a checagem de recência, não uma escolha do clique", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({ ...ITEM, natureza: "bem_consumo" });
 
-    const rServico = await adicionarCandidatoSugerido({ ...PEDIDO, tipoObjeto: "servico" });
-    const rConsumo = await adicionarCandidatoSugerido({ ...PEDIDO, tipoObjeto: "consumo" });
+    await adicionarCandidatoSugerido(PEDIDO);
 
-    expect(rServico.ok).toBe(true);
-    expect(rConsumo.ok).toBe(false);
-    expect(rConsumo.mensagem).toMatch(/365 dias|1 ano|consumo/i);
+    expect(mocks.candidatoEstaNoTempo).toHaveBeenCalledWith(
+      expect.objectContaining({ valorUnitario: 850.5 }),
+      "bem_consumo",
+    );
+  });
+
+  it("rejeita fora da janela do item classificado como bem de consumo (365 dias)", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({ ...ITEM, natureza: "bem_consumo" });
+    mocks.candidatoEstaNoTempo.mockReturnValue(false);
+
+    const r = await adicionarCandidatoSugerido(PEDIDO);
+
+    expect(r.ok).toBe(false);
+    expect(r.mensagem).toMatch(/365 dias|bem de consumo/i);
+    expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
   });
 
   it("não regrava contratação que já está na lista do item", async () => {
