@@ -180,6 +180,17 @@ PrecoReferencia   // o registro de preço em si
   @@unique([fonteReferenciaId, codigo, competencia, uf])
 ```
 
+> **Pendência descoberta pelo spike do M17 (2026-08-07) — schema real ainda não cobre regime de
+> desoneração.** O model implementado no M15 (`prisma/schema.prisma:647-673`) segue exatamente a
+> proposta acima e **não tem campo `regime`** na chave única. Para SINAPI, desonerado/não-desonerado
+> são dois ZIPs de origem inteiramente separados por competência/UF — sem `regime` na chave, a
+> segunda ingestão (segundo ZIP) colide com `@@unique([fonteReferenciaId, codigo, competencia, uf])`
+> da primeira. Nenhuma fonte do M16 (Compras.gov) precisava dessa dimensão, então o gap não apareceu
+> antes. Acrescentar `regime String @default("")` (mesmo padrão do `uf` — vazio para fontes sem essa
+> distinção) e regravar o índice único é tarefa do M17, feita **antes** do runner de ingestão do
+> SINAPI, migration em dev primeiro (§9.19/CLAUDE.md §8). Detalhe completo em
+> [ApiPlan-M17-spike.md §4](ApiPlan-M17-spike.md).
+
 ### 3.3 Uma decisão de design que evita dor recorrente
 
 `TipoCandidatoSimilaridade` ganha **um único** valor novo — `preco_referencia` — e não um valor por
@@ -395,22 +406,26 @@ Compras.gov admite cobertura baixa.
 primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.133, IN 65, Decreto
 7.983/2013), acessados nessa data — nada por dedução ou memória do modelo (mesmo princípio do §4.1).
 
-- [ ] **Spike:** localizar a publicação vigente da Caixa; confirmar formato, estabilidade,
+- [x] **Spike:** localizar a publicação vigente da Caixa; confirmar formato, estabilidade,
       granularidade (insumos e composições), recorte por UF, distinção desonerado/não-desonerado,
-      competência mensal e URL permanente por competência — **parcialmente cumprido, não marcar
-      ainda.** Confirmado por fonte primária: localização do portal, granularidade
-      insumos×composições (composições é a referência certa para a maioria dos itens de pesquisa de
-      preço, não insumos), recorte por UF com a nuance de que cada "UF" é na verdade a capital
-      (localidade de referência do IBGE), motivo de negócio do desonerado/não-desonerado (regimes
-      tributários diferentes coexistem — Leis 13.670/2018, 12.844/2013, 13.161/2015, 14.973/2024), e
-      estabilidade: **instável, documentado três vezes** (2020, 2022, 2025) em mudança estrutural de
-      layout. **Não confirmado por fonte primária:** formato exato do arquivo (XLSX-em-ZIP é hipótese
-      forte por convergência de fontes secundárias, não fato verificado) e URL/nome de arquivo
-      previsível por competência — o "Sumário de Publicações" que ofereceria isso foi descontinuado
-      em 07/05/2025, e a página de downloads atual é renderizada em JS (`curl` não expõe o link real).
-      **Falta um passo só executável com navegador real** (abrir o portal, navegar até SP, baixar o
-      ZIP da competência vigente) antes de fechar este checkbox — não é código, é acesso que este
-      ambiente não reproduz.
+      competência mensal e URL permanente por competência. Confirmado por fonte primária: localização
+      do portal, granularidade insumos×composições (composições é a referência certa para a maioria
+      dos itens de pesquisa de preço, não insumos), recorte por UF com a nuance de que cada "UF" é na
+      verdade a capital (localidade de referência do IBGE), motivo de negócio do
+      desonerado/não-desonerado (regimes tributários diferentes coexistem — Leis 13.670/2018,
+      12.844/2013, 13.161/2015, 14.973/2024), estabilidade (**instável, documentado três vezes** —
+      2020, 2022, 2025 — em mudança estrutural de layout). **Fechado em 2026-08-07 (continuação):** o
+      usuário baixou os dois ZIPs reais de dezembro/2024 (SP, Desonerado/NaoDesonerado) pelo
+      navegador — o WAF bloqueia `curl` mesmo com headers de navegador, `429` persistente confirmado
+      nesta sessão — e a inspeção do XLSX (via XML interno) confirmou formato (3 relatórios XLSX
+      distintos por regime: Insumos, Composições Sintético, Composições Analítico, mais um relatório
+      de Família sem distinção de regime), estrutura de coluna de cada um, regime como **ZIP
+      inteiramente separado** (não aba/coluna — cada baixa é um regime só) e URL previsível por
+      template: `.../sinapi-a-partir-jul-2009-{uf}/SINAPI_ref_Insumos_Composicoes_{UF}_{AAAAMM}_
+      {Regime}.zip`. Registro completo na seção 4 de
+      [ApiPlan-M17-spike.md](ApiPlan-M17-spike.md). **Ajuste obrigatório antes de codificar:** a
+      chave `@@unique` de `PrecoReferencia` (§3.2) precisa incluir o regime — sem isso a segunda
+      ingestão (segundo ZIP) colide com a primeira para o mesmo código/competência/UF.
 - [x] **Spike:** confirmar o enquadramento legal exato (inciso e redação vigente) contra
       [lei-14133-2021](lei-14133-2021-licitacoes-contratos.md) e a IN 65 — não citar de memória.
       **Achado que corrige uma premissa implícita do plano: a IN 65/2021 explicitamente não regula
@@ -649,9 +664,11 @@ M16: a ingestão completa do CATMAT (688 páginas) em produção — exige autor
 usuário — e as duas verificações manuais finais (3 itens conferidos contra o Painel de Preços na
 web; URL de evidência aberta de verdade no navegador).
 
-**Estado em 2026-08-07 (continuação — spikes de pesquisa do M17, sem código):** +1 tarefa concluída
-(enquadramento legal, `[x]`) — **32 concluídas, 25 pendentes**. O spike de formato/estabilidade fica
-`[ ]` porque depende de navegador real (portal SINAPI renderiza a lista de arquivos em JS); achado
-que corrige uma premissa do plano — a IN 65/2021 não regula obras/engenharia, o SINAPI deriva peso
-diretamente da Lei 14.133 art. 23 §2º I. Registro completo em
-[ApiPlan-M17-spike.md](ApiPlan-M17-spike.md).
+**Estado em 2026-08-07 (continuação — spikes de pesquisa do M17, sem código):** +2 tarefas concluídas
+(os dois spikes do M17, ambos `[x]`) — **33 concluídas, 24 pendentes**. Achados que corrigem premissas
+do plano: a IN 65/2021 não regula obras/engenharia — o SINAPI deriva peso diretamente da Lei 14.133
+art. 23 §2º I; e o schema de `PrecoReferencia` do M15 precisa de um campo `regime` antes do runner do
+SINAPI (desonerado/não-desonerado são ZIPs separados, não cobertos pela chave única atual). Formato
+de arquivo, estrutura de colunas e URL por template confirmados por inspeção direta de dois ZIPs reais
+(baixados pelo usuário via navegador — WAF bloqueia acesso automatizado mesmo com headers de browser).
+Registro completo em [ApiPlan-M17-spike.md](ApiPlan-M17-spike.md).

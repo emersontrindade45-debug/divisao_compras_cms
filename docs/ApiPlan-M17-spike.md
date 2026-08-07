@@ -251,6 +251,94 @@ jurídica formal. Registrar como ponto a validar com a assessoria jurídica da C
 decreto como fundamento legal formal em peça processual — para uso interno de priorização de fonte
 de preço, a Lei 14.133 art. 23 §2º já é fundamento suficiente e não depende dessa confirmação.
 
+---
+
+## 4. Confirmação por arquivo real — executada em 2026-08-07 (continuação)
+
+O usuário baixou manualmente os dois ZIPs de dezembro/2024 pelo navegador (o WAF/Azion bloqueia
+`curl` mesmo com user-agent e cookies de navegador — confirmado nesta sessão com `429` persistente),
+o que fecha as duas lacunas do item 3.4 anterior.
+
+**URLs reais, com nome de arquivo e padrão de template confirmado:**
+
+```
+https://www.caixa.gov.br/Downloads/sinapi-a-partir-jul-2009-sp/SINAPI_ref_Insumos_Composicoes_SP_202412_NaoDesonerado.zip
+https://www.caixa.gov.br/Downloads/sinapi-a-partir-jul-2009-sp/SINAPI_ref_Insumos_Composicoes_SP_202412_Desonerado.zip
+```
+
+Padrão: `.../sinapi-a-partir-jul-2009-{uf}/SINAPI_ref_Insumos_Composicoes_{UF}_{AAAAMM}_{Regime}.zip`,
+com `{Regime}` ∈ `{Desonerado, NaoDesonerado}`. **Isso contradiz a leitura pessimista do item 1.6/1.5
+—apesar do "Sumário de Publicações" ter sido descontinuado, a URL final por competência/UF/regime É
+previsível por template**, ao menos para o padrão de nome usado desde jul/2009 (o path o declara
+explicitamente). O que continua não confirmado é se esse padrão de path é **estável no tempo** ou se
+já mudou de formato antes de jul/2009 — irrelevante para o sistema, que só precisa de dados atuais.
+**Risco residual:** o WAF pode bloquear requisição automatizada mesmo com URL correta — o runner de
+ingestão precisa rodar de um ambiente que já tenha passado pelo desafio anti-bot (mesma lição do
+M16/spike original: sessão com cookie), ou aceitar que a ingestão do SINAPI é semiautomática (usuário
+baixa manualmente, sistema só processa o arquivo já em disco/upload) em vez de 100% automática — a
+decidir na implementação, não neste spike.
+
+**Formato do arquivo — confirmado.** O ZIP contém **8 arquivos**, não um só:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `SINAPI_Preco_Ref_Insumos_SP_202412_{Regime}.xlsx` (+ `.pdf` irmão) | Relatório de **insumos** — o alvo do item 1.3 "insumos" |
+| `SINAPI_Custo_Ref_Composicoes_Sintetico_SP_202412_{Regime}.xlsx` (+ `.pdf`) | Composições, **visão resumida** (sem decompor em insumos) |
+| `SINAPI_Custo_Ref_Composicoes_Analitico_SP_202412_{Regime}.xlsx` (+ `.pdf`) | Composições, **visão detalhada** (com a receita de insumos por composição) |
+| `_SINAPI_Relatório_Família_de_Insumos_2024_12.xlsx` | Agrupamento de insumos por família homogênea (sem sufixo de regime — é o mesmo para os dois) |
+| `Notas_SINAPI.pdf` | Cópia do mesmo log de notas já citado no item 1 |
+
+Cada `.xlsx` é acompanhado do mesmo relatório em `.pdf` — **o XLSX é a fonte estruturada correta
+para ingestão**, o PDF é só cópia legível para humano. Confirma a hipótese do item 1.2 (Excel), mas
+corrige a suposição de "planilha única" — são **3 relatórios distintos por regime** (insumos,
+composição sintética, composição analítica), cada um com sua própria estrutura de colunas, mais um
+relatório de família sem distinção de regime.
+
+**Estrutura de colunas — confirmada via inspeção direta do XML interno do XLSX** (um `.xlsx` é um
+ZIP com XML; extraído e lido sem depender de lib externa):
+
+*Relatório de Insumos* (`SINAPI_Preco_Ref_Insumos_SP_202412_NaoDesonerado.xlsx`), cabeçalho real:
+
+```
+CODIGO | DESCRICAO DO INSUMO | UNIDADE DE MEDIDA | ORIGEM DO PRECO | PRECO MEDIANO R$
+```
+
+Cabeçalho de contexto acima da tabela: `MES DE COLETA: 12/2024`, `LOCALIDADE: 2840 - SAO PAULO`
+(confirma que a "UF" é codificada como localidade IBGE da capital, não sigla de estado — item 1.4),
+`ENCARGOS SOCIAIS (%) HORISTA 115,54  MENSALISTA 71,46` (os percentuais de encargos aparecem no
+**cabeçalho do relatório inteiro**, não em coluna por linha — mecânica que o item 1.5 não sabia).
+
+*Relatório de Composições Sintético* (`..._Sintetico_SP_202412_NaoDesonerado.xlsx`), cabeçalho real:
+
+```
+DESCRICAO DA CLASSE | SIGLA DA CLASSE | DESCRICAO DO TIPO 1 | SIGLA DO TIPO 1 |
+CODIGO DO AGRUPADOR | DESCRICAO DO AGRUPADOR | CODIGO DA COMPOSICAO | DESCRICAO DA COMPOSICAO |
+UNIDADE | ORIGEM DE PRECO | CUSTO TOTAL | VINCULO
+```
+
+Cabeçalho de contexto: `DATA DE EMISSÃO`, `ENCARGOS SOCIAIS SOBRE PREÇOS DA MÃO-DE-OBRA: 115,54%
+(HORA) 71,46%(MÊS)`, `ABRANGÊNCIA: NACIONAL / LOCALIDADE: SAO PAULO`. `VINCULO` aparece como
+`"CAIXA REFERENCIAL"` no exemplo capturado — sinaliza proveniência/origem da composição, não
+confirmado o conjunto completo de valores possíveis.
+
+**Consequência de design, não prevista no §3.2 do ApiPlan.md:** `PrecoReferencia.codigo` precisa
+acomodar **dois espaços de código distintos e não sobrepostos** — código de insumo (relatório de
+Insumos) e código de composição (`CODIGO DA COMPOSICAO`, relatório Sintético/Analítico) — e o
+provedor de consulta do M17 deve, por padrão, servir **composições** (conforme já concluído no item
+1.3), tratando o relatório de Insumos como tabela auxiliar de decomposição, não como série de preço
+principal. `metadados(Json)` é o lugar natural para `classe`/`agrupador`/`vinculo`, que não têm
+paralelo nos outros providers já implementados (M16) e não justificam colunas própria (mesmo
+raciocínio do §3.3 do ApiPlan.md — evitar campo por fonte).
+
+**Regime desonerado/não-desonerado — mecânica confirmada: são ZIPs (e portanto conjuntos de arquivo)
+inteiramente separados**, não abas nem coluna dentro do mesmo arquivo. Cada baixa é um regime só; o
+runner de ingestão roda a rotina duas vezes por competência/UF, uma por regime, e
+`PrecoReferencia`/`LoteIngestao` precisam de `regime` (ou campo equivalente) na chave para não
+colidir os dois — o `@@unique([fonteReferenciaId, codigo, competencia, uf])` do §3.2 do ApiPlan.md
+**está incompleto**: sem o regime na chave, a segunda ingestão (do segundo ZIP) sobrescreveria ou
+colidiria com a primeira para o mesmo código/competência/UF, perdendo um dos dois preços legítimos
+que o próprio M17 já sabia que não podiam se misturar.
+
 ### 3.4 O que não foi possível confirmar (consolidado)
 
 - URL exata (com nome de arquivo) do ZIP de São Paulo da competência vigente — página de downloads
@@ -271,16 +359,19 @@ de preço, a Lei 14.133 art. 23 §2º já é fundamento suficiente e não depend
 
 **Primeiro checkbox do M17** ("Spike: localizar a publicação vigente da Caixa; confirmar formato,
 estabilidade, granularidade (...), recorte por UF, distinção desonerado/não-desonerado, competência
-mensal e URL permanente por competência") — **parcialmente cumprido, não marcar `[x]` ainda.**
-Cinco das sete dimensões pedidas foram confirmadas por fonte primária (localização do portal,
-granularidade insumos×composições, recorte por UF com a nuance de "localidade de referência",
-motivo do desonerado×não-desonerado, estabilidade — esta com resposta "instável, documentado três
-vezes"); duas ficaram sem confirmação por fonte primária (formato exato do arquivo, e URL/nome
-previsível por competência — que na prática se confirmou como **não existente**, e essa é uma
-resposta útil, não uma lacuna). Falta um passo de verificação viável só com navegador real (abrir o
-portal, navegar até SP, baixar o ZIP da competência vigente e inspecionar) antes de considerar o
-spike de formato encerrado — não é código, mas exige uma sessão interativa que este ambiente
-(`curl` sem JS) não reproduz.
+mensal e URL permanente por competência") — **pode ser marcado `[x]`, com a seção 4 (2026-08-07,
+continuação) fechando as duas lacunas que restavam.** O usuário baixou os dois ZIPs reais
+(dezembro/2024, SP, `Desonerado` e `NaoDesonerado`) pelo navegador — o WAF bloqueia acesso
+automatizado mesmo com headers de navegador (confirmado nesta sessão, `curl` com user-agent/cookie
+segue recebendo `429`) — e a inspeção direta do XLSX (via XML interno, sem depender de lib) confirmou:
+formato (XLSX, 3 relatórios distintos por regime — Insumos, Composições Sintético, Composições
+Analítico — mais um relatório de Família sem distinção de regime), estrutura de colunas de cada um,
+regime como **ZIP inteiramente separado** (não aba/coluna), URL previsível por template
+(`.../sinapi-a-partir-jul-2009-{uf}/SINAPI_ref_Insumos_Composicoes_{UF}_{AAAAMM}_{Regime}.zip`) — o
+que corrige a leitura pessimista anterior (item 1.6), e granularidade/recorte por UF/estabilidade já
+confirmados na primeira rodada. **Achado que exige ajuste no schema do §3.2 do ApiPlan.md antes de
+codificar:** a chave `@@unique` de `PrecoReferencia` precisa incluir o regime (desonerado/não), sob
+pena de a segunda ingestão colidir com a primeira para o mesmo código/competência/UF.
 
 **Segundo checkbox do M17** ("Spike: confirmar o enquadramento legal exato (inciso e redação
 vigente) (...) — não citar de memória") — **pode ser marcado `[x]`.** O inciso (Lei 14.133/2021,
