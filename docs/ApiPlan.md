@@ -450,6 +450,34 @@ R$ 0,26, R$ 1,00, R$ 29,00, R$ 68,32, R$ 86,77 e R$ 96,37. Parte é unidade de f
 divergente (pacote × unidade), parte é erro de digitação do órgão comprador. Nenhum ingerido às
 cegas: tratamento de dispersão é entrega do M16, não refinamento posterior.
 
+### 4.2 Decisão de design — o catálogo CATMAT não cabe em `PrecoReferencia`
+
+Verificado contra a API real em 2026-08-07, ao retomar o M16 depois do merge do M15:
+
+```
+curl "https://dadosabertos.compras.gov.br/modulo-material/4_consultarItemMaterial?pagina=1&tamanhoPagina=500"
+→ { "resultado": [{ "codigoItem": 206504, "codigoClasse": 7110, "nomeClasse": "MOBILIÁRIO PARA
+    ESCRITÓRIO", "descricaoItem": "CADEIRA ESCRITÓRIO, ...", "statusItem": true, ... }, ...],
+    "totalRegistros": 343880, "totalPaginas": 688, "paginasRestantes": 687 }
+```
+
+**Nenhum campo de preço.** O catálogo é só identidade do item (código, descrição, classe,
+`statusItem` ativo/inativo) — confirma o texto do §4.1(e) ("busca por texto livre não existe;
+matching tem de ser local"), mas expõe uma lacuna que o plano não tinha registrado: o schema do
+M15 define `PrecoReferencia.valorUnitario` e `.competencia` como `NOT NULL`
+(`prisma/schema.prisma:654-655`), e o comentário do próprio model diz "registro de preço de uma
+fonte de referência **ingerida**". Um item de catálogo sem preço não é esse tipo de registro —
+forçá-lo na tabela exigiria inventar um `valorUnitario`/`competencia` sentinela, o que é
+exatamente o tipo de gambiarra que a §1 do CLAUDE.md proíbe ("nenhum preço entra na estimativa sem
+vínculo a fonte, data e evidência"): um preço fictício numa coluna `NOT NULL` é indistinguível de
+um preço real para qualquer consulta futura que esqueça de filtrar.
+
+**Decisão:** o catálogo (CATMAT e CATSER) ganha um model próprio, `ItemCatalogoReferencia` —
+identidade para matching local, sem preço. Preço continua vindo só de fonte que efetivamente
+publica preço (o provedor `modulo-contratacoes` já construído, ou uma futura ingestão de
+`modulo-pesquisa-preco`), nunca do catálogo. Migration em dev primeiro, aplicação em produção só
+com autorização explícita (mesmo padrão do M15, §9.19/§9.20/CLAUDE.md §8).
+
 ---
 
 ## 5. Regras deste plano herdadas do CLAUDE.md §9
