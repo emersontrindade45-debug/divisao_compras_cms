@@ -659,6 +659,13 @@ model PrecoReferencia {
    * "" = âmbito nacional (ver nota acima); UF de duas letras quando a fonte é regional.
    */
   uf                   String   @default("")
+  /**
+   * "" = fonte sem distinção de regime. SINAPI publica "desonerado" e
+   * "nao_desonerado" como arquivos de origem inteiramente separados (mesmo
+   * código/competência/UF, dois preços legítimos e simultâneos — não podem
+   * colidir na constraint única, ver docs/ApiPlan-M17-spike.md §4).
+   */
+  regime               String   @default("")
   urlEvidencia         String?
   metadados            Json?
   createdAt            DateTime @default(now())
@@ -666,7 +673,7 @@ model PrecoReferencia {
   fonteReferencia FonteReferencia @relation(fields: [fonteReferenciaId], references: [id], onDelete: Cascade)
   loteIngestao    LoteIngestao    @relation(fields: [loteIngestaoId], references: [id], onDelete: Cascade)
 
-  @@unique([fonteReferenciaId, codigo, competencia, uf])
+  @@unique([fonteReferenciaId, codigo, competencia, uf, regime])
   @@index([fonteReferenciaId, competencia])
   @@index([descricaoNormalizada])
   @@map("precos_referencia")

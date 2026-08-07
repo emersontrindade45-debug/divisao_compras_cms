@@ -17,6 +17,8 @@ export interface PrecoReferenciaNormalizado {
   dataReferencia: Date;
   /** "" = âmbito nacional — mesma convenção do model (ver prisma/schema.prisma). */
   uf?: string;
+  /** "" = fonte sem distinção de regime — mesma convenção do model (ver prisma/schema.prisma). */
+  regime?: string;
   urlEvidencia?: string;
   metadados?: Record<string, unknown>;
 }
@@ -160,6 +162,7 @@ export async function executarIngestao<TLinhaBruta>(
         valorUnitario: preco.valorUnitario,
         dataReferencia: preco.dataReferencia,
         uf: preco.uf ?? "",
+        regime: preco.regime ?? "",
         urlEvidencia: preco.urlEvidencia ?? null,
         metadados:
           preco.metadados !== undefined

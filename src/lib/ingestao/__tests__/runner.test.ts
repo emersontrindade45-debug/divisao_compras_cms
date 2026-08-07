@@ -117,6 +117,7 @@ describe("executarIngestao", () => {
           codigo: "001",
           valorUnitario: 10,
           uf: "",
+          regime: "",
         }),
       ],
       skipDuplicates: true,
@@ -130,6 +131,33 @@ describe("executarIngestao", () => {
         linhasRejeitadas: 1,
         concluidoEm: expect.any(Date),
       },
+    });
+  });
+
+  it("grava o regime informado pela normalização (SINAPI: desonerado × não desonerado)", async () => {
+    const config = configBase({
+      parsearLinhas: vi.fn().mockReturnValue([
+        { codigo: "001", descricao: "Item A", valor: "10.00" },
+      ]),
+      normalizarLinha: vi.fn((linha: LinhaBruta) => ({
+        ok: true as const,
+        preco: {
+          codigo: linha.codigo,
+          descricao: linha.descricao,
+          descricaoNormalizada: linha.descricao.toLowerCase(),
+          unidade: "UN",
+          valorUnitario: Number(linha.valor),
+          dataReferencia: new Date("2026-08-01"),
+          regime: "desonerado",
+        },
+      })),
+    });
+
+    await executarIngestao(config);
+
+    expect(mocks.db.precoReferencia.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ regime: "desonerado" })],
+      skipDuplicates: true,
     });
   });
 

@@ -180,15 +180,19 @@ PrecoReferencia   // o registro de preço em si
   @@unique([fonteReferenciaId, codigo, competencia, uf])
 ```
 
-> **Pendência descoberta pelo spike do M17 (2026-08-07) — schema real ainda não cobre regime de
-> desoneração.** O model implementado no M15 (`prisma/schema.prisma:647-673`) segue exatamente a
-> proposta acima e **não tem campo `regime`** na chave única. Para SINAPI, desonerado/não-desonerado
-> são dois ZIPs de origem inteiramente separados por competência/UF — sem `regime` na chave, a
-> segunda ingestão (segundo ZIP) colide com `@@unique([fonteReferenciaId, codigo, competencia, uf])`
-> da primeira. Nenhuma fonte do M16 (Compras.gov) precisava dessa dimensão, então o gap não apareceu
-> antes. Acrescentar `regime String @default("")` (mesmo padrão do `uf` — vazio para fontes sem essa
-> distinção) e regravar o índice único é tarefa do M17, feita **antes** do runner de ingestão do
-> SINAPI, migration em dev primeiro (§9.19/CLAUDE.md §8). Detalhe completo em
+> **Pendência descoberta pelo spike do M17 (2026-08-07) — resolvida em 2026-08-07 (continuação).** O
+> model implementado no M15 seguia exatamente a proposta acima e não tinha campo `regime` na chave
+> única. Para SINAPI, desonerado/não-desonerado são dois ZIPs de origem inteiramente separados por
+> competência/UF — sem `regime` na chave, a segunda ingestão colidiria com a primeira. Corrigido:
+> `regime String @default("")` acrescentado (mesmo padrão do `uf` — vazio para fontes sem essa
+> distinção), índice único regravado como
+> `@@unique([fonteReferenciaId, codigo, competencia, uf, regime])`
+> (`prisma/schema.prisma:647-680`), `PrecoReferenciaNormalizado`/`runner.ts` alargados com o mesmo
+> campo opcional. Migration `20260807195603_m17_preco_referencia_regime` aplicada em **dev**
+> (`prisma migrate status` confirma `Database schema is up to date!`); produção fica para quando o
+> runner do SINAPI for de fato escrito, com autorização explícita (mesmo padrão do M15/M16,
+> §9.19/CLAUDE.md §8). Coberto por teste dedicado + verificação por mutação (regime hardcoded para
+> `""` fez o teste cair, confirmando que a asserção protege a garantia — §9.39). Detalhe completo em
 > [ApiPlan-M17-spike.md §4](ApiPlan-M17-spike.md).
 
 ### 3.3 Uma decisão de design que evita dor recorrente
@@ -438,6 +442,9 @@ primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.1
       (vigência formal pós-14.133 não confirmada, irrelevante para uso interno de priorização). Onde
       o CLAUDE.md/PRD citarem "IN 65" como base para hierarquia de fonte em obras/engenharia, a
       citação correta passa a ser Lei 14.133 art. 23 §2º.
+- [x] Schema: campo `regime` em `PrecoReferencia` + chave única regravada (bloqueador identificado
+      pelo spike, ver nota no §3.2 acima) — migration `20260807195603_m17_preco_referencia_regime`
+      aplicada em dev, testes do runner cobrindo o campo (inclusive verificação por mutação)
 - [ ] Ingestão mensal de insumos e composições para SP
 - [ ] Provedor de consulta
 - [ ] Exibir competência, regime de desoneração **e localidade de referência (capital, não o
@@ -672,3 +679,10 @@ SINAPI (desonerado/não-desonerado são ZIPs separados, não cobertos pela chave
 de arquivo, estrutura de colunas e URL por template confirmados por inspeção direta de dois ZIPs reais
 (baixados pelo usuário via navegador — WAF bloqueia acesso automatizado mesmo com headers de browser).
 Registro completo em [ApiPlan-M17-spike.md](ApiPlan-M17-spike.md).
+
+**Estado em 2026-08-07 (continuação — schema do M17, TDD):** +1 tarefa concluída (campo `regime` em
+`PrecoReferencia`, `[x]`) — **34 concluídas, 23 pendentes**. Teste escrito antes da implementação
+(fase vermelha confirmada), migration `20260807195603_m17_preco_referencia_regime` aplicada em dev
+(`migrate status`: `Database schema is up to date!`), garantia validada por mutação (§9.39). Suíte
+completa (717 testes), typecheck e lint verdes após a mudança. Produção fica para quando o runner do
+SINAPI for escrito, com autorização explícita.
