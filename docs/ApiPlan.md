@@ -390,24 +390,66 @@ quem tiver acesso a navegador.
 **Objetivo.** Obras e serviços de engenharia — incluindo manutenção predial, que é onde o
 Compras.gov admite cobertura baixa.
 
+**Spikes de pesquisa executados em 2026-08-07 — registro completo em
+[ApiPlan-M17-spike.md](ApiPlan-M17-spike.md).** Metodologia: cada afirmação tem URL/documento
+primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.133, IN 65, Decreto
+7.983/2013), acessados nessa data — nada por dedução ou memória do modelo (mesmo princípio do §4.1).
+
 - [ ] **Spike:** localizar a publicação vigente da Caixa; confirmar formato, estabilidade,
       granularidade (insumos e composições), recorte por UF, distinção desonerado/não-desonerado,
-      competência mensal e URL permanente por competência
-- [ ] **Spike:** confirmar o enquadramento legal exato (inciso e redação vigente) contra
-      [lei-14133-2021](lei-14133-2021-licitacoes-contratos.md) e a IN 65 — não citar de memória
+      competência mensal e URL permanente por competência — **parcialmente cumprido, não marcar
+      ainda.** Confirmado por fonte primária: localização do portal, granularidade
+      insumos×composições (composições é a referência certa para a maioria dos itens de pesquisa de
+      preço, não insumos), recorte por UF com a nuance de que cada "UF" é na verdade a capital
+      (localidade de referência do IBGE), motivo de negócio do desonerado/não-desonerado (regimes
+      tributários diferentes coexistem — Leis 13.670/2018, 12.844/2013, 13.161/2015, 14.973/2024), e
+      estabilidade: **instável, documentado três vezes** (2020, 2022, 2025) em mudança estrutural de
+      layout. **Não confirmado por fonte primária:** formato exato do arquivo (XLSX-em-ZIP é hipótese
+      forte por convergência de fontes secundárias, não fato verificado) e URL/nome de arquivo
+      previsível por competência — o "Sumário de Publicações" que ofereceria isso foi descontinuado
+      em 07/05/2025, e a página de downloads atual é renderizada em JS (`curl` não expõe o link real).
+      **Falta um passo só executável com navegador real** (abrir o portal, navegar até SP, baixar o
+      ZIP da competência vigente) antes de fechar este checkbox — não é código, é acesso que este
+      ambiente não reproduz.
+- [x] **Spike:** confirmar o enquadramento legal exato (inciso e redação vigente) contra
+      [lei-14133-2021](lei-14133-2021-licitacoes-contratos.md) e a IN 65 — não citar de memória.
+      **Achado que corrige uma premissa implícita do plano: a IN 65/2021 explicitamente não regula
+      obras e serviços de engenharia** (art. 1º §1º da própria IN, confirmado por dupla fonte
+      primária independente — gov.br/compras e PDF de universidade, texto idêntico). Quem rege é
+      diretamente a **Lei 14.133, art. 23 §2º, inciso I** — e não é "fonte prioritária entre várias
+      combináveis" como no §1º (bens/serviços gerais): o §2º estabelece uma **ordem** a esgotar
+      (Sicro/Sinapi no topo, depois tabela/mídia especializada, depois contratações similares, depois
+      NF-e). O vínculo histórico do dever da Caixa de manter o SINAPI vem do Decreto 7.983/2013
+      (vigência formal pós-14.133 não confirmada, irrelevante para uso interno de priorização). Onde
+      o CLAUDE.md/PRD citarem "IN 65" como base para hierarquia de fonte em obras/engenharia, a
+      citação correta passa a ser Lei 14.133 art. 23 §2º.
 - [ ] Ingestão mensal de insumos e composições para SP
 - [ ] Provedor de consulta
-- [ ] Exibir competência e regime de desoneração de forma explícita (dois preços legítimos para o
-      mesmo código não podem se misturar na série)
+- [ ] Exibir competência, regime de desoneração **e localidade de referência (capital, não o
+      estado)** de forma explícita (dois preços legítimos para o mesmo código não podem se misturar
+      na série — confirmado por fonte primária, mecânica exata do arquivo ainda não)
 - [ ] Runner rejeita lote com cabeçalho inesperado e **falha visivelmente** (§9.22)
+- [ ] Runner sinaliza/rejeita lote **estruturalmente válido mas com preços zerados em massa** —
+      precedente real: a Caixa publicou os relatórios de out/2025 a dez/2025 com custos zerados por
+      falha de envio do IBGE ("Nota 12/2025 nº 01"), sanado só em 22/12/2025. "Cabeçalho ok" não é
+      garantia de "preço utilizável".
 - [ ] **Verificação:** uma competência importada, contagem conferida contra o arquivo de origem
 - [ ] **Verificação:** três composições conferidas manualmente contra a planilha oficial
 
-**Peso legal.** O SINAPI é tabela de referência federal formalmente aprovada, com estatura normativa
-própria em obras e serviços de engenharia — o que o coloca acima de site eletrônico na hierarquia da
-IN 65 e o torna, para esse tipo de objeto, fonte que o sistema **deveria** oferecer primeiro.
+**Peso legal (corrigido pelo spike).** O SINAPI não deriva peso da IN 65/2021 — ela não se aplica a
+obras/engenharia. O peso vem diretamente da Lei 14.133 art. 23 §2º I, que o coloca como **primeiro
+parâmetro a esgotar** (não apenas prioritário) para custo de obras e serviços de engenharia, à frente
+de tabela/mídia especializada e de contratações similares. Município sem recurso da União pode usar
+"outros sistemas de custos" (§3º do mesmo artigo — abre a porta para o CADTERC do M18), mas isso não
+dispensa o SINAPI como parâmetro válido quando não há recurso federal envolvido.
 
-**Riscos.** Layout de planilha muda entre competências e quebra em silêncio.
+**Riscos (ampliados pelo spike).** Layout de planilha muda entre competências e quebra em silêncio —
+**risco real e recorrente, não teórico**: quatro mudanças estruturais/de classificação documentadas
+em seis anos (2020, 2022, formato 2025, classificação 2025), fora retificações pontuais. Não há URL
+previsível por competência — o runner de ingestão provavelmente precisa de navegação/scraping da
+página de downloads a cada execução, não montagem de URL por template mês/ano. E lote pode vir
+estruturalmente válido com preços zerados em massa (precedente out-nov/2025), que é falha de dado,
+não de formato — o runner precisa distinguir os dois casos.
 
 ### M18 — CADTERC / BEC-SP
 
@@ -606,3 +648,10 @@ nomes de parâmetro/campo inventados — corrigido, com lição nova no CLAUDE.m
 M16: a ingestão completa do CATMAT (688 páginas) em produção — exige autorização explícita do
 usuário — e as duas verificações manuais finais (3 itens conferidos contra o Painel de Preços na
 web; URL de evidência aberta de verdade no navegador).
+
+**Estado em 2026-08-07 (continuação — spikes de pesquisa do M17, sem código):** +1 tarefa concluída
+(enquadramento legal, `[x]`) — **32 concluídas, 25 pendentes**. O spike de formato/estabilidade fica
+`[ ]` porque depende de navegador real (portal SINAPI renderiza a lista de arquivos em JS); achado
+que corrige uma premissa do plano — a IN 65/2021 não regula obras/engenharia, o SINAPI deriva peso
+diretamente da Lei 14.133 art. 23 §2º I. Registro completo em
+[ApiPlan-M17-spike.md](ApiPlan-M17-spike.md).

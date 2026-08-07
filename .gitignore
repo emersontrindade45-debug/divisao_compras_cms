@@ -7,6 +7,10 @@ skills-lock.json
 .claude/skills/supabase
 # worktrees de agentes: .next/node_modules stale que poluem lint/build (CLAUDE.md §9.17)
 .claude/worktrees/
+# cache local do Supabase CLI (project-ref, tokens de sessão)
+supabase/.temp/
+dev-out.log
+dev-err.log
 
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
