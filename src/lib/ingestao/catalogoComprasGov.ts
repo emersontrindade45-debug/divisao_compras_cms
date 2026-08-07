@@ -238,6 +238,8 @@ export interface ResumoIngestaoCatalogo {
   linhasLidas: number;
   linhasImportadas: number;
   linhasRejeitadas: number;
+  /** Números das páginas que esgotaram as tentativas de retry — também gravado em `LoteIngestao.erro`. */
+  paginasComFalha: number[];
 }
 
 /**
@@ -325,6 +327,12 @@ export async function ingerirCatalogoComprasGov<TRaw>(
 
   const numerosDemaisPaginas = Array.from({ length: totalPaginas - 1 }, (_, i) => i + 2);
 
+  // Páginas que esgotam as tentativas de retry (`onErro`) não podem só logar: sem gravar isso no
+  // lote, uma ingestão real de centenas de páginas rodando sem supervisão perde páginas em
+  // silêncio — o `LoteIngestao` ficaria marcado como concluído com `linhasLidas` menor que o
+  // esperado e nenhum jeito de descobrir por quê depois (CLAUDE.md §1, "toda ação rastreável").
+  const paginasComFalha: number[] = [];
+
   const contadoresDemaisPaginas = await processarComConcorrencia(
     numerosDemaisPaginas,
     concorrencia,
@@ -333,11 +341,13 @@ export async function ingerirCatalogoComprasGov<TRaw>(
       if (!resposta) return { lidas: 0, importadas: 0, rejeitadas: 0 };
       return gravarPagina(config, resposta.resultado);
     },
-    (pagina, erro) =>
+    (pagina, erro) => {
+      paginasComFalha.push(pagina);
       console.warn(
         `[CatalogoComprasGov] Erro na página ${pagina} (${config.fonteChave}):`,
         erro,
-      ),
+      );
+    },
   );
 
   const todosContadores: ContadorPagina[] = [
@@ -354,6 +364,12 @@ export async function ingerirCatalogoComprasGov<TRaw>(
     { lidas: 0, importadas: 0, rejeitadas: 0 },
   );
 
+  const erro =
+    paginasComFalha.length > 0
+      ? `${paginasComFalha.length} de ${totalPaginas} páginas falharam após ${MAX_TENTATIVAS} ` +
+        `tentativas cada: [${paginasComFalha.join(", ")}]. Linhas dessas páginas não foram lidas.`
+      : null;
+
   await db.loteIngestao.update({
     where: { id: lote.id },
     data: {
@@ -361,6 +377,7 @@ export async function ingerirCatalogoComprasGov<TRaw>(
       linhasImportadas: totais.importadas,
       linhasRejeitadas: totais.rejeitadas,
       concluidoEm: new Date(),
+      erro,
     },
   });
 
@@ -372,5 +389,6 @@ export async function ingerirCatalogoComprasGov<TRaw>(
     linhasLidas: totais.lidas,
     linhasImportadas: totais.importadas,
     linhasRejeitadas: totais.rejeitadas,
+    paginasComFalha,
   };
 }

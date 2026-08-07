@@ -208,9 +208,33 @@ describe("ingerirCatalogoComprasGov", () => {
         linhasImportadas: 1,
         linhasRejeitadas: 0,
         concluidoEm: expect.any(Date),
+        erro: null,
       },
     });
 
     expect(resumo.loteId).toBe(LOTE_ID);
+  });
+
+  it("grava LoteIngestao.erro quando uma página esgota os retries — não fica só no console.warn", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.spyOn(global, "fetch").mockImplementation(async (url) => {
+      const pagina = paginaDaUrl(String(url));
+      if (pagina === 2) throw new Error("ECONNRESET simulado");
+      return respostaPagina([itemCatmat(pagina)], 3, pagina);
+    });
+
+    const resumo = await ingerirCatalogoComprasGov(CONFIG_CATALOGO_CATMAT);
+
+    // Páginas 1 e 3 gravadas normalmente; só a 2 falhou — a ingestão não trava por uma página.
+    expect(resumo.paginasComFalha).toEqual([2]);
+    expect(resumo.linhasLidas).toBe(2);
+
+    expect(mocks.db.loteIngestao.update).toHaveBeenCalledWith({
+      where: { id: LOTE_ID },
+      data: expect.objectContaining({
+        erro: expect.stringMatching(/1 de 3 páginas falharam.*\[2\]/),
+      }),
+    });
   });
 });
