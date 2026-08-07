@@ -1,14 +1,18 @@
 import "server-only";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 import { tokenizar, raizPlural } from "@/lib/similaridade/texto";
+import { db } from "@/lib/db";
 
 /**
  * Integração com a API de Dados Abertos do Compras.gov.br
  * (dadosabertos.compras.gov.br — módulos de pesquisa de preços e serviços).
  *
  * Estratégia de busca:
- * 1. Baixa o catálogo CATSER (3 014 itens de serviço) em paralelo e o guarda
- *    em cache de módulo para evitar o download em cada busca.
+ * 1. Carrega o catálogo CATSER — hoje de `ItemCatalogoReferencia` (ingerido
+ *    por `src/lib/ingestao/catalogoComprasGov.ts`, docs/ApiPlan.md §M16),
+ *    com fallback para o download direto por request se a tabela ainda
+ *    estiver vazia (ver `carregarCatalogoServicos` abaixo) — e o guarda em
+ *    cache de módulo para evitar recarregar em toda busca.
  * 2. Usa sobreposição de tokens para encontrar os serviços mais similares ao
  *    termo pesquisado.
  * 3. Consulta `modulo-pesquisa-preco/3_consultarServico` para cada código
@@ -118,42 +122,98 @@ async function fetchJSON<T>(url: string): Promise<T | null> {
 // ── Catálogo de serviços ──────────────────────────────────────────────────────
 
 /**
- * Baixa o catálogo CATSER em paralelo e mantém em cache de módulo.
+ * Carrega o catálogo CATSER de `ItemCatalogoReferencia` (ingerido por
+ * `src/lib/ingestao/catalogoComprasGov.ts` — `null` se a tabela ainda não
+ * tem nenhuma linha com `fonteChave: "catser"`, o que sinaliza ao chamador
+ * para cair no download por request.
  *
- * No ambiente serverless, o cache sobrevive entre invocações da mesma instância
- * (instâncias quentes), mas é descartado no cold start. O download paralelo de
- * todas as páginas leva ~1–2 s, aceitável num cold start de fundo.
+ * Perda de recall conhecida e aceita: `ItemCatalogoReferencia` guarda só
+ * `descricao` (mapeada de `nomeServico`) e `codigoClasse` numérico — não os
+ * nomes textuais de grupo/classe/subclasse que o catálogo por request expõe
+ * (`nomeGrupo`/`nomeClasse`/`nomeSubclasse`). `scoreServico` já tolera campos
+ * ausentes (`.filter(Boolean)`), então o matching cai para pontuar só pela
+ * descrição do serviço — nenhuma quebra, cobertura um pouco mais estreita
+ * para termos que só aparecem no nome da categoria, não no nome do serviço.
+ * Fechar essa lacuna (armazenar os nomes textuais) é trabalho do matching
+ * léxico local, fora do escopo desta migração de fonte de dados.
+ */
+async function carregarCatalogoServicosDoBanco(): Promise<ServicosCatalogo[] | null> {
+  const itens = await db.itemCatalogoReferencia.findMany({
+    where: { fonteChave: "catser", ativo: true },
+    select: { codigo: true, descricao: true },
+  });
+  if (itens.length === 0) return null;
+
+  return itens.map((item) => ({
+    codigoServico: item.codigo,
+    nomeServico: item.descricao,
+  }));
+}
+
+/**
+ * Baixa o catálogo CATSER inteiro por request, paginando em paralelo.
+ * Fallback usado enquanto `ItemCatalogoReferencia` ainda não foi populada
+ * para "catser" (ingestão real ainda não rodou — ver
+ * `scripts/ingerir-catalogo-compras-gov.ts`).
+ */
+async function baixarCatalogoServicosPorRequest(): Promise<ServicosCatalogo[]> {
+  // Busca a primeira página para descobrir o total de páginas.
+  const primeira = await fetchJSON<RespostaPaginada<ServicosCatalogo>>(
+    `${BASE_URL}/modulo-servico/6_consultarItemServico?tamanhoPagina=${CATALOGO_POR_PAGINA}&statusServico=true&pagina=1`,
+  );
+  if (!primeira?.resultado?.length) return [];
+
+  const totalPaginas = Math.min(primeira.totalPaginas, CATALOGO_MAX_PAGINAS);
+  const paginas = Array.from({ length: totalPaginas - 1 }, (_, i) => i + 2);
+
+  const demaisPaginas = await Promise.all(
+    paginas.map((p) =>
+      fetchJSON<RespostaPaginada<ServicosCatalogo>>(
+        `${BASE_URL}/modulo-servico/6_consultarItemServico?tamanhoPagina=${CATALOGO_POR_PAGINA}&statusServico=true&pagina=${p}`,
+      ),
+    ),
+  );
+
+  const todos: ServicosCatalogo[] = [...primeira.resultado];
+  for (const pagina of demaisPaginas) {
+    if (pagina?.resultado) todos.push(...pagina.resultado);
+  }
+  return todos;
+}
+
+/**
+ * Carrega o catálogo CATSER e mantém em cache de módulo.
+ *
+ * Fonte primária: `ItemCatalogoReferencia` (tabela local, ingerida por
+ * `src/lib/ingestao/catalogoComprasGov.ts`) — elimina o download de ~3 100
+ * itens a cada cold start. Se a tabela ainda estiver vazia (ingestão real
+ * ainda não rodou em produção — CLAUDE.md §8 exige autorização explícita
+ * para isso), cai no download por request de antes, com um aviso de log:
+ * silenciosamente trocar de fonte sem esse fallback quebraria o matching
+ * assim que este código fosse publicado antes da ingestão rodar.
+ *
+ * No ambiente serverless, o cache sobrevive entre invocações da mesma
+ * instância (instâncias quentes), mas é descartado no cold start.
  */
 async function carregarCatalogoServicos(): Promise<ServicosCatalogo[]> {
   if (catalogoCache) return catalogoCache;
   if (carregandoCache) return carregandoCache;
 
   carregandoCache = (async () => {
-    // Busca a primeira página para descobrir o total de páginas.
-    const primeira = await fetchJSON<RespostaPaginada<ServicosCatalogo>>(
-      `${BASE_URL}/modulo-servico/6_consultarItemServico?tamanhoPagina=${CATALOGO_POR_PAGINA}&statusServico=true&pagina=1`,
-    );
-    if (!primeira?.resultado?.length) {
-      catalogoCache = [];
-      return [];
+    const doBanco = await carregarCatalogoServicosDoBanco();
+    if (doBanco) {
+      catalogoCache = doBanco;
+      return doBanco;
     }
 
-    const totalPaginas = Math.min(primeira.totalPaginas, CATALOGO_MAX_PAGINAS);
-    const paginas = Array.from({ length: totalPaginas - 1 }, (_, i) => i + 2);
-
-    const demaisPaginas = await Promise.all(
-      paginas.map((p) =>
-        fetchJSON<RespostaPaginada<ServicosCatalogo>>(
-          `${BASE_URL}/modulo-servico/6_consultarItemServico?tamanhoPagina=${CATALOGO_POR_PAGINA}&statusServico=true&pagina=${p}`,
-        ),
-      ),
+    console.warn(
+      '[ComprasGov] ItemCatalogoReferencia vazia para "catser" — usando fallback por request ' +
+        "(download direto da API). Rode a ingestão " +
+        "(scripts/ingerir-catalogo-compras-gov.ts catser) para eliminar este download a cada " +
+        "cold start.",
     );
 
-    const todos: ServicosCatalogo[] = [...primeira.resultado];
-    for (const pagina of demaisPaginas) {
-      if (pagina?.resultado) todos.push(...pagina.resultado);
-    }
-
+    const todos = await baixarCatalogoServicosPorRequest();
     catalogoCache = todos;
     return todos;
   })();

@@ -738,3 +738,16 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     coleção inteira** — confirmar contra um caso grande conhecido antes de confiar, porque sem
     envelope não há como distinguir "acabou" de "cortou". A descrição do item vem com HTML e
     entidades numéricas embutidos e precisa de limpeza antes de tokenizar ou exibir.
+62. **`import "server-only"` quebra qualquer módulo chamado por um script `tsx`/Node puro — não é
+    proteção gratuita.** O pacote resolve, via `exports` condicional do `package.json`, para
+    `index.js` (que lança exceção ao ser importado) a não ser que o resolvedor declare a condição
+    `react-server` — é assim que o bundler do Next marca "isto está dentro do bundle de servidor".
+    `tsx` e `node` puro nunca declaram essa condição (confirmado isolando o import num arquivo à
+    parte e comparando a mensagem de erro com/sem `--conditions=react-server`), então qualquer
+    módulo de `lib/` que precise ser chamado tanto por Server Action/rota quanto por um script
+    administrativo (`scripts/`, mesmo padrão de `set-admin-password.mjs`) não pode ter
+    `import "server-only"` no topo. Antes de copiar esse import "por hábito" de um arquivo vizinho
+    (`runner.ts`, `comprasGov.ts`, ...), perguntar se o módulo precisa ser importável fora do
+    bundler do Next; se precisar, documentar a ausência do marcador como decisão deliberada (não
+    esquecimento) e confirmar que o módulo não é alcançável a partir de `components/` — que é o
+    risco real que o marcador existe para prevenir.

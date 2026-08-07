@@ -289,9 +289,21 @@ cliente do PNCP faz desde o M14.0.
 - [x] **Spike (c)** — preço homologado confirmado, com fornecedor vencedor nomeado
 - [x] **Spike (d)** — URL de evidência derivável e conferida contra a API do PNCP
 - [x] **Spike (e)** — cobertura, latência e limites da API medidos
-- [ ] Ingestão do catálogo CATMAT (343.880 itens) para tabela local
-- [ ] Migrar o catálogo CATSER da ingestão por request para a mesma tabela (elimina o download de
-      3.014 itens a cada cold start em `comprasGov.ts`)
+- [x] Model `ItemCatalogoReferencia` (`prisma/schema.prisma`) — catálogo sem preço, decisão de
+      design registrada no §4.2 acima. Migration `20260807145132_m16_item_catalogo_referencia`
+      aplicada em **dev** (`prisma migrate dev`); produção fica para depois, com autorização
+      explícita (mesmo padrão do M15, §9.19/CLAUDE.md §8).
+- [x] Upsert idempotente de `FonteReferencia` "catmat"/"catser" (`src/lib/ingestao/fontesComprasGov.ts`)
+- [x] Ingestão do catálogo CATMAT (343.880 itens) para tabela local
+      (`src/lib/ingestao/catalogoComprasGov.ts` + `scripts/ingerir-catalogo-compras-gov.ts`) —
+      paginação com concorrência limitada (5, CLAUDE.md §9.11), validação Zod na fronteira,
+      `LoteIngestao` como rastro de auditoria. Rodar a ingestão completa (688 páginas) em produção
+      fica para depois, com autorização explícita (fora do escopo desta execução).
+- [x] Migrar o catálogo CATSER da ingestão por request para a mesma tabela (elimina o download de
+      3.014 itens a cada cold start em `comprasGov.ts`) — com fallback para o download por request
+      enquanto a tabela estiver vazia (ingestão real ainda não rodou em produção), avisado via log;
+      perda de recall aceita e documentada (`ItemCatalogoReferencia` não guarda os nomes textuais
+      de grupo/classe/subclasse que o catálogo por request expõe).
 - [ ] Matching local por sobreposição léxica sobre o catálogo ingerido (reusar
       `src/lib/similaridade/sobreposicaoLexical.ts`)
 - [ ] Provedor sobre `modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133` **wireado no
@@ -521,3 +533,10 @@ CADTERC pode não sobreviver ao seu.
 **Estado em 2026-08-07:** 18 tarefas concluídas (as cinco do spike do M16 + 13 do M15 — fundação
 completa exceto a aplicação da migration em produção, que exige autorização do usuário fora do
 escopo desta execução), 37 pendentes.
+
+**Estado em 2026-08-07 (continuação — fundação de catálogo do M16):** +4 tarefas concluídas
+(`ItemCatalogoReferencia`, upsert de `FonteReferencia` catmat/catser, ingestão paginada do CATMAT,
+migração do CATSER para a tabela local com fallback) — 22 concluídas, 33 pendentes. Matching léxico
+local, wiring do provedor `modulo-contratacoes` no registry, tratamento de dispersão e a ingestão
+completa do CATMAT (688 páginas) em produção continuam pendentes; os três primeiros dependem uns dos
+outros nessa ordem.

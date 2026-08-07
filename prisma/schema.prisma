@@ -597,8 +597,9 @@ model FonteReferencia {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  lotes  LoteIngestao[]
-  precos PrecoReferencia[]
+  lotes         LoteIngestao[]
+  precos        PrecoReferencia[]
+  itensCatalogo ItemCatalogoReferencia[]
 
   @@map("fontes_referencia")
 }
@@ -669,4 +670,42 @@ model PrecoReferencia {
   @@index([fonteReferenciaId, competencia])
   @@index([descricaoNormalizada])
   @@map("precos_referencia")
+}
+
+/**
+ * Catálogo de itens de uma fonte de referência (CATMAT, CATSER, ...) — só
+ * identidade para matching local (código, descrição, classe), sem preço
+ * (docs/ApiPlan.md §4.2). `PrecoReferencia.valorUnitario`/`.competencia` são
+ * `NOT NULL` porque aquele model é, pelo próprio comentário, "registro de
+ * PREÇO de uma fonte ingerida"; um item de catálogo sem preço não cabe ali
+ * sem inventar um valor sentinela — exatamente a gambiarra que a §1 do
+ * CLAUDE.md proíbe. Preço continua vindo só de fonte que efetivamente publica
+ * preço (`PrecoReferencia`, ou o provedor `modulo-contratacoes`); este model
+ * nunca alimenta a estimativa sozinho.
+ */
+model ItemCatalogoReferencia {
+  id           String @id @default(cuid())
+  /**
+   * Casa com `FonteReferencia.chave` ("catmat" | "catser", ...). FK direta na
+   * chave textual (não em `id`): o código de ingestão já trata `chave` como
+   * identificador estável (ver `runner.ts`, `fontesComprasGov.ts`), então
+   * gravar cada linha do lote não depende de resolver o `id` primeiro.
+   */
+  fonteChave   String
+  /** `codigoItem` (CATMAT) / `codigoServico` (CATSER). */
+  codigo       Int
+  /** Nem toda fonte classifica por classe — nullable. */
+  codigoClasse Int?
+  descricao    String
+  /** `normalizar()` de `src/lib/similaridade/texto.ts` — não reimplementar. */
+  descricaoNormalizada String
+  /** De `statusItem`/`statusServico` quando a fonte expõe o campo. */
+  ativo        Boolean  @default(true)
+  atualizadoEm DateTime @updatedAt
+
+  fonteReferencia FonteReferencia @relation(fields: [fonteChave], references: [chave], onDelete: Cascade)
+
+  @@unique([fonteChave, codigo])
+  @@index([descricaoNormalizada])
+  @@map("itens_catalogo_referencia")
 }
