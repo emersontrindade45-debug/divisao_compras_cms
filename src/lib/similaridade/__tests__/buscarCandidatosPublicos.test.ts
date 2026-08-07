@@ -1,5 +1,19 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
+
+// `provedorComprasGovContratacoes` (registrado no M16) depende de
+// `matchingCatalogoLocal.ts`, que consulta `ItemCatalogoReferencia` via
+// `@/lib/db`. Sem este mock, os testes deste arquivo — que não mockam esse
+// terceiro provedor explicitamente — disparariam uma query Prisma real (sem
+// `DATABASE_URL` configurada no ambiente de teste). `findMany` resolvendo
+// vazio reproduz o estado real de produção antes da ingestão do catálogo
+// rodar: o provedor novo vira um no-op silencioso, e os testes de
+// isolamento/timeout/dedupe dos outros dois provedores continuam válidos.
+vi.mock("@/lib/db", () => ({
+  db: { itemCatalogoReferencia: { findMany: vi.fn().mockResolvedValue([]) } },
+}));
+
 import { buscarCandidatosPublicos } from "../buscarCandidatosPublicos";
+import { REGISTRY_PROVEDORES_PUBLICOS } from "../registryProvedores";
 import * as pncp from "@/lib/integracoes/pncp";
 import * as painelPrecos from "@/lib/integracoes/painelPrecos";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
@@ -117,5 +131,17 @@ describe("buscarCandidatosPublicos", () => {
 
     expect(resultado).toHaveLength(1);
     expect(resultado[0]).toEqual(candidatoPncp);
+  });
+});
+
+describe("REGISTRY_PROVEDORES_PUBLICOS", () => {
+  it("inclui o provedor do modulo-contratacoes do Compras.gov, habilitado (M16)", () => {
+    const provedor = REGISTRY_PROVEDORES_PUBLICOS.find(
+      (p) => p.chave === "compras_gov_contratacoes",
+    );
+
+    expect(provedor).toBeDefined();
+    expect(provedor?.habilitado).toBe(true);
+    expect(provedor?.timeoutMs).toBeGreaterThan(0);
   });
 });
