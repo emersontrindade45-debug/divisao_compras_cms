@@ -321,7 +321,14 @@ cliente do PNCP faz desde o M14.0.
       de `src/lib/domain/orgaoProprio.ts` em vez de reimplementar a regra.
 - [x] Derivar a URL de evidência de `idContratacaoPNCP` → `pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}`
       — mesmo padrão de `montarUrlEdital()` em `pncp.ts`, testado contra o exemplo real do spike.
-- [ ] Avaliar `modulo-arp` como fonte adicional (traz `linkAtaPNCP` pronto — ver §4.1)
+- [x] Avaliar `modulo-arp` como fonte adicional (traz `linkAtaPNCP` pronto — ver §4.1) — **decisão:
+      adiar para o M20**, mesmo tratamento do Tier B (§2.2). O próprio §4.1a já classificou como
+      "candidato adicional", não lacuna — `modulo-contratacoes` cobre o caso geral (item de
+      contratação da 14.133) e ata de registro de preços é um subconjunto dele. Sem uso real do
+      provedor principal ainda, não há como medir se falta cobertura que só `modulo-arp` fecha;
+      construir os dois de uma vez arrisca o mesmo erro da §9.35 (justificativa por plausibilidade,
+      não por evidência). Reabrir no M20 se o uso real do `modulo-contratacoes` mostrar lacuna em
+      compras via ata.
 - [ ] Tratar dispersão: o spike encontrou R$ 0,26 e R$ 96,37 para o mesmo código CATMAT
 - [ ] **Verificação:** três itens que a Câmara compra, conferidos contra o Painel de Preços na web
 - [ ] **Verificação:** a URL de evidência gerada aberta de verdade no navegador (§9.8)
