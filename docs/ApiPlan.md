@@ -261,16 +261,19 @@ silenciosamente marcada.
 - [x] **Verificação:** os testes de timeout, isolamento e dedupe validados **por mutação** (§9.39) —
       as três guardas (`Promise.allSettled`, `comTimeout`, `deduplicarCandidatos`) foram desligadas
       uma de cada vez e o teste correspondente falhou em todos os três casos; revertido depois.
-- [ ] **Verificação:** `migrate status` contra produção retorna `up to date` (§9.19) — **não feito
-      nesta tarefa, de propósito.** `prisma migrate deploy`/status contra produção exige autorização
-      explícita do usuário (CLAUDE.md §8); o escopo desta execução (definido pelo agente
-      orquestrador) foi aplicar e confirmar em dev local, não em produção. Fica pendente até alguém
-      autorizar e rodar `/api/admin/migrate` (ou `migrate deploy` do CLI) contra o banco de produção
-      — só então marcar este item.
+- [x] **Verificação:** `migrate status` contra produção retorna `up to date` (§9.19) — **aplicada em
+      2026-08-07**, com autorização explícita do usuário (CLAUDE.md §8). Executada via
+      `supabase db query --linked` (SQL da migration + `INSERT` em `_prisma_migrations` com o
+      checksum SHA-256 do arquivo, numa única transação — mesmo padrão do M13), não pela rota
+      `/api/admin/migrate` nem pelo CLI do Prisma diretamente. Confirmado por duas consultas
+      independentes contra o banco de produção: `_prisma_migrations` lista
+      `20260807130150_m15_fonte_referencia` com `finished_at` preenchido (9 de 9 migrations
+      aplicadas), e `information_schema.tables` confirma as três tabelas novas
+      (`fontes_referencia`, `lotes_ingestao`, `precos_referencia`) presentes.
 
 **Riscos.** Migration com coluna nova em model já consultado → a varredura de `select` acima não é
-opcional. Migration só está pronta depois de aplicada em produção (§9.19) — **ver checkbox acima:
-a migration deste milestone ainda não foi aplicada em produção.**
+opcional. Migration só está pronta depois de aplicada em produção (§9.19) — **aplicada e verificada
+em 2026-08-07, ver checkbox acima.**
 
 ### M16 — Compras.gov: materiais e itens de contratações da 14.133
 
