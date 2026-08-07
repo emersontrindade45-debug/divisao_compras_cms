@@ -6,20 +6,25 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-/** Item como o `modulo-contratacoes` devolve, com valores de exemplo do spike (ApiPlan.md §4.1c). */
+/**
+ * Item como o `modulo-contratacoes` devolve de fato — campos e formato confirmados contra a API
+ * real em 2026-08-07 (ver correção no cabeçalho de `comprasGovContratacoes.ts`), não o formato
+ * adivinhado da primeira versão (`descricaoItem`/`dataCancelamentoPncp`/`orgaoEntidadeRazaoSocial`
+ * não existem na API real).
+ */
 function itemDe(over: Record<string, unknown> = {}) {
   return {
     codItemCatalogo: 331791,
     codigoClasse: 7510,
-    descricaoItem: "CAPA ENCADERNAÇÃO, MATERIAL PVC, TIPO A3",
+    descricaoResumida: "CAPA ENCADERNAÇÃO, MATERIAL PVC, TIPO A3",
+    unidadeMedida: "Unidade  ",
     valorUnitarioEstimado: 1.69,
     valorUnitarioResultado: 1.0,
     quantidadeResultado: 100,
     dataResultado: "2026-02-20",
     temResultado: true,
-    dataCancelamentoPncp: null,
+    situacaoCompraItemNome: "Homologado",
     orgaoEntidadeCnpj: "12345678000199",
-    orgaoEntidadeRazaoSocial: "Prefeitura Teste",
     nomeFornecedor: "VM COMERCIO DE PAPEL LTDA",
     idContratacaoPNCP: "12345678000199-1-000010/2025",
     ...over,
@@ -64,6 +69,7 @@ describe("buscarItensContratacoesCompraGov", () => {
     expect(resultado[0]).toMatchObject({
       codItemCatalogo: 331791,
       descricaoItem: "CAPA ENCADERNAÇÃO, MATERIAL PVC, TIPO A3",
+      unidade: "Unidade", // aparado — a API real traz espaços à direita
       valorUnitarioResultado: 1.0,
       quantidadeHomologada: 100,
       orgaoEntidadeCnpj: "12345678000199",
@@ -104,9 +110,9 @@ describe("buscarItensContratacoesCompraGov", () => {
       expect(resultado).toEqual([]);
     });
 
-    it("descarta item com dataCancelamentoPncp preenchida", async () => {
+    it("descarta item com situacaoCompraItemNome indicando cancelamento (não há campo de data de cancelamento nesta API)", async () => {
       vi.spyOn(global, "fetch").mockResolvedValue(
-        mockPagina([itemDe({ dataCancelamentoPncp: "2026-02-01" })]),
+        mockPagina([itemDe({ situacaoCompraItemNome: "Cancelado" })]),
       );
 
       const resultado = await buscarItensContratacoesCompraGov(filtroPadrao, periodoPadrao);
@@ -224,6 +230,22 @@ describe("buscarItensContratacoesCompraGov", () => {
   });
 
   describe("janela máxima de 365 dias", () => {
+    it("usa os nomes reais dos parâmetros de data (dataInclusaoPncpInicial/Final, confirmados contra a API em 2026-08-07)", async () => {
+      const urls: string[] = [];
+      vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+        urls.push(String(input));
+        return mockPagina([]);
+      });
+
+      await buscarItensContratacoesCompraGov(filtroPadrao, periodoPadrao);
+
+      const url = new URL(urls[0]!);
+      expect(url.searchParams.has("dataInclusaoPncpInicial")).toBe(true);
+      expect(url.searchParams.has("dataInclusaoPncpFinal")).toBe(true);
+      expect(url.searchParams.has("dataInicial")).toBe(false);
+      expect(url.searchParams.has("dataFinal")).toBe(false);
+    });
+
     it("período de até 365 dias gera uma única janela/chamada", async () => {
       const urls: string[] = [];
       vi.spyOn(global, "fetch").mockImplementation(async (input) => {
@@ -244,8 +266,8 @@ describe("buscarItensContratacoesCompraGov", () => {
       vi.spyOn(global, "fetch").mockImplementation(async (input) => {
         const url = new URL(String(input));
         chamadas.push({
-          dataInicial: url.searchParams.get("dataInicial")!,
-          dataFinal: url.searchParams.get("dataFinal")!,
+          dataInicial: url.searchParams.get("dataInclusaoPncpInicial")!,
+          dataFinal: url.searchParams.get("dataInclusaoPncpFinal")!,
         });
         return mockPagina([]);
       });

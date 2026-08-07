@@ -29,13 +29,36 @@ import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorr
  *   evidência que `montarUrlEdital()` em `pncp.ts` produz a partir de outro
  *   campo de origem.
  *
- * O nome exato dos parâmetros de data da requisição (`dataInicial`/
- * `dataFinal` abaixo) não foi capturado pelo spike — que confirmou o envelope
- * de resposta, os campos do item e o limite de 365 dias, mas não o payload
- * exato da requisição. É a única premissa deste módulo que ainda depende de
- * confirmação contra a API ao vivo antes deste provedor entrar no registry
- * (M15) — o restante (paginação, regra de preço homologado, exclusão do
- * próprio órgão, derivação da URL de evidência) foi verificado.
+ * **Correção de 2026-08-07, contra a API real e o OpenAPI (`/v3/api-docs`) do backend** — o spike
+ * original não havia capturado o payload exato da requisição nem o schema completo do item, e a
+ * primeira versão deste módulo adivinhou nomes de campo que **não existem** na API real:
+ * - Parâmetros de data são **`dataInclusaoPncpInicial`/`dataInclusaoPncpFinal`** (obrigatórios,
+ *   confirmado como `required: true` no OpenAPI e por uma chamada real HTTP 200), não
+ *   `dataInicial`/`dataFinal` — a versão anterior teria devolvido erro em toda chamada real.
+ * - O campo de descrição é **`descricaoResumida`**, não `descricaoItem` (que não existe na
+ *   resposta) — a versão anterior sempre gravaria descrição vazia.
+ * - **`orgaoEntidadeRazaoSocial` não existe** na resposta (confirmado no OpenAPI e numa amostra
+ *   real) — removido; só `orgaoEntidadeCnpj` está disponível para identificar o órgão.
+ * - **`dataCancelamentoPncp` não existe** — não há campo de data de cancelamento nesta API. O
+ *   sinal mais próximo é `situacaoCompraItemNome` (texto livre, sem enum documentado); ver
+ *   `mapearItem()` para o tratamento (heurística, não confirmada com um exemplo cancelado real).
+ * - Existe **`unidadeMedida`** (string, ex. `"Unidade  "` — com espaços à direita observados na
+ *   amostra real, por isso o `.trim()` na mensagem).
+ *
+ * Fatos que seguem confirmados (spike original §4.1 + esta correção):
+ * - o envelope de paginação é `{ resultado, totalRegistros, totalPaginas,
+ *   paginasRestantes }`, sem truncamento silencioso (ao contrário de
+ *   `/itens` do PNCP — CLAUDE.md §9.61b);
+ * - o preço de referência é `valorUnitarioResultado` (homologado), nunca
+ *   `valorUnitarioEstimado` (CLAUDE.md §9.61a) — o spike mediu até 41% de
+ *   diferença entre os dois no mesmo item;
+ * - a janela de consulta aceita no máximo 365 dias, com erro explícito acima
+ *   disso;
+ * - `idContratacaoPNCP` vem no formato `"{cnpj}-{tipo}-{sequencial}/{ano}"`
+ *   (ex.: `"13672605000170-1-000119/2025"`), de onde se deriva a mesma URL de
+ *   evidência que `montarUrlEdital()` em `pncp.ts` produz a partir de outro
+ *   campo de origem — confirmado também que `numeroControlePNCPCompra` traz o
+ *   mesmo valor, como campo alternativo caso `idContratacaoPNCP` falte algum dia.
  */
 
 const BASE_URL = "https://dadosabertos.compras.gov.br";
@@ -72,15 +95,15 @@ function formatarData(data: Date): string {
 const itemContratacaoApiSchema = z.object({
   codItemCatalogo: z.number().nullish(),
   codigoClasse: z.number().nullish(),
-  descricaoItem: z.string().nullish(),
+  descricaoResumida: z.string().nullish(),
+  unidadeMedida: z.string().nullish(),
   valorUnitarioEstimado: z.number().nullish(),
   valorUnitarioResultado: z.number().nullish(),
   quantidadeResultado: z.number().nullish(),
   dataResultado: z.string().nullish(),
   temResultado: z.boolean().nullish(),
-  dataCancelamentoPncp: z.string().nullish(),
+  situacaoCompraItemNome: z.string().nullish(),
   orgaoEntidadeCnpj: z.string().nullish(),
-  orgaoEntidadeRazaoSocial: z.string().nullish(),
   nomeFornecedor: z.string().nullish(),
   idContratacaoPNCP: z.string().nullish(),
 });
@@ -176,8 +199,8 @@ function montarUrl(
   const params = new URLSearchParams({
     pagina: String(pagina),
     tamanhoPagina: String(TAMANHO_PAGINA),
-    dataInicial: formatarData(janela.dataInicial),
-    dataFinal: formatarData(janela.dataFinal),
+    dataInclusaoPncpInicial: formatarData(janela.dataInicial),
+    dataInclusaoPncpFinal: formatarData(janela.dataFinal),
   });
   if (filtro.codItemCatalogo !== undefined) {
     params.set("codItemCatalogo", String(filtro.codItemCatalogo));
@@ -213,12 +236,14 @@ export interface ItemContratacaoCompraGov {
   codItemCatalogo: number | null;
   codigoClasse: number | null;
   descricaoItem: string;
+  /** `unidadeMedida` da API, aparada — a amostra real trouxe espaços à direita (ex. "Unidade  "). */
+  unidade: string;
   /** Preço efetivamente contratado (homologado) — nunca o estimado. */
   valorUnitarioResultado: number;
   quantidadeHomologada: number;
   dataResultado: Date;
+  /** Único identificador de órgão disponível nesta API — não há campo de razão social. */
   orgaoEntidadeCnpj: string;
-  orgaoEntidadeRazaoSocial: string;
   nomeFornecedorVencedor: string;
   /** https://pncp.gov.br/app/editais/{cnpj}/{ano}/{sequencial} — derivada de idContratacaoPNCP. */
   fonteUrl: string;
@@ -242,6 +267,12 @@ function montarUrlEvidencia(idContratacaoPNCP: string): string | null {
   return `https://pncp.gov.br/app/editais/${cnpj}/${ano}/${sequencial}`;
 }
 
+// Não existe campo de data/flag de cancelamento nesta API (ver correção de 2026-08-07 no
+// cabeçalho do arquivo) — `situacaoCompraItemNome` é o único texto de status disponível, sem enum
+// documentado. Heurística de string, não confirmada contra um exemplo real cancelado: melhor
+// filtrar candidato demais do que deixar passar um item cancelado na estimativa de preço.
+const REGEX_STATUS_CANCELADO = /cancelad/i;
+
 /**
  * Aplica as regras de conformidade e devolve `null` quando o item não pode
  * virar candidato de preço: sem resultado homologado, contratação cancelada,
@@ -251,7 +282,9 @@ function montarUrlEvidencia(idContratacaoPNCP: string): string | null {
  */
 function mapearItem(raw: ItemContratacaoApi): ItemContratacaoCompraGov | null {
   if (raw.temResultado !== true) return null;
-  if (raw.dataCancelamentoPncp) return null;
+  if (raw.situacaoCompraItemNome && REGEX_STATUS_CANCELADO.test(raw.situacaoCompraItemNome)) {
+    return null;
+  }
   if (typeof raw.valorUnitarioResultado !== "number" || raw.valorUnitarioResultado <= 0) {
     return null;
   }
@@ -270,12 +303,12 @@ function mapearItem(raw: ItemContratacaoApi): ItemContratacaoCompraGov | null {
   return {
     codItemCatalogo: raw.codItemCatalogo ?? null,
     codigoClasse: raw.codigoClasse ?? null,
-    descricaoItem: (raw.descricaoItem ?? "").trim(),
+    descricaoItem: (raw.descricaoResumida ?? "").trim(),
+    unidade: (raw.unidadeMedida ?? "").trim(),
     valorUnitarioResultado: raw.valorUnitarioResultado,
     quantidadeHomologada: raw.quantidadeResultado ?? 1,
     dataResultado,
     orgaoEntidadeCnpj: cnpjOrgao,
-    orgaoEntidadeRazaoSocial: raw.orgaoEntidadeRazaoSocial ?? "",
     nomeFornecedorVencedor: raw.nomeFornecedor ?? "",
     fonteUrl,
     idContratacaoPNCP: raw.idContratacaoPNCP,
