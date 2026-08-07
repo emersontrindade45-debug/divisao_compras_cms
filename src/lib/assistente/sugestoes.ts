@@ -26,7 +26,7 @@ export const MAX_SUGESTOES_POR_BUSCA = 25;
 export const candidatoSugeridoSchema = z.object({
   /** Estável dentro do passo (`c1`, `c2`...): é o que o clique manda de volta. */
   id: z.string().min(1),
-  tipoCandidato: z.enum(["contratacao_publica", "painel_precos"]),
+  tipoCandidato: z.enum(["contratacao_publica", "painel_precos", "preco_referencia"]),
   fonteDescricao: z.string(),
   fonteOrgaoOuId: z.string(),
   fonteUrl: z.string().nullable(),

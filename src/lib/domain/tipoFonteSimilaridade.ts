@@ -12,6 +12,11 @@ import type { TipoCandidatoSimilaridade, TipoFonte } from "@prisma/client";
  *   à mesma janela de validade de 365 dias. Tratá-los sob o mesmo `TipoFonte`
  *   mantém a validação de validade (`validarValidadeFontes`) coerente sem
  *   inventar um valor de enum inexistente.
+ * - `preco_referencia` → `contratacao_publica` (mesmo motivo de `painel_precos`
+ *   acima): uma tabela de referência ingerida (SINAPI, CADTERC, CATMAT, ...;
+ *   M15+) é, para fins da hierarquia da IN 65/2021, mais uma referência
+ *   pública de preço — só a proveniência concreta muda, e essa vive na FK
+ *   `PrecoReferencia.fonteReferenciaId`, não neste mapeamento.
  *
  * Função pura: não importa de `components/` nem toca em I/O (CLAUDE.md §9-2).
  * As strings dos dois enums seguem a mesma convenção (underscore) em todos os
@@ -24,6 +29,8 @@ export function mapTipoCandidatoParaFonte(
     case "contratacao_publica":
       return "contratacao_publica";
     case "painel_precos":
+      return "contratacao_publica";
+    case "preco_referencia":
       return "contratacao_publica";
     case "site_eletronico":
       return "site_eletronico";
@@ -50,6 +57,12 @@ export interface PromocaoPermitida {
  * evidência. Esse caminho existe no módulo de sites (`CapturaEvidencia`), que
  * captura URL + data/hora + arquivo — e é para lá que o usuário é mandado.
  *
+ * `preco_referencia` é promovível como `contratacao_publica`/`painel_precos`:
+ * um `PrecoReferencia` só existe porque o runner de ingestão (M15) já exigiu
+ * fonte + competência + evidência (`urlEvidencia`) no momento da gravação —
+ * ao contrário do achado de site aberto, não há metadado de conformidade
+ * fabricado na promoção.
+ *
  * Função pura: sem I/O, sem import de `components/` (CLAUDE.md §9.2).
  */
 export function podePromoverCandidato(
@@ -58,6 +71,7 @@ export function podePromoverCandidato(
   switch (tipo) {
     case "contratacao_publica":
     case "painel_precos":
+    case "preco_referencia":
       return { permitido: true };
     case "site_eletronico":
       return {

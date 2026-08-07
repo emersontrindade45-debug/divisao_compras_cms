@@ -278,6 +278,15 @@ async function buscarItensDaCompra(
         dataReferencia: new Date(resultado.dataResultado ?? item.dataAtualizacao),
         unidade: item.unidadeMedida,
         quantidade: resultado.quantidadeHomologada ?? item.quantidade,
+        // Identidade estruturada da compra: alimenta a deduplicação entre
+        // provedores do registry (docs/ApiPlan.md §3.4) quando a mesma
+        // contratação chegar também por outra fonte.
+        identidadeContratacao: {
+          cnpjOrgao: processo.orgao_cnpj,
+          ano: processo.ano,
+          numeroSequencial: processo.numero_sequencial,
+          numeroItem: item.numeroItem,
+        },
       });
     });
 

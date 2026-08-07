@@ -52,6 +52,25 @@ enum TipoCandidatoSimilaridade {
   // (CapturaEvidencia) produz. Ver `podePromoverCandidato` em
   // src/lib/domain/tipoFonteSimilaridade.ts.
   site_eletronico
+  // Candidato originado de uma tabela de referência ingerida (SINAPI, CADTERC,
+  // CATMAT, ...; M15+). Um único valor para todas as fontes de referência de
+  // propósito — a fonte concreta é identificada pela FK
+  // `PrecoReferencia.fonteReferenciaId`, não por um valor de enum por fonte.
+  // Ver docs/ApiPlan.md §3.3: cada valor novo custaria migration + varredura
+  // de `select` (CLAUDE.md §9.46) + badge de UI + testes a cada fonte
+  // ingerida; com um valor só, acrescentar a sexta fonte é inserir uma linha
+  // em `FonteReferencia`, não migrar o schema.
+  preco_referencia
+}
+
+// Esfera de governo responsável pela publicação de uma FonteReferencia —
+// determina o peso da fonte na hierarquia de conformidade da IN 65/2021
+// (ex.: SINAPI é referência federal; CADTERC é estadual e pode exigir
+// justificativa adicional — ver docs/ApiPlan.md M17/M18).
+enum EsferaGoverno {
+  federal
+  estadual
+  municipal
 }
 
 /**
@@ -546,4 +565,108 @@ model InstrucaoPesquisa {
   @@index([escopo])
   @@index([processoId])
   @@map("instrucoes_pesquisa")
+}
+
+// ─── Repositório de inteligência de mercado (Módulo 8 do PRD; M15+) ─────────
+//
+// Fundação da ingestão de tabelas de referência de preço (SINAPI, CADTERC,
+// CATMAT, ...). Nenhuma fonte real é povoada em M15 — só o esqueleto de
+// catálogo + auditoria de lote + registro de preço (docs/ApiPlan.md §3.2).
+
+/**
+ * Catálogo das fontes de referência ingeridas (SINAPI, CADTERC, CATMAT, ...).
+ */
+model FonteReferencia {
+  id            String        @id @default(cuid())
+  /**
+   * Identificador estável usado pelo runner de ingestão e pelo código (ex.: "sinapi").
+   */
+  chave         String        @unique
+  nome          String
+  esfera        EsferaGoverno
+  /**
+   * Enquadramento legal que justifica o uso da fonte como referência de preço (IN 65/2021).
+   */
+  baseLegal     String?
+  urlOficial    String
+  /**
+   * Texto livre de propósito: periodicidade real varia por fonte e algumas são "esporádicas" (ver docs/ApiPlan.md §2.5).
+   */
+  periodicidade String
+  ativa         Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  lotes  LoteIngestao[]
+  precos PrecoReferencia[]
+
+  @@map("fontes_referencia")
+}
+
+/**
+ * Auditoria de uma rodada de ingestão de uma FonteReferencia.
+ */
+model LoteIngestao {
+  id                String    @id @default(cuid())
+  fonteReferenciaId String
+  /**
+   * Competência do lote (ex.: "2026-08" para publicação mensal).
+   */
+  competencia       String
+  urlArquivo        String
+  checksum          String
+  linhasLidas       Int       @default(0)
+  linhasImportadas  Int       @default(0)
+  linhasRejeitadas  Int       @default(0)
+  iniciadoEm        DateTime  @default(now())
+  concluidoEm       DateTime?
+  /**
+   * Preenchido quando o runner rejeita o lote inteiro (ex.: cabeçalho inesperado).
+   */
+  erro              String?
+
+  fonteReferencia FonteReferencia   @relation(fields: [fonteReferenciaId], references: [id], onDelete: Cascade)
+  precos          PrecoReferencia[]
+
+  @@index([fonteReferenciaId])
+  @@map("lotes_ingestao")
+}
+
+/**
+ * Registro de preço de uma fonte de referência ingerida.
+ * `competencia` é duplicada de `LoteIngestao` (não só herdada por relação):
+ * assim uma consulta por competência não precisa de join, e o histórico de
+ * competências de um código permanece íntegro mesmo que o lote de origem seja
+ * reprocessado. `uf` usa `""` como sentinela de "âmbito nacional" em vez de
+ * `null` — no Postgres, `NULL` é sempre distinto de `NULL` em constraint
+ * `@@unique`, então uma fonte nacional (sem UF) poderia duplicar o mesmo
+ * código na mesma competência sem violar a constraint (mesma armadilha da
+ * nota em `InstrucaoPesquisa.chave`).
+ */
+model PrecoReferencia {
+  id                   String   @id @default(cuid())
+  fonteReferenciaId    String
+  loteIngestaoId       String
+  codigo               String
+  descricao            String
+  descricaoNormalizada String
+  unidade              String
+  valorUnitario        Decimal  @db.Decimal(12, 2)
+  competencia          String
+  dataReferencia       DateTime
+  /**
+   * "" = âmbito nacional (ver nota acima); UF de duas letras quando a fonte é regional.
+   */
+  uf                   String   @default("")
+  urlEvidencia         String?
+  metadados            Json?
+  createdAt            DateTime @default(now())
+
+  fonteReferencia FonteReferencia @relation(fields: [fonteReferenciaId], references: [id], onDelete: Cascade)
+  loteIngestao    LoteIngestao    @relation(fields: [loteIngestaoId], references: [id], onDelete: Cascade)
+
+  @@unique([fonteReferenciaId, codigo, competencia, uf])
+  @@index([fonteReferenciaId, competencia])
+  @@index([descricaoNormalizada])
+  @@map("precos_referencia")
 }

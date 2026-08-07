@@ -7,8 +7,21 @@ export interface ItemExtraidoTR {
   termoBusca?: string;
 }
 
+/**
+ * Identidade estruturada da contratação de origem de um candidato, quando o
+ * provedor a expõe (hoje só o PNCP — ver `buscarContratosPNCP`). Alimenta a
+ * deduplicação entre provedores do registry (docs/ApiPlan.md §3.4): duas
+ * fontes podem republicar o mesmo item da mesma compra pública.
+ */
+export interface IdentidadeContratacao {
+  cnpjOrgao: string;
+  ano: string;
+  numeroSequencial: string;
+  numeroItem: number;
+}
+
 export interface CandidatoSimilaridade {
-  tipoCandidato: "contratacao_publica" | "painel_precos";
+  tipoCandidato: "contratacao_publica" | "painel_precos" | "preco_referencia";
   fonteDescricao: string;
   fonteOrgaoOuId: string;
   fonteUrl?: string;
@@ -16,6 +29,8 @@ export interface CandidatoSimilaridade {
   dataReferencia: Date;
   unidade: string;
   quantidade: number;
+  /** Ausente quando o provedor não expõe a identidade estruturada da compra (ver `IdentidadeContratacao`). */
+  identidadeContratacao?: IdentidadeContratacao;
 }
 
 export interface ScoreSimilaridade {

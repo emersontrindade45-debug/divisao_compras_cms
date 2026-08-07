@@ -2,6 +2,7 @@ import {
   BarChart3,
   BookOpen,
   Building2,
+  Database,
   FileText,
   FolderSearch,
   Globe,
@@ -52,6 +53,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Consulta",
     items: [
       { href: "/contratacoes", label: "Contratações públicas", icon: FileText },
+      { href: "/ingestoes", label: "Fontes de referência", icon: Database },
       { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
       // Só as instruções entram na sidebar. O assistente em si não é destino de
       // navegação: é um painel lateral acionado da Topbar (global) ou de dentro
