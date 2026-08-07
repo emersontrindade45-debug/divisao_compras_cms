@@ -369,6 +369,22 @@ recoberto por 22 testes (era 21) antes de prosseguir para o wiring no registry.
 - [ ] **Verificação:** três itens que a Câmara compra, conferidos contra o Painel de Preços na web
 - [ ] **Verificação:** a URL de evidência gerada aberta de verdade no navegador (§9.8)
 
+**Tentativa parcial em 2026-08-07 (não fecha os dois itens acima — continuam `[ ]`).** Sem acesso a
+navegador real neste ambiente, tentei a verificação mais forte disponível: para o item real
+`idContratacaoPNCP: "06272868000127-1-000057/2024"` (codItemCatalogo 611701, "Mesa Reunião
+Redonda", capturado numa chamada real ao `modulo-contratacoes` nesta sessão), consultei a **API
+oficial de consulta do PNCP** — `pncp.gov.br/api/consulta/v1/orgaos/06272868000127/compras/2024/57`
+— fonte independente do Compras.gov, não só um espelho dele. Bateu: mesmo `numeroControlePNCP`,
+órgão "CONSELHO REGIONAL DE ENFERMAGEM COREN MA", objeto "aquisição de mobiliário", consistente com
+os itens de mobiliário retornados. A página `pncp.gov.br/app/editais/...` (a URL de evidência em
+si) devolveu `ECONNRESET` tanto por `curl` quanto por fetch de página — é SPA com proteção
+anti-bot, mesmo obstáculo já registrado no spike do M16 (§4.1d). Isso confirma que os **dados por
+trás** da evidência são reais e batem, mas não substitui abrir a URL literalmente num navegador
+(§9.8 pede exatamente isso, porque formato de URL errado só aparece na renderização real). Não
+tentei o Painel de Preços (paineldeprecos.planejamento.gov.br) por ser também um portal
+JS-pesado sem API de consulta simples conhecida. Os dois itens seguem como tarefa manual para
+quem tiver acesso a navegador.
+
 ### M17 — SINAPI
 
 **Objetivo.** Obras e serviços de engenharia — incluindo manutenção predial, que é onde o
