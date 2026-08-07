@@ -1,6 +1,7 @@
 import "server-only";
 import { buscarContratosPNCP } from "@/lib/integracoes/pncp";
 import { buscarPrecosPainelPrecos } from "@/lib/integracoes/painelPrecos";
+import { buscarCandidatosComprasGovContratacoes } from "./provedorComprasGovContratacoes";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 
 /**
@@ -45,5 +46,17 @@ export const REGISTRY_PROVEDORES_PUBLICOS: readonly ProvedorBuscaPublica[] = [
     habilitado: true,
     timeoutMs: TIMEOUT_PADRAO_MS,
     buscar: (termo) => buscarPrecosPainelPrecos(termo),
+  },
+  {
+    // Compras.gov — `modulo-contratacoes` (M16, docs/ApiPlan.md §4.1). Fecha a
+    // lacuna de material de consumo e TI/equipamentos: matching local sobre o
+    // catálogo CATMAT ingerido (`matchingCatalogoLocal.ts`) → itens de
+    // contratação por código. Habilitado mesmo com `ItemCatalogoReferencia`
+    // ainda vazia em produção — o provedor vira um no-op seguro (`[]` cedo,
+    // com log de diagnóstico) até a ingestão real do catálogo rodar.
+    chave: "compras_gov_contratacoes",
+    habilitado: true,
+    timeoutMs: TIMEOUT_PADRAO_MS,
+    buscar: (termo) => buscarCandidatosComprasGovContratacoes(termo),
   },
 ];
