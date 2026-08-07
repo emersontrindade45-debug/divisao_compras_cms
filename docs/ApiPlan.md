@@ -294,12 +294,21 @@ cliente do PNCP faz desde o M14.0.
       3.014 itens a cada cold start em `comprasGov.ts`)
 - [ ] Matching local por sobreposição léxica sobre o catálogo ingerido (reusar
       `src/lib/similaridade/sobreposicaoLexical.ts`)
-- [ ] Provedor sobre `modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133`
-      (filtro por `codItemCatalogo`/`codigoClasse`, janela de 365 dias)
-- [ ] Usar `valorUnitarioResultado`, nunca `valorUnitarioEstimado` (§9.61a)
-- [ ] Descartar item sem `temResultado` e com `dataCancelamentoPncp` preenchida
-- [ ] Excluir `orgaoEntidadeCnpj === ORGAO_CNPJ` (§9.9)
-- [ ] Derivar a URL de evidência de `idContratacaoPNCP` → `pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}`
+- [ ] Provedor sobre `modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133` **wireado no
+      registry** (filtro por `codItemCatalogo`/`codigoClasse`, janela de 365 dias) — o cliente
+      (`src/lib/integracoes/comprasGovContratacoes.ts`) já existe e está testado (ver os quatro
+      itens abaixo), mas ainda não está no `REGISTRY_PROVEDORES_PUBLICOS`: a API não tem busca por
+      texto livre (confirmado no spike §4.1), então o wiring depende do matching léxico sobre o
+      catálogo ingerido (item acima) para resolver `termo → codItemCatalogo` primeiro.
+- [x] Usar `valorUnitarioResultado`, nunca `valorUnitarioEstimado` (§9.61a) —
+      `comprasGovContratacoes.ts`; `valorUnitarioEstimado` só existe no schema Zod de parsing, nunca
+      no tipo de saída (confirmado por `grep`, revisão de código e teste de presença — troca por
+      engano derrubaria o teste).
+- [x] Descartar item sem `temResultado` e com `dataCancelamentoPncp` preenchida — idem, testado.
+- [x] Excluir `orgaoEntidadeCnpj === ORGAO_CNPJ` (§9.9) — reusa `cnpjOrgaoProprio()`/`normalizarCnpj()`
+      de `src/lib/domain/orgaoProprio.ts` em vez de reimplementar a regra.
+- [x] Derivar a URL de evidência de `idContratacaoPNCP` → `pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}`
+      — mesmo padrão de `montarUrlEdital()` em `pncp.ts`, testado contra o exemplo real do spike.
 - [ ] Avaliar `modulo-arp` como fonte adicional (traz `linkAtaPNCP` pronto — ver §4.1)
 - [ ] Tratar dispersão: o spike encontrou R$ 0,26 e R$ 96,37 para o mesmo código CATMAT
 - [ ] **Verificação:** três itens que a Câmara compra, conferidos contra o Painel de Preços na web
