@@ -224,8 +224,14 @@ async function gravarPagina<TRaw>(
 }
 
 export interface OpcoesIngestaoCatalogo {
-  /** Limita quantas páginas buscar — só para teste manual/local (docs/ApiPlan.md, M16). */
+  /**
+   * Limita quantas páginas buscar **a partir de `paginaInicial`** — usado tanto para teste
+   * manual/local quanto para dividir uma ingestão grande (CATMAT, 688 páginas) em lotes que cabem
+   * numa invocação serverless (ver `/api/admin/ingerir-catalogo`, que chama isto repetidas vezes).
+   */
   maxPaginas?: number;
+  /** Primeira página deste lote. Default 1 (ingestão completa numa chamada só). */
+  paginaInicial?: number;
   /** Concorrência de páginas simultâneas. Default `CONCORRENCIA_PADRAO` (CLAUDE.md §9.11). */
   concorrencia?: number;
 }
@@ -233,8 +239,14 @@ export interface OpcoesIngestaoCatalogo {
 export interface ResumoIngestaoCatalogo {
   loteId: string;
   fonteChave: string;
+  /** Quantidade de páginas processadas **neste lote** (não o total do catálogo). */
   totalPaginas: number;
   paginasProcessadas: number;
+  /** Primeira e última página deste lote — o chamador usa `paginaFinal + 1` para pedir o próximo. */
+  paginaInicial: number;
+  paginaFinal: number;
+  /** Total real de páginas do catálogo, informado pela API — permite ao chamador saber quando parar. */
+  totalPaginasCatalogo: number;
   linhasLidas: number;
   linhasImportadas: number;
   linhasRejeitadas: number;
@@ -283,20 +295,25 @@ export async function ingerirCatalogoComprasGov<TRaw>(
     throw new Error(`Fonte de referência "${config.fonteChave}" está inativa.`);
   }
 
+  const paginaInicial = Math.max(1, opcoes.paginaInicial ?? 1);
+
   const schemaResposta = schemaRespostaPaginada(config.schemaItem);
-  const primeira = await buscarJSON(montarUrl(config.endpoint, 1), schemaResposta);
+  const primeira = await buscarJSON(montarUrl(config.endpoint, paginaInicial), schemaResposta);
   if (!primeira) {
     throw new Error(
-      `Não foi possível carregar a primeira página do catálogo "${config.fonteChave}".`,
+      `Não foi possível carregar a página ${paginaInicial} do catálogo "${config.fonteChave}".`,
     );
   }
 
-  const totalPaginasReal = Math.max(1, primeira.totalPaginas ?? 1);
-  const totalPaginas = Math.min(
-    totalPaginasReal,
-    opcoes.maxPaginas ?? totalPaginasReal,
-    MAX_PAGINAS_SEGURANCA,
+  const totalPaginasCatalogo = Math.max(1, primeira.totalPaginas ?? 1);
+  // Última página deste lote: limitada pelo tamanho pedido (`maxPaginas`), pelo fim real do
+  // catálogo e pela trava de segurança — nessa ordem de restrição.
+  const paginaFinal = Math.min(
+    paginaInicial + (opcoes.maxPaginas ?? totalPaginasCatalogo) - 1,
+    totalPaginasCatalogo,
+    paginaInicial + MAX_PAGINAS_SEGURANCA - 1,
   );
+  const totalPaginas = paginaFinal - paginaInicial + 1;
 
   const iniciadoEm = new Date();
   const checksum = calcularChecksumSha256(
@@ -305,7 +322,8 @@ export async function ingerirCatalogoComprasGov<TRaw>(
         fonteChave: config.fonteChave,
         endpoint: config.endpoint,
         totalRegistros: primeira.totalRegistros ?? null,
-        totalPaginas,
+        paginaInicial,
+        paginaFinal,
         iniciadoEm: iniciadoEm.toISOString(),
       }),
     ),
@@ -315,17 +333,20 @@ export async function ingerirCatalogoComprasGov<TRaw>(
     data: {
       fonteReferenciaId: fonte.id,
       competencia: iniciadoEm.toISOString().slice(0, 10),
-      urlArquivo: `${BASE_URL}${config.endpoint}`,
+      urlArquivo: `${BASE_URL}${config.endpoint}?pagina=${paginaInicial}-${paginaFinal}`,
       checksum,
       iniciadoEm,
     },
     select: { id: true },
   });
 
-  // Página 1 já foi buscada acima — grava aqui em vez de refazer a requisição.
+  // A primeira página deste lote já foi buscada acima — grava aqui em vez de refazer a requisição.
   const contadorPagina1 = await gravarPagina(config, primeira.resultado);
 
-  const numerosDemaisPaginas = Array.from({ length: totalPaginas - 1 }, (_, i) => i + 2);
+  const numerosDemaisPaginas = Array.from(
+    { length: Math.max(0, paginaFinal - paginaInicial) },
+    (_, i) => paginaInicial + i + 1,
+  );
 
   // Páginas que esgotam as tentativas de retry (`onErro`) não podem só logar: sem gravar isso no
   // lote, uma ingestão real de centenas de páginas rodando sem supervisão perde páginas em
@@ -386,6 +407,9 @@ export async function ingerirCatalogoComprasGov<TRaw>(
     fonteChave: config.fonteChave,
     totalPaginas,
     paginasProcessadas: todosContadores.length,
+    paginaInicial,
+    paginaFinal,
+    totalPaginasCatalogo,
     linhasLidas: totais.lidas,
     linhasImportadas: totais.importadas,
     linhasRejeitadas: totais.rejeitadas,

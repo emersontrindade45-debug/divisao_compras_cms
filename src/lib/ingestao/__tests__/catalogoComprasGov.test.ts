@@ -83,7 +83,7 @@ describe("ingerirCatalogoComprasGov", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(ingerirCatalogoComprasGov(CONFIG_CATALOGO_CATMAT)).rejects.toThrow(
-      /primeira página/,
+      /página 1/,
     );
     expect(mocks.db.loteIngestao.create).not.toHaveBeenCalled();
   });
@@ -130,7 +130,48 @@ describe("ingerirCatalogoComprasGov", () => {
 
     expect(resumo.totalPaginas).toBe(3);
     expect(resumo.paginasProcessadas).toBe(3);
+    expect(resumo.paginaInicial).toBe(1);
+    expect(resumo.paginaFinal).toBe(3);
+    expect(resumo.totalPaginasCatalogo).toBe(688);
     expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("paginaInicial retoma a partir de uma página arbitrária, para dividir uma ingestão grande em lotes", async () => {
+    const paginasPedidas: number[] = [];
+    vi.spyOn(global, "fetch").mockImplementation(async (url) => {
+      const pagina = paginaDaUrl(String(url));
+      paginasPedidas.push(pagina);
+      return respostaPagina([itemCatmat(pagina)], 688, pagina);
+    });
+
+    const resumo = await ingerirCatalogoComprasGov(CONFIG_CATALOGO_CATMAT, {
+      paginaInicial: 300,
+      maxPaginas: 5,
+    });
+
+    expect(paginasPedidas.sort((a, b) => a - b)).toEqual([300, 301, 302, 303, 304]);
+    expect(resumo.paginaInicial).toBe(300);
+    expect(resumo.paginaFinal).toBe(304);
+    expect(resumo.totalPaginas).toBe(5);
+    expect(resumo.totalPaginasCatalogo).toBe(688);
+  });
+
+  it("paginaInicial próxima do fim do catálogo é limitada por totalPaginasCatalogo, não estoura", async () => {
+    const paginasPedidas: number[] = [];
+    vi.spyOn(global, "fetch").mockImplementation(async (url) => {
+      const pagina = paginaDaUrl(String(url));
+      paginasPedidas.push(pagina);
+      return respostaPagina([itemCatmat(pagina)], 688, pagina);
+    });
+
+    const resumo = await ingerirCatalogoComprasGov(CONFIG_CATALOGO_CATMAT, {
+      paginaInicial: 686,
+      maxPaginas: 10, // pediria até a página 695, mas o catálogo só tem 688
+    });
+
+    expect(paginasPedidas.sort((a, b) => a - b)).toEqual([686, 687, 688]);
+    expect(resumo.paginaFinal).toBe(688);
+    expect(resumo.totalPaginas).toBe(3);
   });
 
   it("rejeita a página inteira quando a resposta não bate com o schema Zod, sem interromper as demais", async () => {
