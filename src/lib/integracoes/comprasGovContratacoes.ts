@@ -106,6 +106,8 @@ const itemContratacaoApiSchema = z.object({
   orgaoEntidadeCnpj: z.string().nullish(),
   nomeFornecedor: z.string().nullish(),
   idContratacaoPNCP: z.string().nullish(),
+  /** Número do item dentro da compra no PNCP — usado para montar `identidadeContratacao` (dedupe com o provedor PNCP). */
+  numeroItemPncp: z.number().nullish(),
 });
 
 type ItemContratacaoApi = z.infer<typeof itemContratacaoApiSchema>;
@@ -249,22 +251,33 @@ export interface ItemContratacaoCompraGov {
   fonteUrl: string;
   /** Formato original da API: "{cnpj}-{tipo}-{sequencial}/{ano}". */
   idContratacaoPNCP: string;
+  /** Número do item na compra do PNCP — `null` quando a API não o expõe para este registro. */
+  numeroItemPncp: number | null;
+  /** Ano da compra, parseado de `idContratacaoPNCP` — alimenta `identidadeContratacao` no wiring do registry. */
+  ano: string;
+  /** Sequencial da compra sem zeros à esquerda, parseado de `idContratacaoPNCP` — idem. */
+  numeroSequencial: string;
 }
 
 /**
- * Deriva a URL de evidência do formato `"{cnpj}-{tipo}-{sequencial}/{ano}"`
- * (ex.: `"13672605000170-1-000119/2025"`) para
- * `https://pncp.gov.br/app/editais/{cnpj}/{ano}/{sequencial}` — mesma URL
- * final que `montarUrlEdital()` em `pncp.ts` produz a partir da busca textual,
- * agora a partir de um campo de origem diferente. O sequencial perde os
- * zeros à esquerda (`"000119"` → `"119"`), como no exemplo medido no spike.
+ * Parseia `idContratacaoPNCP` no formato `"{cnpj}-{tipo}-{sequencial}/{ano}"`
+ * (ex.: `"13672605000170-1-000119/2025"`). O sequencial perde os zeros à
+ * esquerda (`"000119"` → `"119"`), como no exemplo medido no spike — mesma
+ * convenção de `identidadeContratacao` que o provedor do PNCP já usa
+ * (`pncp.ts`), para que a deduplicação entre os dois provedores funcione.
  */
-function montarUrlEvidencia(idContratacaoPNCP: string): string | null {
+function parsearIdContratacaoPNCP(
+  idContratacaoPNCP: string,
+): { cnpj: string; ano: string; sequencial: string } | null {
   const match = /^(\d{14})-\d+-(\d+)\/(\d{4})$/.exec(idContratacaoPNCP);
   if (!match) return null;
   const [, cnpj, sequencialComZeros, ano] = match;
-  const sequencial = String(Number(sequencialComZeros));
-  return `https://pncp.gov.br/app/editais/${cnpj}/${ano}/${sequencial}`;
+  return { cnpj, ano, sequencial: String(Number(sequencialComZeros)) };
+}
+
+/** https://pncp.gov.br/app/editais/{cnpj}/{ano}/{sequencial} — mesma URL final que `montarUrlEdital()` em `pncp.ts` produz a partir da busca textual. */
+function montarUrlEvidencia(partes: { cnpj: string; ano: string; sequencial: string }): string {
+  return `https://pncp.gov.br/app/editais/${partes.cnpj}/${partes.ano}/${partes.sequencial}`;
 }
 
 // Não existe campo de data/flag de cancelamento nesta API (ver correção de 2026-08-07 no
@@ -293,8 +306,8 @@ function mapearItem(raw: ItemContratacaoApi): ItemContratacaoCompraGov | null {
   if (!cnpjOrgao || cnpjOrgao === cnpjOrgaoProprio()) return null;
 
   if (!raw.idContratacaoPNCP) return null;
-  const fonteUrl = montarUrlEvidencia(raw.idContratacaoPNCP);
-  if (!fonteUrl) return null;
+  const partes = parsearIdContratacaoPNCP(raw.idContratacaoPNCP);
+  if (!partes) return null;
 
   if (!raw.dataResultado) return null;
   const dataResultado = new Date(raw.dataResultado);
@@ -310,8 +323,11 @@ function mapearItem(raw: ItemContratacaoApi): ItemContratacaoCompraGov | null {
     dataResultado,
     orgaoEntidadeCnpj: cnpjOrgao,
     nomeFornecedorVencedor: raw.nomeFornecedor ?? "",
-    fonteUrl,
+    fonteUrl: montarUrlEvidencia(partes),
     idContratacaoPNCP: raw.idContratacaoPNCP,
+    numeroItemPncp: raw.numeroItemPncp ?? null,
+    ano: partes.ano,
+    numeroSequencial: partes.sequencial,
   };
 }
 
