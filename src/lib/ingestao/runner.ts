@@ -141,8 +141,14 @@ export async function executarIngestao<TLinhaBruta>(
     }
   }
 
+  // `createMany` com `skipDuplicates` pode gravar MENOS linhas do que `validas.length`
+  // quando a constraint `@@unique([fonteReferenciaId, codigo, competencia, uf])` colide
+  // (ex.: reingerir a mesma competência depois de corrigir um arquivo). `linhasImportadas`
+  // é a auditoria da rodada (docs/ApiPlan.md §3.2) — reportar `validas.length` aqui mentiria
+  // sobre quantas linhas de fato entraram na tabela sempre que houvesse duplicata pulada.
+  let linhasImportadas = 0;
   if (validas.length > 0) {
-    await db.precoReferencia.createMany({
+    const resultado = await db.precoReferencia.createMany({
       data: validas.map((preco) => ({
         fonteReferenciaId: fonte.id,
         loteIngestaoId: lote.id,
@@ -162,13 +168,14 @@ export async function executarIngestao<TLinhaBruta>(
       })),
       skipDuplicates: true,
     });
+    linhasImportadas = resultado.count;
   }
 
   await db.loteIngestao.update({
     where: { id: lote.id },
     data: {
       linhasLidas: linhasBrutas.length,
-      linhasImportadas: validas.length,
+      linhasImportadas,
       linhasRejeitadas: motivosRejeicao.length,
       concluidoEm: new Date(),
     },
@@ -178,7 +185,7 @@ export async function executarIngestao<TLinhaBruta>(
     loteId: lote.id,
     sucesso: true,
     linhasLidas: linhasBrutas.length,
-    linhasImportadas: validas.length,
+    linhasImportadas,
     linhasRejeitadas: motivosRejeicao.length,
     motivosRejeicao,
   };

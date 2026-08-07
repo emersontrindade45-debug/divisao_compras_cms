@@ -57,11 +57,19 @@ export interface PromocaoPermitida {
  * evidência. Esse caminho existe no módulo de sites (`CapturaEvidencia`), que
  * captura URL + data/hora + arquivo — e é para lá que o usuário é mandado.
  *
- * `preco_referencia` é promovível como `contratacao_publica`/`painel_precos`:
- * um `PrecoReferencia` só existe porque o runner de ingestão (M15) já exigiu
- * fonte + competência + evidência (`urlEvidencia`) no momento da gravação —
- * ao contrário do achado de site aberto, não há metadado de conformidade
- * fabricado na promoção.
+ * `preco_referencia` é promovível hoje sem restrição adicional — mas essa é
+ * uma lacuna consciente, não uma garantia. `PrecoReferencia.urlEvidencia` é
+ * **opcional** no schema (`String?`) e no runner de ingestão
+ * (`PrecoReferenciaNormalizado.urlEvidencia`); nada valida ou rejeita uma
+ * linha sem evidência antes de gravar. A promoção herda esse buraco: nada
+ * aqui impede promover um candidato `preco_referencia` sem `urlEvidencia`. A
+ * razão de não travar isso já em M15 é que publicações como o SINAPI vêm como
+ * **um arquivo por competência**, não um registro por item com URL própria —
+ * então "exigir URL por linha" pode ser a regra errada para esse formato.
+ * M16+ precisa decidir, por fonte, se `urlEvidencia` (ou algum substituto,
+ * como referenciar o arquivo do lote) é obrigatório antes de promover — e daí
+ * sim endurecer esta função. Até lá, tratar `preco_referencia` como
+ * automaticamente conforme é uma suposição a revisitar, não um fato do código.
  *
  * Função pura: sem I/O, sem import de `components/` (CLAUDE.md §9.2).
  */

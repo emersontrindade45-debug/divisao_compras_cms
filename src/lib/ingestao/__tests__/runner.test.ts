@@ -133,6 +133,34 @@ describe("executarIngestao", () => {
     });
   });
 
+  it("reporta linhasImportadas pelo count real do createMany, não pelo total de linhas válidas", async () => {
+    // 3 linhas válidas, mas o banco só grava 2 — skipDuplicates pulou 1 por
+    // colidir com a constraint @@unique (ex.: reingestão da mesma competência).
+    const config = configBase({
+      parsearLinhas: vi.fn().mockReturnValue([
+        { codigo: "001", descricao: "Item A", valor: "10.00" },
+        { codigo: "002", descricao: "Item B", valor: "20.00" },
+        { codigo: "003", descricao: "Item C", valor: "30.00" },
+      ]),
+    });
+    mocks.db.precoReferencia.createMany.mockResolvedValue({ count: 2 });
+
+    const resumo = await executarIngestao(config);
+
+    expect(resumo.linhasImportadas).toBe(2);
+    expect(resumo.linhasLidas).toBe(3);
+    expect(resumo.linhasRejeitadas).toBe(0);
+    expect(mocks.db.loteIngestao.update).toHaveBeenCalledWith({
+      where: { id: LOTE_ID },
+      data: {
+        linhasLidas: 3,
+        linhasImportadas: 2,
+        linhasRejeitadas: 0,
+        concluidoEm: expect.any(Date),
+      },
+    });
+  });
+
   it("registra erro do parser sem gravar nenhuma linha", async () => {
     const config = configBase({
       parsearLinhas: vi.fn(() => {
