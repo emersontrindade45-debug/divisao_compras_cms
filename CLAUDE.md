@@ -751,3 +751,19 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     bundler do Next; se precisar, documentar a ausência do marcador como decisão deliberada (não
     esquecimento) e confirmar que o módulo não é alcançável a partir de `components/` — que é o
     risco real que o marcador existe para prevenir.
+63. **Spike que confirma o envelope da resposta não confirma o payload da requisição nem todo
+    campo do item — cada um se verifica separadamente, e "não capturado pelo spike" precisa ser
+    resolvido antes do merge, não carregado como dívida.** O cliente do `modulo-contratacoes`
+    (M16) foi mergeado com `dataInicial`/`dataFinal` como nomes de parâmetro de data — nunca
+    confirmados contra a API, o próprio comentário do arquivo dizia isso — e com `descricaoItem`/
+    `orgaoEntidadeRazaoSocial`/`dataCancelamentoPncp`, nenhum dos quais existe na resposta real.
+    Passou por `dev`, `code-reviewer` e `verifier` porque nenhum dos três fez uma chamada HTTP real
+    a esse endpoint específico: os testes usavam um fixture que replicava os mesmos nomes
+    inventados do código, então bateram certo por construção, não por verificação (mesmo modo de
+    falha do §9.39 — "teste que passa pelo motivo errado" — só que no nível do fixture, não da
+    asserção). A correção só apareceu ao retomar o trabalho seguinte (wiring no registry) e tentar
+    montar uma chamada real: `curl` devolveu `400`/nomes ausentes, e o OpenAPI do backend
+    (`/v3/api-docs`) confirmou os nomes corretos. Regra: quando o código sinalizar uma premissa
+    como "não verificada contra a API ao vivo", isso é bloqueante para considerar o componente
+    pronto — resolver antes do merge (uma chamada real basta) ou, se adiado por decisão explícita,
+    o merge não pode carregar checkbox `[x]` para as partes que dependem dela.

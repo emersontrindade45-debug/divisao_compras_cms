@@ -316,11 +316,35 @@ cliente do PNCP faz desde o M14.0.
       `comprasGovContratacoes.ts`; `valorUnitarioEstimado` só existe no schema Zod de parsing, nunca
       no tipo de saída (confirmado por `grep`, revisão de código e teste de presença — troca por
       engano derrubaria o teste).
-- [x] Descartar item sem `temResultado` e com `dataCancelamentoPncp` preenchida — idem, testado.
+- [x] Descartar item sem `temResultado` e contratação cancelada — idem, testado. **Correção de
+      2026-08-07:** o campo `dataCancelamentoPncp` citado aqui **não existe** na API real —
+      substituído por heurística sobre `situacaoCompraItemNome` (ver nota abaixo).
 - [x] Excluir `orgaoEntidadeCnpj === ORGAO_CNPJ` (§9.9) — reusa `cnpjOrgaoProprio()`/`normalizarCnpj()`
       de `src/lib/domain/orgaoProprio.ts` em vez de reimplementar a regra.
 - [x] Derivar a URL de evidência de `idContratacaoPNCP` → `pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}`
       — mesmo padrão de `montarUrlEdital()` em `pncp.ts`, testado contra o exemplo real do spike.
+
+**Correção de 2026-08-07 — os quatro itens acima estavam testados contra um fixture errado, não
+contra a API real.** Ao retomar o wiring, uma chamada HTTP real (200, `tamanhoPagina=10`,
+`dataInclusaoPncpInicial`/`dataInclusaoPncpFinal=2025-01`) e o OpenAPI do backend
+(`/v3/api-docs`) revelaram que `comprasGovContratacoes.ts` usava nomes de campo inventados, nunca
+confirmados contra a API:
+- Parâmetros de data: eram `dataInicial`/`dataFinal`; os reais e **obrigatórios** são
+  `dataInclusaoPncpInicial`/`dataInclusaoPncpFinal` — toda chamada real teria devolvido erro.
+- `descricaoItem` não existe — o campo real é `descricaoResumida`.
+- `orgaoEntidadeRazaoSocial` não existe — removido do tipo de saída.
+- `dataCancelamentoPncp` não existe — não há campo de data/flag de cancelamento nesta API.
+  Substituído por checagem de `situacaoCompraItemNome` (regex `/cancelad/i`), heurística por não
+  haver enum documentado nem exemplo real de item cancelado à mão — sinalizado como tal no código.
+- `unidadeMedida` existe (ex. `"Unidade  "`, com espaços à direita) e não estava sendo capturado —
+  `CandidatoSimilaridade.unidade` é obrigatório e este cliente não o preenchia.
+
+O fixture de teste (`itemDe()`) usava os mesmos nomes inventados que o código de produção, então a
+suíte passava sem exercitar a resposta real — nenhuma revisão anterior (dev, code-reviewer,
+verifier) pegou isso porque nenhuma fez uma chamada HTTP de verdade a este endpoint específico
+antes de aprovar. As regras de negócio em si (preço homologado, exclusão do próprio órgão,
+evidência derivável) continuam corretas — só os nomes de campo de origem mudaram. Corrigido e
+recoberto por 22 testes (era 21) antes de prosseguir para o wiring no registry.
 - [x] Avaliar `modulo-arp` como fonte adicional (traz `linkAtaPNCP` pronto — ver §4.1) — **decisão:
       adiar para o M20**, mesmo tratamento do Tier B (§2.2). O próprio §4.1a já classificou como
       "candidato adicional", não lacuna — `modulo-contratacoes` cobre o caso geral (item de
