@@ -304,14 +304,22 @@ cliente do PNCP faz desde o M14.0.
       enquanto a tabela estiver vazia (ingestão real ainda não rodou em produção), avisado via log;
       perda de recall aceita e documentada (`ItemCatalogoReferencia` não guarda os nomes textuais
       de grupo/classe/subclasse que o catálogo por request expõe).
-- [ ] Matching local por sobreposição léxica sobre o catálogo ingerido (reusar
-      `src/lib/similaridade/sobreposicaoLexical.ts`)
-- [ ] Provedor sobre `modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133` **wireado no
-      registry** (filtro por `codItemCatalogo`/`codigoClasse`, janela de 365 dias) — o cliente
-      (`src/lib/integracoes/comprasGovContratacoes.ts`) já existe e está testado (ver os quatro
-      itens abaixo), mas ainda não está no `REGISTRY_PROVEDORES_PUBLICOS`: a API não tem busca por
-      texto livre (confirmado no spike §4.1), então o wiring depende do matching léxico sobre o
-      catálogo ingerido (item acima) para resolver `termo → codItemCatalogo` primeiro.
+- [x] Matching local por termo → `codItemCatalogo` sobre o catálogo ingerido
+      (`src/lib/similaridade/matchingCatalogoLocal.ts`) — query `ILIKE` parametrizada (Prisma
+      `contains`/`mode: "insensitive"`) pelo token mais longo do termo, `take` limitado a 400,
+      pontuação final por sobreposição de tokens raizados (reusa `tokenizar`/`raizPlural` de
+      `texto.ts`, não `sobreposicaoLexical.ts` — aquele espera `CandidatoSimilaridade[]`, não linha
+      de catálogo). Sem índice trigram/full-text — decisão consciente, a chamada de rede ao
+      Compras.gov (22–40s a frio) domina o tempo total, não a query local.
+- [x] Provedor sobre `modulo-contratacoes/2_consultarItensContratacoes_PNCP_14133` **wireado no
+      registry** (`src/lib/similaridade/provedorComprasGovContratacoes.ts`,
+      `chave: "compras_gov_contratacoes"` em `REGISTRY_PROVEDORES_PUBLICOS`) — busca por até 5
+      códigos candidatos do matching local, janela de 730 dias (mesma convenção de
+      `comprasGov.ts`), concorrência limitada a 3 (§9.11), `tipoCandidato: "contratacao_publica"`
+      (não `preco_referencia` — é consulta ao vivo, não dado ingerido, ver §3.3/§4.2).
+      `identidadeContratacao` preenchido quando `numeroItemPncp` existe, alimentando o dedupe com o
+      PNCP. Tabela de catálogo vazia (estado real de produção até a ingestão completa rodar) resulta
+      em `[]` rápido, sem erro — o provedor fica um no-op seguro até lá.
 - [x] Usar `valorUnitarioResultado`, nunca `valorUnitarioEstimado` (§9.61a) —
       `comprasGovContratacoes.ts`; `valorUnitarioEstimado` só existe no schema Zod de parsing, nunca
       no tipo de saída (confirmado por `grep`, revisão de código e teste de presença — troca por
@@ -353,7 +361,11 @@ recoberto por 22 testes (era 21) antes de prosseguir para o wiring no registry.
       construir os dois de uma vez arrisca o mesmo erro da §9.35 (justificativa por plausibilidade,
       não por evidência). Reabrir no M20 se o uso real do `modulo-contratacoes` mostrar lacuna em
       compras via ata.
-- [ ] Tratar dispersão: o spike encontrou R$ 0,26 e R$ 96,37 para o mesmo código CATMAT
+- [x] Tratar dispersão: o spike encontrou R$ 0,26 e R$ 96,37 para o mesmo código CATMAT — reusa
+      `excluirDiscrepantes()` de `src/lib/domain/priceStats.ts` (já existente, não reimplementado),
+      aplicado por grupo de `codItemCatalogo` com tolerância `"aquisicao"`, dentro do provedor
+      antes de mapear para `CandidatoSimilaridade`. Confirmado por mutação (desligar o filtro faz o
+      teste cair) por dois agentes independentes (dev e verifier).
 - [ ] **Verificação:** três itens que a Câmara compra, conferidos contra o Painel de Preços na web
 - [ ] **Verificação:** a URL de evidência gerada aberta de verdade no navegador (§9.8)
 
@@ -567,7 +579,14 @@ escopo desta execução), 37 pendentes.
 
 **Estado em 2026-08-07 (continuação — fundação de catálogo do M16):** +4 tarefas concluídas
 (`ItemCatalogoReferencia`, upsert de `FonteReferencia` catmat/catser, ingestão paginada do CATMAT,
-migração do CATSER para a tabela local com fallback) — 22 concluídas, 33 pendentes. Matching léxico
-local, wiring do provedor `modulo-contratacoes` no registry, tratamento de dispersão e a ingestão
-completa do CATMAT (688 páginas) em produção continuam pendentes; os três primeiros dependem uns dos
-outros nessa ordem.
+migração do CATSER para a tabela local com fallback) — 22 concluídas, 33 pendentes.
+
+**Estado em 2026-08-07 (continuação — wiring do provedor no registry):** +9 tarefas concluídas
+(matching local, provedor wireado, as quatro regras de negócio do cliente re-verificadas contra a
+API real após a correção da §9.63, `modulo-arp` decidido/adiado, tratamento de dispersão) —
+**31 concluídas, 26 pendentes**. Nesse meio-tempo, uma verificação contra a API real revelou que o
+cliente `comprasGovContratacoes.ts` (mergeado antes, "verificado" por duas rodadas de revisão) usava
+nomes de parâmetro/campo inventados — corrigido, com lição nova no CLAUDE.md (§9.63). O que falta do
+M16: a ingestão completa do CATMAT (688 páginas) em produção — exige autorização explícita do
+usuário — e as duas verificações manuais finais (3 itens conferidos contra o Painel de Preços na
+web; URL de evidência aberta de verdade no navegador).
