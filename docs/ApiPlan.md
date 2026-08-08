@@ -543,21 +543,26 @@ comentário do nosso próprio código admite.
       há URL estável por caderno.
 - [x] **Decisão com o usuário depois do spike, não antes:** (a) ingestão semiautomática com
       conferência humana; (b) cadastro manual dos postos relevantes como tabela interna, tratando o
-      CADTERC como referência documental; (c) descartar. **Registrada como recomendação do spike,
-      não como decisão executada** — este agente não tem acesso direto ao usuário nesta execução;
-      a recomendação (descartar ingestão automática; considerar cadastro manual como trabalho
-      futuro separado, sujeito a demanda real) está em `ApiPlan-M18-spike.md` §6-7, aguardando
-      confirmação do usuário antes de qualquer código de cadastro ser escrito.
-- [ ] Ingestão ou cadastro, conforme a decisão acima — **não iniciado**: a decisão do usuário sobre
-      (b) vs. (c) ainda não foi tomada: ver `ApiPlan-M18-spike.md` §7.
-- [ ] Gerar automaticamente a justificativa de uso de tabela estadual junto com a fonte — depende
-      do item acima; não faz sentido sem uma fonte real cadastrada.
-- [ ] **Verificação:** um caderno conferido posto a posto contra o documento oficial — não
-      aplicável enquanto não houver ingestão/cadastro.
+      CADTERC como referência documental; (c) descartar. **Decidido com o usuário em 2026-08-08:
+      (c) descartar.** Mesmo tratamento do Tier C do plano (§2.3) — decisão fundamentada de não
+      integrar, não esquecimento. Motivo: nenhum dado estruturado para ingerir (só PDF de leitura
+      humana), 2 dos 4 links de caderno já quebrados na própria página oficial no momento do spike
+      (evidência medida, não risco hipotético), e "copeiragem" — citada no objetivo original deste
+      milestone — não aparece em nenhum caderno hoje publicado. Detalhe completo em
+      `ApiPlan-M18-spike.md` §6-7.
+- [x] Ingestão ou cadastro — **não aplicável, milestone descartado.** Nenhum model, provedor ou
+      parser foi implementado. A fundação do M15 (`FonteReferencia`, `LoteIngestao`,
+      `PrecoReferencia`, runner genérico) comporta a opção (b) — cadastro manual — se e quando
+      surgir demanda real de contratação coberta por algum caderno existente (limpeza, vigilância,
+      recepção); nesse caso reabrir como milestone novo, não como continuação deste M18.
+- [x] Justificativa automática de uso de tabela estadual — **não aplicável, milestone descartado.**
+- [x] **Verificação:** não aplicável — sem ingestão/cadastro, não há caderno a conferir.
 
 **Peso legal.** Tabela de referência **estadual**, não federal — usável, mas com enquadramento mais
 fraco que o do SINAPI na IN 65, e provavelmente exigindo justificativa registrada no processo. O
-sistema deve gerar essa justificativa, não deixar para o pesquisador lembrar.
+sistema deve gerar essa justificativa, não deixar para o pesquisador lembrar. **Irrelevante para
+este projeto após o descarte** — mantido aqui só como registro do enquadramento legal que valeria
+se a fonte fosse reaberta no futuro.
 
 ### M19 — Qualificação de fornecedor
 
