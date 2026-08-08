@@ -60,7 +60,15 @@ export async function registrarProposta(input: unknown): Promise<ActionResult<{ 
   const parsed = createPropostaSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
 
-  const cotacao = await db.cotacao.findUnique({ where: { id: parsed.data.cotacaoId } });
+  // select explícito (CLAUDE.md §9.46): sem ele o Prisma pediria todas as
+  // colunas escalares de Cotacao, incluindo qualquer uma futura.
+  const cotacao = await db.cotacao.findUnique({
+    where: { id: parsed.data.cotacaoId },
+    select: {
+      processoId: true,
+      fornecedor: { select: { statusQualificacao: true } },
+    },
+  });
   if (!cotacao) return { error: "Cotação não encontrada" };
 
   const validacao = validarProposta(
@@ -80,15 +88,35 @@ export async function registrarProposta(input: unknown): Promise<ActionResult<{ 
     return { error: blockViolations[0]!.rule };
   }
 
-  const proposta = await db.proposta.create({ data: parsed.data });
+  // Alerta de qualificação (M19): espelha o status já consultado do
+  // fornecedor no momento em que a proposta é registrada. Não dispara nova
+  // consulta aqui — qualificação e registro de proposta são ações distintas
+  // (a consulta pode ter sido feita antes, no cadastro do fornecedor).
+  const proposta = await db.proposta.create({
+    data: { ...parsed.data, statusQualificacaoFornecedor: cotacao.fornecedor.statusQualificacao },
+  });
 
   await registrarAuditoria({
     userId: user.id,
     processoId: cotacao.processoId,
     cotacaoId: parsed.data.cotacaoId,
     acao: "registrar_proposta",
-    detalhes: { propostaId: proposta.id, statusGeral: parsed.data.statusGeral },
+    detalhes: {
+      propostaId: proposta.id,
+      statusGeral: parsed.data.statusGeral,
+      statusQualificacaoFornecedor: cotacao.fornecedor.statusQualificacao,
+    },
   });
+
+  if (
+    cotacao.fornecedor.statusQualificacao === "sancionado" ||
+    cotacao.fornecedor.statusQualificacao === "cadastro_irregular"
+  ) {
+    console.warn(
+      `[Qualificacao] Proposta ${proposta.id} registrada para fornecedor com status ` +
+        `${cotacao.fornecedor.statusQualificacao} — exige análise crítica antes de aceitar (IN 65/2021).`,
+    );
+  }
 
   return { data: { id: proposta.id } };
 }

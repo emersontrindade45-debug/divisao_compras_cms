@@ -24,10 +24,41 @@ export default async function FornecedoresPage() {
   await requireAuth();
 
   const fornecedoresDb = await db.fornecedor.findMany({
-    include: {
-      historicoCotacoes: { orderBy: { data: "desc" } },
+    select: {
+      id: true,
+      cnpj: true,
+      razaoSocial: true,
+      nomeFantasia: true,
+      categoria: true,
+      cidade: true,
+      estado: true,
+      responsavelContato: true,
+      email: true,
+      telefone: true,
+      score: true,
+      totalCotacoes: true,
+      totalRespostas: true,
+      taxaResposta: true,
+      ultimaResposta: true,
+      status: true,
+      historicoCotacoes: {
+        select: {
+          id: true,
+          processoNumero: true,
+          data: true,
+          statusResposta: true,
+          valorProposto: true,
+        },
+        orderBy: { data: "desc" },
+      },
       cotacoes: {
-        include: { processo: { select: { numero: true } } },
+        select: {
+          id: true,
+          status: true,
+          dataEnvio: true,
+          valorProposto: true,
+          processo: { select: { numero: true } },
+        },
         orderBy: { dataEnvio: "desc" },
       },
     },

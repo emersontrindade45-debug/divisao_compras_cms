@@ -13,7 +13,10 @@ export async function criarFornecedor(input: unknown): Promise<ActionResult<{ id
   const parsed = createFornecedorSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
 
-  const existente = await db.fornecedor.findUnique({ where: { cnpj: parsed.data.cnpj } });
+  const existente = await db.fornecedor.findUnique({
+    where: { cnpj: parsed.data.cnpj },
+    select: { id: true },
+  });
   if (existente) return { error: "CNPJ já cadastrado" };
 
   const fornecedor = await db.fornecedor.create({ data: parsed.data });
@@ -32,7 +35,7 @@ export async function atualizarFornecedor(id: string, input: unknown): Promise<A
   const parsed = updateFornecedorSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
 
-  const fornecedor = await db.fornecedor.findUnique({ where: { id } });
+  const fornecedor = await db.fornecedor.findUnique({ where: { id }, select: { id: true } });
   if (!fornecedor) return { error: "Fornecedor não encontrado" };
 
   await db.fornecedor.update({ where: { id }, data: parsed.data });
@@ -65,6 +68,24 @@ export async function listarFornecedores(filtros?: {
         : {}),
       ...(filtros?.cidade ? { cidade: { contains: filtros.cidade, mode: "insensitive" } } : {}),
       ...(filtros?.categoria ? { categoria: { has: filtros.categoria } } : {}),
+    },
+    select: {
+      id: true,
+      cnpj: true,
+      razaoSocial: true,
+      nomeFantasia: true,
+      categoria: true,
+      cidade: true,
+      estado: true,
+      responsavelContato: true,
+      email: true,
+      telefone: true,
+      score: true,
+      totalCotacoes: true,
+      totalRespostas: true,
+      taxaResposta: true,
+      ultimaResposta: true,
+      status: true,
     },
     orderBy: { razaoSocial: "asc" },
   });

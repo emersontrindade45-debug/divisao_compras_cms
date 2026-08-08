@@ -149,6 +149,18 @@ enum StatusResposta {
   recusado
 }
 
+// Resultado consolidado de uma consulta de qualificação (M19): cruza CEIS/CNEP
+// (sanções, Portal da Transparência) e situação cadastral de CNPJ (Receita
+// Federal via BrasilAPI). `nao_verificado` é o estado inicial e também o
+// resultado de uma consulta negada por falta de token — nunca silenciosamente
+// tratado como "sem sanção" (CLAUDE.md §9.45, fail-closed).
+enum StatusQualificacao {
+  regular
+  sancionado
+  cadastro_irregular
+  nao_verificado
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 model User {
@@ -370,13 +382,49 @@ model Fornecedor {
   taxaResposta       Decimal          @default(0) @db.Decimal(5, 2)
   ultimaResposta     DateTime?
   status             StatusFornecedor @default(ativo)
+  /**
+   * Espelho da qualificação mais recente (M19), para listar/filtrar fornecedores
+   * sem precisar de subquery em `qualificacoes`. A fonte de verdade fica em
+   * `QualificacaoFornecedor` — este campo é atualizado junto, na mesma
+   * transação, sempre que uma consulta nova roda.
+   */
+  statusQualificacao StatusQualificacao @default(nao_verificado)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
   cotacoes          Cotacao[]
   historicoCotacoes HistoricoCotacao[]
+  qualificacoes     QualificacaoFornecedor[]
 
   @@map("fornecedores")
+}
+
+/**
+ * Histórico de consultas de qualificação de um fornecedor (M19): CEIS/CNEP
+ * (sanções, Portal da Transparência) e situação cadastral de CNPJ (Receita
+ * Federal via BrasilAPI). Um registro por consulta — histórico completo, nunca
+ * sobrescrito, com a data em que a consulta foi feita (não a data do evento
+ * sancionador), porque a mesma exigência de rastreabilidade que vale para preço
+ * (fonte + data + evidência, CLAUDE.md §1) vale para qualificação de fornecedor.
+ */
+model QualificacaoFornecedor {
+  id                  String             @id @default(cuid())
+  fornecedorId        String
+  dataConsulta        DateTime
+  statusQualificacao  StatusQualificacao
+  /** true quando a consulta foi negada por ausência/invalidez de token — nunca confundido com "regular". */
+  consultaNegada      Boolean            @default(false)
+  /** Achados de CEIS/CNEP, ou null quando a consulta foi negada antes de tentar. */
+  sancoesEncontradas  Json?
+  /** Situação cadastral da Receita (ex.: "ATIVA", "BAIXADA"), ou null quando a consulta foi negada. */
+  situacaoCadastral   String?
+  motivoNegacao       String?
+  createdAt           DateTime           @default(now())
+
+  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Cascade)
+
+  @@index([fornecedorId, dataConsulta])
+  @@map("qualificacoes_fornecedores")
 }
 
 model HistoricoCotacao {
@@ -429,6 +477,12 @@ model Proposta {
   dataProposta        DateTime?
   responsavel         String?
   observacoes         String?
+  /**
+   * Alerta de qualificação (M19): espelha `Fornecedor.statusQualificacao` no
+   * momento em que a proposta é revisada, para o checklist mostrar o achado
+   * sem precisar de join. `null` quando o fornecedor nunca foi consultado.
+   */
+  statusQualificacaoFornecedor StatusQualificacao?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 

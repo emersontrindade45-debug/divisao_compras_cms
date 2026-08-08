@@ -564,13 +564,27 @@ sistema deve gerar essa justificativa, não deixar para o pesquisador lembrar.
 **Objetivo.** Não é preço: é o outro lado da conformidade. Hoje o checklist de proposta e o score de
 fornecedor não consultam nenhuma base oficial.
 
-- [ ] Cliente de consulta a CEIS/CNEP (sanções, via Portal da Transparência — token gratuito)
-- [ ] Consulta de situação cadastral de CNPJ
-- [ ] Gravar o resultado **com a data da consulta** no `HistoricoCotacao` / checklist
-- [ ] Alerta na proposta quando o fornecedor estiver sancionado
-- [ ] Guarda de token: ausência **nega** a consulta e sinaliza (§9.45)
-- [ ] **Verificação:** um fornecedor sancionado conhecido é detectado
-- [ ] **Verificação:** por mutação, remover o token e confirmar que a consulta é negada, não pulada
+- [x] Cliente de consulta a CEIS/CNEP (sanções, via Portal da Transparência — token gratuito) —
+      `src/lib/integracoes/portalTransparencia.ts`
+- [x] Consulta de situação cadastral de CNPJ — `src/lib/integracoes/situacaoCadastralCnpj.ts`
+      (BrasilAPI, ver §4.3 para o porquê da escolha)
+- [x] Gravar o resultado **com a data da consulta** — model novo `QualificacaoFornecedor`
+      (histórico, um registro por consulta, nunca sobrescrito) + espelho em
+      `Fornecedor.statusQualificacao` e `Proposta.statusQualificacaoFornecedor`. Não foi plugado em
+      `HistoricoCotacao` porque aquele model é sobre *resposta a cotação* (SLA/prazo), um eixo
+      diferente de *qualificação regulatória do fornecedor* — misturar os dois obrigaria a linha de
+      `HistoricoCotacao` a existir mesmo sem cotação nenhuma. Ver §4.3.
+- [x] Alerta na proposta quando o fornecedor estiver sancionado — `registrarProposta` grava
+      `statusQualificacaoFornecedor` na proposta e emite log de alerta quando o status é
+      `sancionado`/`cadastro_irregular`
+- [x] Guarda de token: ausência **nega** a consulta e sinaliza (§9.45) — `if (!token)` em
+      `consultarSancoesCnpj`, nunca `if (token && ...)`
+- [ ] **Verificação:** um fornecedor sancionado conhecido é detectado — **não verificado contra a
+      API real** (ver limitação em §4.3: obtenção de token do Portal da Transparência é cadastro
+      manual por e-mail, fora do alcance deste ambiente). Testado com fixture MOCK documentado
+      como tal em `portalTransparencia.test.ts`
+- [x] **Verificação:** por mutação, remover o token e confirmar que a consulta é negada, não
+      pulada — confirmado em duas camadas (cliente e domínio/action), ver §4.3
 
 ### M20 — Reavaliação do Tier B e estudo de sobreposição
 
@@ -680,6 +694,99 @@ identidade para matching local, sem preço. Preço continua vindo só de fonte q
 publica preço (o provedor `modulo-contratacoes` já construído, ou uma futura ingestão de
 `modulo-pesquisa-preco`), nunca do catálogo. Migration em dev primeiro, aplicação em produção só
 com autorização explícita (mesmo padrão do M15, §9.19/§9.20/CLAUDE.md §8).
+
+### 4.3 Registro do M19 — executado em 2026-08-07
+
+Medido contra a API real de duas fontes distintas: `api.portaldatransparencia.gov.br` (CEIS/CNEP) e
+`brasilapi.com.br` (situação cadastral). Nada aqui é dedução de memória (CLAUDE.md §9.63).
+
+**(a) CEIS/CNEP — Portal da Transparência (CGU).** Endpoints confirmados pelo OpenAPI real
+(`GET /v3/api-docs`), não adivinhados:
+
+```
+GET /api-de-dados/ceis?codigoSancionado={cnpj}&pagina=1
+GET /api-de-dados/cnep?codigoSancionado={cnpj}&pagina=1
+Header: chave-api-dados: <token>
+```
+
+Resposta é array nu (`CeisDTO[]`/`CnepDTO[]`) — sem envelope de paginação documentado no
+`securitySchemes`, mas o parâmetro `pagina` é obrigatório, então o cliente assume paginação e lê só
+a primeira página (suficiente para o caso de uso: existe/não existe sanção; paginação completa fica
+como próximo passo se o volume por CNPJ um dia justificar). Campos usados
+(`sancionado.nome`, `tipoSancao.descricaoResumida`, `orgaoSancionador.nome`, `dataInicioSancao`,
+`dataFimSancao`, `numeroProcesso`, `linkPublicacao`) vêm do schema `CeisDTO`/`CnepDTO` do OpenAPI.
+
+Autenticação confirmada por chamada real: sem header `chave-api-dados`, HTTP 401 com corpo
+`{"Erro na API": "Chave de API não informada!..."}`; com token inválido, HTTP 401 com
+`{"Erro na API": "Chave de API inválida!"}` — mesma família de erro, mensagens diferentes,
+confirmando que o mecanismo é o `apiKey` em header declarado no `securitySchemes`, não Bearer.
+
+**Limitação registrada explicitamente:** obter um token de produção do Portal da Transparência é
+cadastro manual por e-mail (`portaldatransparencia.gov.br/api-de-dados/cadastrar-email`) — não há
+endpoint de autoatendimento, e este ambiente de execução não tem acesso a caixa de e-mail nem
+capacidade de completar esse cadastro. **Não foi possível consultar um CNPJ real e confirmar um
+fornecedor sancionado contra a API viva.** O formato de requisição/resposta foi validado contra o
+OpenAPI publicado e contra o comportamento real de erro (401 nos dois casos de token
+ausente/inválido); o caminho de sucesso com resultado não-vazio permanece **hipótese não
+verificada ao vivo** — mesmo status que a §9.63 exige declarar explicitamente. O teste de "fornecedor
+sancionado detectado" usa um fixture com o formato do schema OpenAPI real, mas conteúdo (nome,
+órgão, sanção) inventado — documentado como MOCK no cabeçalho do teste, não como caso real.
+
+**(b) Situação cadastral de CNPJ — decisão de fonte.** Avaliadas três opções:
+
+| Fonte | Token | Notas |
+|---|---|---|
+| Receita Federal (API oficial) | Sim, pago/restrito | Sem endpoint público gratuito conhecido para este uso |
+| Minha Receita | Não | Faz proxy síncrono ao site da Receita a cada chamada — mais sujeita a instabilidade sob carga, schema menos documentado |
+| **BrasilAPI** (escolhida) | **Não** | Infraestrutura própria, schema documentado, `situacao_cadastral`/`descricao_situacao_cadastral` estruturados |
+
+Confirmado por chamada real (`GET https://brasilapi.com.br/api/cnpj/v1/{cnpj}`, só dígitos):
+
+- CNPJ existente (`00000000000191`, Banco do Brasil — CNPJ público, usado só como amostra de
+  formato): HTTP 200, `descricao_situacao_cadastral: "ATIVA"`, `situacao_cadastral: 2`,
+  `data_situacao_cadastral`, `razao_social`.
+- CNPJ inexistente (`00000000000000`): HTTP 404,
+  `{"message": "...", "type": "not_found", "name": "NotFoundError"}`.
+
+Sem guarda de token — a BrasilAPI é gratuita e sem autenticação, então **não** compete com a mesma
+exigência fail-closed de credencial que CEIS/CNEP tem; o cliente ainda assim nunca inventa um
+resultado quando a chamada falha (erro de rede/formato vira `encontrado: false`, nunca "ATIVA"
+silencioso).
+
+**(c) Onde o resultado é gravado.** Novo model `QualificacaoFornecedor` (histórico completo, um
+registro por consulta, com `dataConsulta`) + dois campos-espelho:
+`Fornecedor.statusQualificacao` (consulta mais recente, para listar/filtrar sem subquery) e
+`Proposta.statusQualificacaoFornecedor` (o que valia no momento em que a proposta foi registrada).
+Novo enum `StatusQualificacao`: `regular` | `sancionado` | `cadastro_irregular` | `nao_verificado`.
+`nao_verificado` é tanto o estado inicial quanto o resultado de uma consulta negada — nunca
+confundido com "regular" (regra de domínio em `avaliarQualificacao`,
+`src/lib/domain/qualificacaoFornecedor.ts`, prioridade: sanção > cadastro irregular > não
+verificado > regular).
+
+Migration `20260807190000_m19_qualificacao_fornecedor` escrita manualmente (não gerada por
+`prisma migrate dev`): Docker Desktop não estava acessível neste ambiente de execução (serviço
+parado, requer elevação para iniciar, fora do escopo autorizado) e não havia `.env` com banco de
+dev configurado. O SQL foi conferido linha a linha contra o padrão das migrations anteriores do
+projeto — **não aplicada nem em dev nem em produção**; aplicação em produção exige autorização
+explícita do usuário (CLAUDE.md §8), como os milestones anteriores.
+
+**(d) Verificação por mutação (§9.39/§9.45/§9.53).** A guarda fail-closed foi testada em duas
+camadas, cada uma com a mutação inversa aplicada e revertida:
+
+1. `consultarSancoesCnpj` (cliente): mutação temporária trocou `if (!token) return negada` por
+   `return { negada: false, sancoes: [] }` — os dois testes que afirmam "nega sem token" caíram
+   (`expected false to be true`, `expected {...} to not deeply equal {...}`), confirmando que a
+   asserção detecta a regressão. Revertida antes do commit.
+2. `avaliarQualificacao` (domínio) + `qualificarFornecedor` (action): mutação temporária desligou
+   o ramo `consultaSancoesNegada` (`if (false && ...)`) — os testes "NUNCA 'regular'" caíram nas
+   duas camadas (`expected 'regular' to be 'nao_verificado'`), confirmando que tanto a regra de
+   negócio quanto a action que a invoca protegem a garantia ponta a ponta. Revertida antes do
+   commit.
+
+**Pendências explícitas para quando houver token real:** (1) validar o caminho de sucesso de
+`consultarSancoesCnpj` com uma chamada real a um CNPJ sancionado conhecido; (2) rodar
+`prisma migrate dev` contra um banco real para gerar a migration pelo caminho normal e comparar
+com a escrita manualmente; (3) aplicar a migration em produção sob autorização explícita.
 
 ---
 
@@ -801,3 +908,21 @@ completa: 758/759 (mesma falha pré-existente e não relacionada em `painelPreco
 lint e build verdes. Falta do M17: exibição de competência/regime/localidade na UI e as duas
 verificações finais (competência importada contra o arquivo de origem; composições conferidas
 manualmente contra a planilha oficial).
+
+**Estado em 2026-08-07 (M19 — qualificação de fornecedor, em worktree isolado):** +5 tarefas
+concluídas (cliente CEIS/CNEP, cliente de situação cadastral, gravação com data em
+`QualificacaoFornecedor`, alerta na proposta, guarda fail-closed) + 1 verificação por mutação
+concluída — a verificação de fornecedor sancionado conhecido **não** foi marcada (sem token de
+produção do Portal da Transparência neste ambiente, ver §4.3). Trabalho feito em paralelo a M17/M18
+(sessão distinta, sem tocar `src/lib/ingestao/`), incluindo correção pós-revisão: varredura completa
+de `select` explícito nas consultas pré-existentes de `Fornecedor`/`Proposta` que a coluna nova do
+M19 expunha ao risco do CLAUDE.md §9.46 (`src/lib/actions/fornecedores.ts`,
+`src/app/(app)/fornecedores/page.tsx`, `src/app/(app)/cotacoes/page.tsx`,
+`src/lib/actions/alertas.ts`).
+
+**Estado em 2026-08-07 (consolidação — merge de M17+M18+M19 em `main`):** **47 concluídas, 14
+pendentes**, somando as 42 do M15–M18 (contador acima, já incluindo o spike do M18) + 5 do M19. M20
+segue inteiro pendente. Falta do M17: exibição na UI e as duas verificações finais. Falta do M19: a
+verificação de fornecedor sancionado real (sem token de produção) e aplicação da migration em
+produção (`20260807190000_m19_qualificacao_fornecedor`, escrita manualmente por falta de banco local
+acessível — nunca aplicada nem em dev, ver §4.3).
