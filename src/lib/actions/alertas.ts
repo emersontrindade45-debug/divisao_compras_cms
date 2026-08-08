@@ -19,7 +19,10 @@ export async function buscarAlertas(): Promise<Alerta[]> {
           status: "silenciosa",
           dataLimite: { lte: tresDiasAFrente },
         },
-        include: {
+        select: {
+          id: true,
+          processoId: true,
+          dataLimite: true,
           fornecedor: { select: { razaoSocial: true } },
           processo: { select: { numero: true } },
         },
@@ -47,9 +50,10 @@ export async function buscarAlertas(): Promise<Alerta[]> {
       // Propostas com status "com_ressalva" ou "invalida"
       db.proposta.findMany({
         where: { statusGeral: { in: ["com_ressalva", "invalida"] } },
-        include: {
+        select: {
+          cotacaoId: true,
           cotacao: {
-            include: {
+            select: {
               fornecedor: { select: { razaoSocial: true } },
               processo: { select: { numero: true, id: true } },
             },

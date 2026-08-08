@@ -36,9 +36,20 @@ export default async function CotacoesPage() {
     }),
     db.proposta.findMany({
       where: { statusGeral: { in: ["com_ressalva", "invalida"] } },
-      include: {
+      select: {
+        id: true,
+        cnpjValido: true,
+        descricaoValida: true,
+        valorUnitarioValido: true,
+        valorTotalValido: true,
+        dataValida: true,
+        responsavelValido: true,
+        statusGeral: true,
+        observacoes: true,
+        valorUnitario: true,
+        valorTotal: true,
         cotacao: {
-          include: {
+          select: {
             fornecedor: { select: { razaoSocial: true, cnpj: true } },
             processo: { select: { numero: true } },
           },
