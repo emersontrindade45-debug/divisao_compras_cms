@@ -569,38 +569,80 @@ se a fonte fosse reaberta no futuro.
 **Objetivo.** Não é preço: é o outro lado da conformidade. Hoje o checklist de proposta e o score de
 fornecedor não consultam nenhuma base oficial.
 
-- [x] Cliente de consulta a CEIS/CNEP (sanções, via Portal da Transparência — token gratuito) —
-      `src/lib/integracoes/portalTransparencia.ts`
+> **Escopo reduzido em 2026-08-08, decisão do usuário.** A consulta a CEIS/CNEP (sanções, via
+> Portal da Transparência) foi **removida** — o usuário decidiu não obter/manter o token necessário
+> (cadastro manual por e-mail, sem uso previsto). `src/lib/integracoes/portalTransparencia.ts` e seu
+> teste foram apagados; `avaliarQualificacao` (`src/lib/domain/qualificacaoFornecedor.ts`) e
+> `qualificarFornecedor` (`src/lib/actions/qualificarFornecedor.ts`) foram simplificados para
+> depender só da situação cadastral de CNPJ. O status `sancionado` continua existindo no enum
+> `StatusQualificacao` (e no `if` de alerta em `registrarProposta`) mas fica **inalcançável** pelo
+> domínio atual — não removido do schema para não exigir uma migration nova em produção só por
+> limpeza (a `20260807190000_m19_qualificacao_fornecedor` já estava aplicada). As colunas
+> `consultaNegada`, `sancoesEncontradas` e `motivoNegacao` de `QualificacaoFornecedor` viram
+> resquício sempre `false`/`null` — ver comentário no `schema.prisma`. Reabrir CEIS/CNEP no futuro
+> é só reintroduzir o cliente e voltar a chamá-lo nesses dois arquivos; a estrutura de dados já
+> comporta.
+
+- [x] ~~Cliente de consulta a CEIS/CNEP~~ — **removido em 2026-08-08**, ver nota acima.
 - [x] Consulta de situação cadastral de CNPJ — `src/lib/integracoes/situacaoCadastralCnpj.ts`
       (BrasilAPI, ver §4.3 para o porquê da escolha)
-- [x] Gravar o resultado **com a data da consulta** — model novo `QualificacaoFornecedor`
+- [x] Gravar o resultado **com a data da consulta** — model `QualificacaoFornecedor`
       (histórico, um registro por consulta, nunca sobrescrito) + espelho em
       `Fornecedor.statusQualificacao` e `Proposta.statusQualificacaoFornecedor`. Não foi plugado em
       `HistoricoCotacao` porque aquele model é sobre *resposta a cotação* (SLA/prazo), um eixo
       diferente de *qualificação regulatória do fornecedor* — misturar os dois obrigaria a linha de
       `HistoricoCotacao` a existir mesmo sem cotação nenhuma. Ver §4.3.
-- [x] Alerta na proposta quando o fornecedor estiver sancionado — `registrarProposta` grava
-      `statusQualificacaoFornecedor` na proposta e emite log de alerta quando o status é
-      `sancionado`/`cadastro_irregular`
-- [x] Guarda de token: ausência **nega** a consulta e sinaliza (§9.45) — `if (!token)` em
-      `consultarSancoesCnpj`, nunca `if (token && ...)`
-- [ ] **Verificação:** um fornecedor sancionado conhecido é detectado — **não verificado contra a
-      API real** (ver limitação em §4.3: obtenção de token do Portal da Transparência é cadastro
-      manual por e-mail, fora do alcance deste ambiente). Testado com fixture MOCK documentado
-      como tal em `portalTransparencia.test.ts`
-- [x] **Verificação:** por mutação, remover o token e confirmar que a consulta é negada, não
-      pulada — confirmado em duas camadas (cliente e domínio/action), ver §4.3
+- [x] Alerta na proposta quando o fornecedor estiver com cadastro irregular — `registrarProposta`
+      grava `statusQualificacaoFornecedor` na proposta e emite log de alerta quando o status é
+      `sancionado`/`cadastro_irregular` (o primeiro valor ficou inalcançável após a redução de
+      escopo, mas o `if` foi mantido — é inofensivo e evita reescrever a guarda se CEIS/CNEP voltar)
+- [x] ~~Guarda de token: ausência nega a consulta e sinaliza~~ — **não aplicável, sem token nesta
+      versão do M19.** A BrasilAPI (situação cadastral) é gratuita e sem autenticação; não há
+      segredo para guardar. Ver §4.3(b).
+- [x] **Verificação:** um fornecedor sancionado conhecido é detectado — **não aplicável, escopo
+      removido.** Substituída pela verificação da situação cadastral (ver testes de
+      `qualificacaoFornecedor.test.ts` e `qualificarFornecedor.test.ts`, cobrindo `cadastro_irregular`
+      via BrasilAPI).
+- [x] **Verificação:** por mutação — **não aplicável, guarda de token removida junto com CEIS/CNEP.**
 
 ### M20 — Reavaliação do Tier B e estudo de sobreposição
 
 **Objetivo.** Decidir com dado, não com panorama.
 
-- [ ] Estudo de sobreposição PNCP × plataformas comerciais, para fechar ou reabrir a decisão da
-      §2.3 com número
-- [ ] Avaliação de LICITAÇÕES-e e estaduais à luz do que o uso real de M16–M18 mostrar faltando
-- [ ] BPS/CMED — apenas se surgir demanda concreta de objeto de saúde
-- [ ] *(opcional)* Medição de sobreposição PNCP × LicitaCon descrita na §2.5 — só vale o esforço se
-      o uso real apontar **descoberta** como gargalo, e não cobertura de preço
+**Decisão de escopo com o usuário em 2026-08-08:** as duas medições originalmente descritas (cruzar
+~200 contratações do LicitaCon-RS contra o PNCP; medir sobreposição PNCP × cada plataforma do Tier
+C) são um projeto de engenharia de dados à parte — baixar dataset externo, casar registro a
+registro contra a API do PNCP — não algo a apressar dentro deste milestone. Optou-se por um estudo
+leve: usar o que é medível agora (acesso público a cada plataforma, evidência de uso real já no
+banco) e declarar explicitamente o que continua como hipótese não verificada, em vez de simular um
+número (§9.35).
+
+- [x] Estudo de sobreposição PNCP × plataformas comerciais, para fechar ou reabrir a decisão da
+      §2.3 com número — **fechado por achado de acesso, não por contagem de sobreposição** (ver
+      §4.4). Nenhuma das cinco plataformas do Tier C expõe API pública/dataset em massa comparável
+      ao PNCP; `licitacoes-e.com.br` devolveu HTTP 403 até para a página de busca manual, sem
+      cabeçalho de autenticação nenhum. Sem um corpus estruturado do lado de lá, não há como medir
+      sobreposição sem contratar acesso — que é exatamente o custo que a §2.3 já rejeitou (F4). A
+      decisão de descartar o Tier C **permanece**, agora também por impossibilidade prática de
+      medição sem a mesma contratação que a decisão original evita.
+- [x] Avaliação de LICITAÇÕES-e e estaduais à luz do que o uso real de M16–M18 mostrar faltando —
+      **uso real ainda não existe para avaliar contra** (ver §4.4): o banco de dev tem 8 processos
+      de teste, 1 `ResultadoSimilaridade` (via `contratacao_publica`, i.e. PNCP/modulo-contratacoes)
+      e 0 `PrecoReferencia` (SINAPI nunca ingerido de fato, nem em dev). Não há gargalo de cobertura
+      demonstrado para LICITAÇÕES-e ou estaduais resolverem — permanecem Tier B, reavaliação adiada
+      até existir volume de uso real. `licitacoes-e.com.br` segue com o mesmo obstáculo do panorama
+      original (credenciamento restrito ao BB) confirmado pelo 403 acima.
+- [x] BPS/CMED — apenas se surgir demanda concreta de objeto de saúde — **sem demanda**: os três
+      `Item` existentes no banco de dev (cadeira ergonômica, kit de limpeza, notebook) são
+      consistentes com o perfil de Câmara Municipal descrito na §1 (serviços continuados,
+      obras/engenharia, TI/equipamentos, material de consumo) — nenhum objeto de saúde. Continua
+      fora, sem milestone.
+- [x] *(opcional)* Medição de sobreposição PNCP × LicitaCon descrita na §2.5 — **não executada,
+      adiada deliberadamente**, mesma razão do item acima: o gargalo que justificaria o esforço é
+      "descoberta" (achar contratação similar) no uso real de M16–M18, e esse uso real ainda não
+      existe em volume (ver §4.4). Medir agora seria responder uma pergunta que ninguém fez ainda.
+      Reabrir quando M16 (modulo-contratacoes) estiver em uso com processos reais e alguém notar
+      dificuldade de achar contratação similar — não antes.
 
 ### 4.1 Registro do spike do M16 — executado em 2026-08-06
 
@@ -798,6 +840,50 @@ camadas, cada uma com a mutação inversa aplicada e revertida:
 com a escrita manualmente. (3) — aplicar a migration em produção — **concluída em 2026-08-08**,
 ver nota acima.
 
+### 4.4 Registro do M20 — executado em 2026-08-08
+
+Medido contra o estado real do banco de dev e o acesso real (não documentação de memória) das
+plataformas do Tier C, com escopo reduzido decidido com o usuário (ver nota de abertura do M20).
+
+**(a) Uso real de M16–M18 — consultado no Postgres local (`localhost:5432/divisao_compras`, banco
+de dev, não produção):**
+
+| Tabela/métrica | Valor |
+|---|---|
+| `Processo` | 8 |
+| `Item` | 3 (cadeira ergonômica, kit de limpeza, notebook — nenhum objeto de saúde) |
+| `ResultadoSimilaridade` | 1, `tipoCandidato: "contratacao_publica"` (via PNCP/modulo-contratacoes do M16) |
+| `PrecoReferencia` (SINAPI) | **0** — nenhuma ingestão real rodou, nem em dev |
+| `ItemCatalogoReferencia` | 2.000 (ingestão parcial/de teste; universo real é 343.880, §4.1) |
+| `Fonte` | 5 |
+
+Conclusão direta: o volume de uso é de teste, não de operação real. Os dois itens do M20 que
+dependiam de "o que o uso real de M16–M18 mostrar faltando" não têm o que avaliar ainda — não é
+lacuna a fechar agora, é pré-condição ainda não atingida.
+
+**(b) Acesso às plataformas do Tier C — verificado, não assumido.** Pesquisa web (2026-08-08) sobre
+Portal de Compras Públicas, BLL Compras, BBMNET e Licitações-e (Tier B, avaliado junto por ter o
+mesmo obstáculo): nenhuma expõe dataset em massa ou API pública equivalente à
+`compras.dados.gov.br`/PNCP — o que existe é consulta manual individual de editais publicados, sem
+endpoint de exportação em lote documentado. `licitacoes-e.com.br/aop/pesquisar-licitacao.aop`
+(a própria página de busca manual, sem tentativa de endpoint de API) devolveu **HTTP 403** a um
+fetch sem autenticação — consistente com o "credenciamento restrito ao BB" já registrado na §2.2.
+
+**(c) Por que isso fecha a §2.3 sem contar sobreposição.** O estudo original propunha medir *quantas
+contratações relevantes dessas plataformas não aparecem no PNCP*. Isso pressupõe um corpus do lado
+de lá para cruzar. Sem API/dataset aberto, obter esse corpus exige exatamente o que a razão 2 da
+§2.3 já rejeita — contratar acesso. A pergunta "vale a pena integrar?" e a pergunta "dá pra medir a
+sobreposição sem pagar?" colapsam na mesma resposta: não, pelo mesmo motivo. Decisão mantida, agora
+com uma segunda razão independente (F4 por impossibilidade de medição, não só por custo de
+manutenção).
+
+**Pendências explícitas para reabertura.** (1) Se M16 (`modulo-contratacoes`) passar a ser usado com
+processos reais da Câmara e o pesquisador notar dificuldade de achar contratação similar, reavaliar
+LICITAÇÕES-e/estaduais e a medição PNCP × LicitaCon-RS com esse gargalo concreto em mãos — não
+antes. (2) Se algum dia surgir objeto de saúde na pauta de compras, reabrir BPS/CMED. (3) A
+medição de sobreposição do Tier C fica bloqueada por acesso, não por falta de tempo — só reabre se
+alguma dessas plataformas publicar dado aberto (mesmo critério do Tier D, §2.4).
+
 ---
 
 ## 5. Regras deste plano herdadas do CLAUDE.md §9
@@ -936,3 +1022,19 @@ segue inteiro pendente. Falta do M17: exibição na UI e as duas verificações 
 verificação de fornecedor sancionado real (sem token de produção) e aplicação da migration em
 produção (`20260807190000_m19_qualificacao_fornecedor`, escrita manualmente por falta de banco local
 acessível — nunca aplicada nem em dev, ver §4.3).
+
+**Estado em 2026-08-08 (M20 — reavaliação do Tier B e estudo de sobreposição, sessão isolada, sem
+tocar arquivos de M19 em andamento em paralelo):** **+4 tarefas concluídas — as quatro do M20,
+`[x]`.** Escopo reduzido decidido com o usuário: em vez das duas medições pesadas originalmente
+descritas (cruzar ~200 contratações do LicitaCon-RS contra o PNCP; contar sobreposição de cada
+plataforma do Tier C), um estudo leve com o que é medível sem projeto de dados à parte. Dois achados
+que fecham os quatro itens: (1) nenhuma plataforma do Tier C/LICITAÇÕES-e expõe API pública ou
+dataset em massa — `licitacoes-e.com.br` devolveu HTTP 403 até para a página de busca manual sem
+autenticação —, o que fecha a §2.3 por impossibilidade prática de medição sem contratar acesso
+(razão adicional à original, mesmo veredito); (2) o banco de dev tem só uso de teste (8 processos, 1
+`ResultadoSimilaridade`, 0 `PrecoReferencia` de SINAPI ingerido), então não há "o que o uso real de
+M16–M18 mostrar faltando" para avaliar ainda — LICITAÇÕES-e/estaduais e a medição PNCP × LicitaCon
+ficam adiadas até existir volume de uso real, não descartadas. BPS/CMED confirmado sem demanda (os 3
+`Item` do banco são cadeira/kit de limpeza/notebook, nenhum objeto de saúde). Nenhum código
+alterado — milestone é só decisão registrada, com pendências explícitas de reabertura no §4.4.
+Detalhe completo em §4.4.

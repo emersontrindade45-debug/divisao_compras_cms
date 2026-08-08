@@ -400,24 +400,30 @@ model Fornecedor {
 }
 
 /**
- * Histórico de consultas de qualificação de um fornecedor (M19): CEIS/CNEP
- * (sanções, Portal da Transparência) e situação cadastral de CNPJ (Receita
- * Federal via BrasilAPI). Um registro por consulta — histórico completo, nunca
- * sobrescrito, com a data em que a consulta foi feita (não a data do evento
- * sancionador), porque a mesma exigência de rastreabilidade que vale para preço
+ * Histórico de consultas de qualificação de um fornecedor (M19): situação
+ * cadastral de CNPJ (Receita Federal via BrasilAPI). Um registro por consulta
+ * — histórico completo, nunca sobrescrito, com a data em que a consulta foi
+ * feita, porque a mesma exigência de rastreabilidade que vale para preço
  * (fonte + data + evidência, CLAUDE.md §1) vale para qualificação de fornecedor.
+ *
+ * `consultaNegada`, `sancoesEncontradas` e `motivoNegacao` são resquício da
+ * consulta a CEIS/CNEP (Portal da Transparência), removida por decisão do
+ * usuário em 2026-08-08 — mantidas no schema (sempre `false`/`null` a partir
+ * daqui) para não exigir uma migration DROP COLUMN em produção só por
+ * limpeza; ver docs/ApiPlan.md §4.3.
  */
 model QualificacaoFornecedor {
   id                  String             @id @default(cuid())
   fornecedorId        String
   dataConsulta        DateTime
   statusQualificacao  StatusQualificacao
-  /** true quando a consulta foi negada por ausência/invalidez de token — nunca confundido com "regular". */
+  /** Resquício de CEIS/CNEP (ver comentário do model) — sempre `false` daqui em diante. */
   consultaNegada      Boolean            @default(false)
-  /** Achados de CEIS/CNEP, ou null quando a consulta foi negada antes de tentar. */
+  /** Resquício de CEIS/CNEP (ver comentário do model) — sempre `null` daqui em diante. */
   sancoesEncontradas  Json?
-  /** Situação cadastral da Receita (ex.: "ATIVA", "BAIXADA"), ou null quando a consulta foi negada. */
+  /** Situação cadastral da Receita (ex.: "ATIVA", "BAIXADA"), ou null quando a consulta não pôde ser feita. */
   situacaoCadastral   String?
+  /** Resquício de CEIS/CNEP (ver comentário do model) — sempre `null` daqui em diante. */
   motivoNegacao       String?
   createdAt           DateTime           @default(now())
 

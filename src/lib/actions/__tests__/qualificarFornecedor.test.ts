@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   db: {
@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
   registrarAuditoria: vi.fn(),
   revalidatePath: vi.fn(),
-  consultarSancoesCnpj: vi.fn(),
   consultarSituacaoCadastral: vi.fn(),
 }));
 
@@ -17,9 +16,6 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/rbac", () => ({ requireRole: mocks.requireRole }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
-vi.mock("@/lib/integracoes/portalTransparencia", () => ({
-  consultarSancoesCnpj: mocks.consultarSancoesCnpj,
-}));
 vi.mock("@/lib/integracoes/situacaoCadastralCnpj", () => ({
   consultarSituacaoCadastral: mocks.consultarSituacaoCadastral,
 }));
@@ -45,10 +41,6 @@ describe("qualificarFornecedor", () => {
     mocks.db.$transaction.mockResolvedValue([{}, {}]);
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it("retorna erro quando o fornecedor não existe", async () => {
     mocks.db.fornecedor.findUnique.mockResolvedValue(null);
 
@@ -58,27 +50,22 @@ describe("qualificarFornecedor", () => {
     expect(mocks.db.$transaction).not.toHaveBeenCalled();
   });
 
-  it("grava status 'sancionado' e alerta quando o fornecedor consta em CEIS/CNEP", async () => {
-    mocks.consultarSancoesCnpj.mockResolvedValue({
-      negada: false,
-      sancoes: [{ origem: "CEIS", tipoSancao: "Suspensão", orgaoSancionador: null, dataInicioSancao: null, dataFimSancao: null, numeroProcesso: null, linkPublicacao: null }],
-    });
+  it("grava status 'cadastro_irregular' e alerta quando a situação cadastral não é ATIVA", async () => {
     mocks.consultarSituacaoCadastral.mockResolvedValue({
       encontrado: true,
-      situacao: "ATIVA",
+      situacao: "BAIXADA",
       razaoSocial: "Fornecedora Exemplo LTDA",
       dataSituacao: "2020-01-01",
     });
 
     const resultado = await qualificarFornecedor("forn-1");
 
-    expect(resultado.data?.status).toBe("sancionado");
+    expect(resultado.data?.status).toBe("cadastro_irregular");
     expect(resultado.data?.alerta).toBe(true);
     expect(mocks.db.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it("grava a data da consulta em QualificacaoFornecedor (histórico) e atualiza o espelho em Fornecedor", async () => {
-    mocks.consultarSancoesCnpj.mockResolvedValue({ negada: false, sancoes: [] });
     mocks.consultarSituacaoCadastral.mockResolvedValue({
       encontrado: true,
       situacao: "ATIVA",
@@ -107,38 +94,16 @@ describe("qualificarFornecedor", () => {
     expect(argUpdate.data.statusQualificacao).toBe("regular");
   });
 
-  // Mutação inversa (§9.45/§9.53): remover a guarda fail-closed do cliente
-  // (`consultarSancoesCnpj`) faria este teste, que simula a resposta "negada",
-  // continuar batendo em 'nao_verificado' só enquanto a action de fato respeita
-  // o campo `negada` — se a action ignorasse esse campo e assumisse "regular"
-  // por padrão, esta asserção cairia.
-  it("nunca grava 'regular' quando a consulta de sanções foi negada por falta de token", async () => {
-    mocks.consultarSancoesCnpj.mockResolvedValue({
-      negada: true,
-      motivo: "PORTAL_TRANSPARENCIA_TOKEN não configurado",
-    });
-    mocks.consultarSituacaoCadastral.mockResolvedValue({
-      encontrado: true,
-      situacao: "ATIVA",
-      razaoSocial: "Fornecedora Exemplo LTDA",
-      dataSituacao: "2020-01-01",
-    });
+  it("grava 'nao_verificado' quando a situação cadastral não pôde ser obtida", async () => {
+    mocks.consultarSituacaoCadastral.mockResolvedValue({ encontrado: false });
 
     const resultado = await qualificarFornecedor("forn-1");
 
     expect(resultado.data?.status).toBe("nao_verificado");
-    expect(resultado.data?.status).not.toBe("regular");
     expect(resultado.data?.alerta).toBe(true);
-
-    const argCreate = mocks.db.qualificacaoFornecedor.create.mock.calls[0]![0] as {
-      data: { consultaNegada: boolean; motivoNegacao: string | null };
-    };
-    expect(argCreate.data.consultaNegada).toBe(true);
-    expect(argCreate.data.motivoNegacao).toContain("PORTAL_TRANSPARENCIA_TOKEN");
   });
 
   it("registra auditoria da consulta", async () => {
-    mocks.consultarSancoesCnpj.mockResolvedValue({ negada: false, sancoes: [] });
     mocks.consultarSituacaoCadastral.mockResolvedValue({
       encontrado: true,
       situacao: "ATIVA",
