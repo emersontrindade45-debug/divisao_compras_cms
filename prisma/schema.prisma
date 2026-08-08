@@ -259,6 +259,14 @@ model ResultadoSimilaridade {
   // Termo efetivamente usado na busca que achou este candidato. Alimenta a
   // análise de quais termos produzem candidatos que viram Fonte.
   termoBuscaUsado        String?
+  // Metadados de fonte de tabela de referência oficial (SINAPI — M17), nulos
+  // para as demais fontes (contratacao_publica/painel_precos). Sem isso, dois
+  // preços legítimos do mesmo código (desonerado x não-desonerado) se
+  // misturariam na série sem distinção visível — ver
+  // MetadadosPrecoReferencia em src/lib/ia/types.ts.
+  competenciaReferencia  String?
+  regimeReferencia       String?
+  localidadeReferencia   String?
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
 

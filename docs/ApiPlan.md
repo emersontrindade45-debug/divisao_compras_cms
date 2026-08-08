@@ -505,13 +505,68 @@ primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.1
       acessível e não poderia alimentar a estimativa (CLAUDE.md §9.8). Corrigido: preenche com a URL
       do portal oficial de downloads (`caixa.gov.br/site/Paginas/downloads.aspx`) — mesma URL para
       toda a competência, já que o spike confirmou que não há link estável por item/registro (§1.6).
-- [ ] Exibir competência, regime de desoneração **e localidade de referência (capital, não o
-      estado)** de forma explícita na UI (os três já são capturados pelo parser em
-      `metadados`/`regime`/`dataReferencia`/`uf` — falta o componente que os renderiza)
-- [ ] **Verificação:** uma competência importada, contagem conferida contra o arquivo de origem —
-      parser já testado contra o arquivo real (24 testes acima), mas isto é sobre a ingestão de
-      ponta a ponta (banco), que depende do orquestrador acima
-- [ ] **Verificação:** três composições conferidas manualmente contra a planilha oficial
+- [x] Exibir competência, regime de desoneração **e localidade de referência (capital, não o
+      estado)** de forma explícita na UI. **Fechado em 2026-08-08:** os três dados não chegavam à
+      UI porque nem chegavam ao banco — `CandidatoSimilaridade` (`src/lib/ia/types.ts`) não tinha
+      campo para eles, e `ResultadoSimilaridade` (schema) também não. Cadeia completa: novo campo
+      opcional `metadadosPrecoReferencia` (`competencia`/`regime`/`localidade`) em
+      `CandidatoSimilaridade`, preenchido por `provedorSinapi.ts` (guarda: só preenche se `regime`
+      gravado for um dos dois valores conhecidos — dado legado/corrompido não inventa um valor) →
+      três colunas nullable novas em `ResultadoSimilaridade`
+      (`competenciaReferencia`/`regimeReferencia`/`localidadeReferencia`, migration
+      `20260808124610_m17_metadados_preco_referencia_similaridade`, aplicada em dev) → persistidas
+      em `pesquisaSimilaridade.ts` (`createMany`) → `select` explícito acrescentado em
+      `obterFontesSimilaridade` (`listar.ts`, CLAUDE.md §9.46) → renderizadas em
+      `FontesSimilaridadeList.tsx` (componente que já lista os candidatos de similaridade de
+      qualquer fonte — PNCP, Painel de Preços, SINAPI), nova coluna "Referência" com badge de
+      competência (mm/aaaa), badge de regime (verde "Desonerado" / âmbar "Não desonerado", CLAUDE.md
+      §5) e o nome da localidade seguido de "(capital)" para deixar explícito que não é o estado
+      inteiro — só renderiza quando `tipoCandidato === "preco_referencia"`. 8 testes novos (3 no
+      provedor, 2 na action, 2 no componente + verificação de ausência do bloco para
+      `contratacao_publica`).
+- [x] **Verificação:** uma competência importada, contagem conferida contra o arquivo de origem.
+      **Fechado em 2026-08-08 contra banco de dev local real** (não mock, não produção — ver nota
+      abaixo): upload do fixture real de dezembro/2024
+      (`sinapi_composicoes_sintetico_sp_202412.xlsx`, 7.829 linhas) via `POST
+      /api/admin/ingerir-sinapi` (servidor `next dev` local, mesmo caminho de código da produção,
+      incluindo a guarda fail-closed de `ADMIN_MIGRATE_SECRET`) contra um Postgres de dev já
+      existente no ambiente (WSL, banco `divisao_compras`, migrations em dia — descoberto, não
+      criado por esta tarefa). Resposta da rota: `linhasLidas: 7829, linhasImportadas: 7829,
+      linhasRejeitadas: 0`. Conferido **direto no banco** (não só na resposta HTTP, §9.37): `SELECT
+      COUNT(*) FROM precos_referencia` = 7829, batendo exatamente com a contagem que o teste do
+      parser já esperava (`toHaveLength(7829)`, `sinapi.test.ts`); `COUNT(DISTINCT codigo)` = 7829
+      (sem duplicação); `regime` = `nao_desonerado` em 100% das linhas (só um ZIP foi baixado pelo
+      usuário para esta verificação); amostra de linhas com `competencia: "2024-12"`, `uf: "SP"`,
+      `metadados.localidade: "SAO PAULO"` e `urlEvidencia` preenchida, todos corretos.
+      `FonteReferencia "sinapi"` criada por `garantirFonteSinapi()` com a `baseLegal` esperada.
+      **Verificação extra da constraint única com regime (spike §4, "ajuste obrigatório antes de
+      codificar" no primeiro item deste M17):** reingeri o mesmo arquivo com `regime=desonerado`
+      (sem ter o segundo ZIP real disponível neste ambiente — mesmo conteúdo, só para exercitar a
+      constraint) e a segunda ingestão **não colidiu** com a primeira: `SELECT COUNT(*)` foi a
+      15.658 (7.829 × 2), `GROUP BY regime` confirmou 7.829 linhas em cada um dos dois regimes, e o
+      mesmo código (`100064`) apareceu duas vezes, uma por regime — exatamente o comportamento que
+      motivou adicionar `regime` à chave única `@@unique([fonteReferenciaId, codigo, competencia,
+      uf, regime])` no schema.
+- [ ] **Verificação:** três composições conferidas manualmente contra a planilha oficial — não
+      fechado nesta tarefa: exigiria abrir a planilha `.xlsx` original num visualizador (Excel/
+      LibreOffice) e comparar linha a linha com o que foi gravado no banco; sem acesso a essa
+      ferramenta neste ambiente. A verificação programática (parser testado contra o arquivo real,
+      24 testes em `sinapi.test.ts` + a ingestão de ponta a ponta acima) cobre estrutura e volume,
+      mas não substitui a conferência visual manual que este item pede.
+
+**Nota operacional sobre o ambiente usado na verificação (2026-08-08).** Só o ZIP "Não Desonerado"
+foi ingerido nesta sessão — o "Desonerado" (também baixado pelo usuário) não foi carregado, por não
+ser necessário para provar a contagem de ponta a ponta; ingeri-lo é reexecutar o mesmo upload com
+`regime=desonerado`, sem trabalho de código pendente. Havia um Postgres 18 de dev já rodando no
+WSL2, exposto em `localhost:5432` (via `wslrelay`), com a base `divisao_compras` já criada e as
+migrations até `20260807195603_m17_preco_referencia_regime` aplicadas — não foi criado nada para
+esta tarefa, só descoberto; `_prisma_migrations` mostrava histórico de sessões anteriores. Este
+worktree não tinha `node_modules` (agente novo, nunca instalado) — `pnpm install --frozen-lockfile`
+seguido de `pnpm prisma generate` foram necessários antes de qualquer verificação (mesma causa raiz
+do CLAUDE.md §9.36, sem o cenário de instalação abortada). A rota admin foi exercitada via `next dev`
+real (não uma chamada direta à função `ingerirSinapi()`, que teria pulado a guarda de autenticação e
+o parsing de multipart) — `.env` local (gitignored, nunca commitado) com `ADMIN_MIGRATE_SECRET` de
+teste, removido/descartado ao final da verificação junto com o processo do servidor.
 
 **Peso legal (corrigido pelo spike).** O SINAPI não deriva peso da IN 65/2021 — ela não se aplica a
 obras/engenharia. O peso vem diretamente da Lei 14.133 art. 23 §2º I, que o coloca como **primeiro

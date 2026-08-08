@@ -48,7 +48,21 @@ interface LinhaPrecoReferencia {
   valorUnitario: { toNumber: () => number };
   dataReferencia: Date;
   urlEvidencia: string | null;
+  competencia: string;
+  regime: string;
+  metadados: unknown;
 }
+
+/** Extrai `localidade` de `metadados` (JSON livre) com fallback seguro — nunca lança. */
+function extrairLocalidade(metadados: unknown): string {
+  if (metadados && typeof metadados === "object" && "localidade" in metadados) {
+    const valor = (metadados as { localidade?: unknown }).localidade;
+    if (typeof valor === "string" && valor.trim()) return valor;
+  }
+  return "não informada";
+}
+
+const REGIMES_VALIDOS = new Set(["desonerado", "nao_desonerado"]);
 
 /**
  * Sem `urlEvidencia`, o candidato não pode alimentar a estimativa
@@ -68,6 +82,20 @@ function mapearParaCandidato(linha: LinhaPrecoReferencia): CandidatoSimilaridade
     dataReferencia: linha.dataReferencia,
     unidade: linha.unidade,
     quantidade: 1,
+    // Sem competência/regime/localidade explícitos, dois preços legítimos do
+    // mesmo código (desonerado x não-desonerado) se misturariam na série sem
+    // distinção visível (CLAUDE.md §5, densidade informacional) — só omite o
+    // bloco se o regime gravado não for um dos dois valores conhecidos
+    // (dado legado/corrompido), nunca inventa um valor.
+    ...(REGIMES_VALIDOS.has(linha.regime)
+      ? {
+          metadadosPrecoReferencia: {
+            competencia: linha.competencia,
+            regime: linha.regime as "desonerado" | "nao_desonerado",
+            localidade: extrairLocalidade(linha.metadados),
+          },
+        }
+      : {}),
   };
 }
 
@@ -105,6 +133,8 @@ export async function buscarCandidatosSinapi(termo: string): Promise<CandidatoSi
         dataReferencia: true,
         competencia: true,
         urlEvidencia: true,
+        regime: true,
+        metadados: true,
       },
       orderBy: { competencia: "desc" },
       take: MAX_CANDIDATOS_QUERY,
