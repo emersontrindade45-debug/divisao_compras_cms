@@ -381,24 +381,26 @@ recoberto por 22 testes (era 21) antes de prosseguir para o wiring no registry.
       aplicado por grupo de `codItemCatalogo` com tolerância `"aquisicao"`, dentro do provedor
       antes de mapear para `CandidatoSimilaridade`. Confirmado por mutação (desligar o filtro faz o
       teste cair) por dois agentes independentes (dev e verifier).
-- [ ] **Verificação:** três itens que a Câmara compra, conferidos contra o Painel de Preços na web
-- [ ] **Verificação:** a URL de evidência gerada aberta de verdade no navegador (§9.8)
+- [x] **Verificação:** a URL de evidência gerada aberta de verdade no navegador (§9.8) — **fechada
+      em 2026-08-08.** O usuário abriu `https://pncp.gov.br/app/editais/06272868000127/2024/57` no
+      navegador e confirmou que carrega corretamente (a tentativa por `curl`/fetch em 2026-08-07
+      dava `ECONNRESET` — SPA com proteção anti-bot, só navegador real resolve, ver nota abaixo).
+- [ ] **Verificação:** três itens que a Câmara compra, conferidos contra o Painel de Preços na web —
+      **tentado em 2026-08-08, não fechado**: o usuário tentou acessar
+      `paineldeprecos.planejamento.gov.br` e recebeu **HTTP 502 (Bad Gateway) via Cloudflare** — erro
+      do lado do servidor do próprio portal, não da integração nem do acesso do usuário. Tentar de
+      novo mais tarde quando o portal estiver no ar; não é um problema deste projeto.
 
-**Tentativa parcial em 2026-08-07 (não fecha os dois itens acima — continuam `[ ]`).** Sem acesso a
-navegador real neste ambiente, tentei a verificação mais forte disponível: para o item real
-`idContratacaoPNCP: "06272868000127-1-000057/2024"` (codItemCatalogo 611701, "Mesa Reunião
-Redonda", capturado numa chamada real ao `modulo-contratacoes` nesta sessão), consultei a **API
-oficial de consulta do PNCP** — `pncp.gov.br/api/consulta/v1/orgaos/06272868000127/compras/2024/57`
+**Tentativa parcial em 2026-08-07 (contexto da verificação da URL de evidência, fechada acima em
+2026-08-08).** Sem acesso a navegador real naquela sessão, foi tentada a verificação mais forte
+disponível: para o item real `idContratacaoPNCP: "06272868000127-1-000057/2024"` (codItemCatalogo
+611701, "Mesa Reunião Redonda", capturado numa chamada real ao `modulo-contratacoes`), consultada a
+**API oficial de consulta do PNCP** — `pncp.gov.br/api/consulta/v1/orgaos/06272868000127/compras/2024/57`
 — fonte independente do Compras.gov, não só um espelho dele. Bateu: mesmo `numeroControlePNCP`,
 órgão "CONSELHO REGIONAL DE ENFERMAGEM COREN MA", objeto "aquisição de mobiliário", consistente com
-os itens de mobiliário retornados. A página `pncp.gov.br/app/editais/...` (a URL de evidência em
-si) devolveu `ECONNRESET` tanto por `curl` quanto por fetch de página — é SPA com proteção
-anti-bot, mesmo obstáculo já registrado no spike do M16 (§4.1d). Isso confirma que os **dados por
-trás** da evidência são reais e batem, mas não substitui abrir a URL literalmente num navegador
-(§9.8 pede exatamente isso, porque formato de URL errado só aparece na renderização real). Não
-tentei o Painel de Preços (paineldeprecos.planejamento.gov.br) por ser também um portal
-JS-pesado sem API de consulta simples conhecida. Os dois itens seguem como tarefa manual para
-quem tiver acesso a navegador.
+os itens de mobiliário retornados. Confirma que os **dados por trás** da evidência eram reais e
+batiam — o que faltava (a página em si abrir num navegador real) foi confirmado pelo usuário em
+2026-08-08.
 
 ### M17 — SINAPI
 
@@ -547,12 +549,22 @@ primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.1
       mesmo código (`100064`) apareceu duas vezes, uma por regime — exatamente o comportamento que
       motivou adicionar `regime` à chave única `@@unique([fonteReferenciaId, codigo, competencia,
       uf, regime])` no schema.
-- [ ] **Verificação:** três composições conferidas manualmente contra a planilha oficial — não
-      fechado nesta tarefa: exigiria abrir a planilha `.xlsx` original num visualizador (Excel/
-      LibreOffice) e comparar linha a linha com o que foi gravado no banco; sem acesso a essa
-      ferramenta neste ambiente. A verificação programática (parser testado contra o arquivo real,
-      24 testes em `sinapi.test.ts` + a ingestão de ponta a ponta acima) cobre estrutura e volume,
-      mas não substitui a conferência visual manual que este item pede.
+- [x] **Verificação:** três composições conferidas manualmente contra a planilha oficial —
+      **fechada em 2026-08-08.** O usuário não tinha acesso a Excel/LibreOffice para abrir o
+      `.xlsx` diretamente; a planilha foi lida programaticamente (`xlsx`, mesmo parser que o runner
+      usa) e as linhas foram mostradas em texto para conferência visual do usuário, comparadas
+      contra o valor gravado no banco de dev (consulta direta em `precos_referencia`):
+
+| Código | Descrição (resumida) | Planilha | Banco |
+|---|---|---|---|
+| 97141 | Assentamento tubo ferro fundido DN 80mm | R$ 5,40 / M | R$ 5,40 / M |
+| 97142 | Assentamento tubo ferro fundido DN 100mm | R$ 6,28 / M | R$ 6,28 / M |
+| 97143 | Assentamento tubo ferro fundido DN 150mm | R$ 8,40 / M | R$ 8,40 / M |
+
+      Código, descrição, unidade e valor batem exatamente entre planilha e banco; competência
+      (2024-12), UF (SP) e os dois regimes (`desonerado`/`nao_desonerado`, um registro por regime)
+      também conferidos. Complementa a verificação programática já existente (24 testes em
+      `sinapi.test.ts` + ingestão de ponta a ponta acima).
 
 **Nota operacional sobre o ambiente usado na verificação (2026-08-08).** Só o ZIP "Não Desonerado"
 foi ingerido nesta sessão — o "Desonerado" (também baixado pelo usuário) não foi carregado, por não
