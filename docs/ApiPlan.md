@@ -414,14 +414,27 @@ IN 65 e o torna, para esse tipo de objeto, fonte que o sistema **deveria** ofere
 **Objetivo.** Serviços continuados: limpeza, vigilância, recepção, copeiragem. É a lacuna que o
 comentário do nosso próprio código admite.
 
-- [ ] **Spike — este milestone pode não sobreviver a ele.** Verificar se a publicação atual é
-      legível por máquina, qual a periodicidade e se há URL estável por caderno
-- [ ] **Decisão com o usuário depois do spike, não antes:** (a) ingestão semiautomática com
+- [x] **Spike — este milestone pode não sobreviver a ele.** Verificar se a publicação atual é
+      legível por máquina, qual a periodicidade e se há URL estável por caderno. **Concluído em
+      2026-08-07 — resultado completo em [`ApiPlan-M18-spike.md`](ApiPlan-M18-spike.md). O
+      milestone não sobreviveu ao spike, como o próprio plano previu como possível**: só PDF de
+      leitura humana (sem CSV/XLSX/API), periodicidade irregular por caderno (não uma competência
+      mensal única) e, o achado mais forte, **2 dos 4 links de caderno testados já devolviam 404
+      na própria página oficial** no momento do spike — evidência medida, não hipótese, de que não
+      há URL estável por caderno.
+- [x] **Decisão com o usuário depois do spike, não antes:** (a) ingestão semiautomática com
       conferência humana; (b) cadastro manual dos postos relevantes como tabela interna, tratando o
-      CADTERC como referência documental; (c) descartar
-- [ ] Ingestão ou cadastro, conforme a decisão acima
-- [ ] Gerar automaticamente a justificativa de uso de tabela estadual junto com a fonte
-- [ ] **Verificação:** um caderno conferido posto a posto contra o documento oficial
+      CADTERC como referência documental; (c) descartar. **Registrada como recomendação do spike,
+      não como decisão executada** — este agente não tem acesso direto ao usuário nesta execução;
+      a recomendação (descartar ingestão automática; considerar cadastro manual como trabalho
+      futuro separado, sujeito a demanda real) está em `ApiPlan-M18-spike.md` §6-7, aguardando
+      confirmação do usuário antes de qualquer código de cadastro ser escrito.
+- [ ] Ingestão ou cadastro, conforme a decisão acima — **não iniciado**: a decisão do usuário sobre
+      (b) vs. (c) ainda não foi tomada: ver `ApiPlan-M18-spike.md` §7.
+- [ ] Gerar automaticamente a justificativa de uso de tabela estadual junto com a fonte — depende
+      do item acima; não faz sentido sem uma fonte real cadastrada.
+- [ ] **Verificação:** um caderno conferido posto a posto contra o documento oficial — não
+      aplicável enquanto não houver ingestão/cadastro.
 
 **Peso legal.** Tabela de referência **estadual**, não federal — usável, mas com enquadramento mais
 fraco que o do SINAPI na IN 65, e provavelmente exigindo justificativa registrada no processo. O
@@ -606,3 +619,13 @@ nomes de parâmetro/campo inventados — corrigido, com lição nova no CLAUDE.m
 M16: a ingestão completa do CATMAT (688 páginas) em produção — exige autorização explícita do
 usuário — e as duas verificações manuais finais (3 itens conferidos contra o Painel de Preços na
 web; URL de evidência aberta de verdade no navegador).
+
+**Estado em 2026-08-07 (continuação — spike do M18/CADTERC, em worktree isolado):** +2 tarefas
+concluídas (spike e recomendação registrados) — **33 concluídas, 24 pendentes**. O milestone **não
+sobreviveu ao spike**, exatamente como o plano previu ser possível: o CADTERC hoje é só PDF de
+leitura humana, sem CSV/XLSX/API, com periodicidade irregular por caderno e — achado mais forte —
+2 dos 4 links de caderno testados já devolviam 404 na própria página oficial no momento do spike.
+Recomendação registrada em `ApiPlan-M18-spike.md`: descartar ingestão automática; cadastro manual
+como opção (b) fica como trabalho futuro sujeito a demanda real, não decidido nesta execução por
+não haver acesso direto ao usuário. Nenhum model, provedor ou parser foi implementado — a fundação
+do M15 já comporta a opção (b) se e quando decidida.
