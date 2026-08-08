@@ -201,6 +201,17 @@ describe("normalizarLinhaSinapi", () => {
     }
   });
 
+  it("preenche urlEvidencia com o portal oficial (não há URL por item — CLAUDE.md §9.8)", () => {
+    const resultado = normalizarLinhaSinapi(linhaBase, "nao_desonerado");
+
+    expect(resultado.ok).toBe(true);
+    if (resultado.ok) {
+      expect(resultado.preco.urlEvidencia).toBe(
+        "https://www.caixa.gov.br/site/Paginas/downloads.aspx",
+      );
+    }
+  });
+
   it("normaliza corretamente valor com separador de milhar (5.602,92)", () => {
     const resultado = normalizarLinhaSinapi(
       { ...linhaBase, custoTotal: "5.602,92" },

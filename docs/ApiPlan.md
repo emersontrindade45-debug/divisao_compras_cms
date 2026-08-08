@@ -486,8 +486,25 @@ primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.1
       (`ADMIN_MIGRATE_SECRET`, CLAUDE.md §9.45). 6 + 7 testes (orquestrador + rota, incluindo
       ingestão de ponta a ponta contra o arquivo real de 7.829 linhas); `pnpm build` confirma a rota
       compilando e listada no build de produção.
-- [ ] Provedor de consulta (expõe `PrecoReferencia` do SINAPI para o motor de similaridade —
-      equivalente ao wiring do M16 no registry)
+- [x] Provedor de consulta `buscarCandidatosSinapi()` (`src/lib/similaridade/provedorSinapi.ts`),
+      wireado no registry (`chave: "sinapi"` em `REGISTRY_PROVEDORES_PUBLICOS`) — diferente do
+      provedor Compras.gov (M16), **sem chamada de rede**: os dados já foram ingeridos localmente,
+      então é consulta direta a `PrecoReferencia` (matching por texto livre, mesmo princípio de duas
+      fases de `matchingCatalogoLocal.ts`: token mais distintivo filtra no banco, sobreposição de
+      tokens pontua em memória — mas aqui a linha já **é** o candidato final, com preço, não um
+      código intermediário que precisa de uma segunda consulta externa). **Decisão de design:** só a
+      **competência mais recente por código** entra no resultado (de-duplicação em memória sobre
+      `orderBy: competencia desc`) — sem isso, um código ingerido em várias competências apareceria
+      repetido na série com valores de meses diferentes. Guarda explícita descarta candidato sem
+      `urlEvidencia` (nunca deveria acontecer depois do achado abaixo, mas não depende disso
+      silenciosamente — confirmado por mutação). Habilitado mesmo com a tabela vazia em produção —
+      no-op seguro, mesmo padrão do M16. `tipoCandidato: "preco_referencia"` (valor único do M15,
+      §3.3 — não um valor por fonte).
+      **Achado durante o design do provedor, corrigido no parser:** `normalizarLinhaSinapi`
+      (`sinapi.ts`) não preenchia `urlEvidencia` — todo candidato SINAPI ficaria sem evidência
+      acessível e não poderia alimentar a estimativa (CLAUDE.md §9.8). Corrigido: preenche com a URL
+      do portal oficial de downloads (`caixa.gov.br/site/Paginas/downloads.aspx`) — mesma URL para
+      toda a competência, já que o spike confirmou que não há link estável por item/registro (§1.6).
 - [ ] Exibir competência, regime de desoneração **e localidade de referência (capital, não o
       estado)** de forma explícita na UI (os três já são capturados pelo parser em
       `metadados`/`regime`/`dataReferencia`/`uf` — falta o componente que os renderiza)
@@ -773,3 +790,14 @@ página oficial no momento do spike. Recomendação registrada em `ApiPlan-M18-s
 ingestão automática; cadastro manual como opção (b) fica como trabalho futuro sujeito a demanda
 real, não decidido nesta execução por não haver acesso direto ao usuário. Nenhum model, provedor ou
 parser foi implementado — a fundação do M15 já comporta a opção (b) se e quando decidida.
+
+**Estado em 2026-08-07 (continuação — provedor de consulta do M17):** +1 tarefa concluída (`[x]`) —
+**42 concluídas, 15 pendentes**. `buscarCandidatosSinapi()` wireado no registry, consulta direta a
+`PrecoReferencia` sem chamada de rede (diferente do M16), de-duplicação por competência mais recente
+por código. Achado corrigido no parser: `normalizarLinhaSinapi` não preenchia `urlEvidencia` — todo
+candidato SINAPI ficaria sem evidência acessível (CLAUDE.md §9.8); agora preenche com a URL do portal
+oficial de downloads. TDD ponta a ponta, guarda de `urlEvidencia` confirmada por mutação. Suíte
+completa: 758/759 (mesma falha pré-existente e não relacionada em `painelPrecos.test.ts`), typecheck,
+lint e build verdes. Falta do M17: exibição de competência/regime/localidade na UI e as duas
+verificações finais (competência importada contra o arquivo de origem; composições conferidas
+manualmente contra a planilha oficial).

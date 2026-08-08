@@ -2,6 +2,7 @@ import "server-only";
 import { buscarContratosPNCP } from "@/lib/integracoes/pncp";
 import { buscarPrecosPainelPrecos } from "@/lib/integracoes/painelPrecos";
 import { buscarCandidatosComprasGovContratacoes } from "./provedorComprasGovContratacoes";
+import { buscarCandidatosSinapi } from "./provedorSinapi";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 
 /**
@@ -58,5 +59,19 @@ export const REGISTRY_PROVEDORES_PUBLICOS: readonly ProvedorBuscaPublica[] = [
     habilitado: true,
     timeoutMs: TIMEOUT_PADRAO_MS,
     buscar: (termo) => buscarCandidatosComprasGovContratacoes(termo),
+  },
+  {
+    // SINAPI — Composições Sintético (M17, docs/ApiPlan.md). Sem chamada de
+    // rede: consulta direta a `PrecoReferencia` já ingerida
+    // (src/lib/ingestao/ingerirSinapi.ts), então o timeout aqui é folga
+    // sobre uma query de banco, não sobre latência de API externa — mas
+    // mantém o mesmo teto que os demais para não exigir orçamento próprio.
+    // Habilitado mesmo com a tabela ainda vazia em produção (ingestão real
+    // ainda não rodou): vira um no-op seguro (`[]` cedo), mesmo padrão do
+    // provedor Compras.gov.
+    chave: "sinapi",
+    habilitado: true,
+    timeoutMs: TIMEOUT_PADRAO_MS,
+    buscar: (termo) => buscarCandidatosSinapi(termo),
   },
 ];

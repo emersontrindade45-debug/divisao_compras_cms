@@ -225,6 +225,12 @@ export function normalizarLinhaSinapi(
     dataReferencia: new Date(Date.UTC(ano, mes - 1, 1)),
     uf: "SP",
     regime,
+    // Não há URL por item/registro (spike §1.6 — "Sumário de Publicações" descontinuado, sem
+    // link estável por competência confirmado por fonte primária além do padrão de nome de
+    // arquivo). A evidência exigida pelo CLAUDE.md §9.8 aqui é o portal oficial de downloads —
+    // mesma URL para toda a competência, não um link por registro; sem preenchê-la, o candidato
+    // ficaria sem evidência acessível e não poderia alimentar a estimativa.
+    urlEvidencia: "https://www.caixa.gov.br/site/Paginas/downloads.aspx",
     metadados: {
       descricaoClasse: linha.descricaoClasse,
       vinculo: linha.vinculo,

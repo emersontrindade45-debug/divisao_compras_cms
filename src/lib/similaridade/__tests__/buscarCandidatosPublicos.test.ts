@@ -144,4 +144,12 @@ describe("REGISTRY_PROVEDORES_PUBLICOS", () => {
     expect(provedor?.habilitado).toBe(true);
     expect(provedor?.timeoutMs).toBeGreaterThan(0);
   });
+
+  it("inclui o provedor do SINAPI, habilitado (M17)", () => {
+    const provedor = REGISTRY_PROVEDORES_PUBLICOS.find((p) => p.chave === "sinapi");
+
+    expect(provedor).toBeDefined();
+    expect(provedor?.habilitado).toBe(true);
+    expect(provedor?.timeoutMs).toBeGreaterThan(0);
+  });
 });
