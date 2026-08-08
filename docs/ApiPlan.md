@@ -475,14 +475,17 @@ primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.1
       (`src/lib/ingestao/fontesSinapi.ts`, `garantirFonteSinapi()`) — `baseLegal` já com o inciso
       exato confirmado pelo spike (Lei 14.133 art. 23 §2º I), ao contrário do CATMAT/CATSER do M16
       (que registram o enquadramento como "não verificado").
-- [ ] **Falta:** função orquestradora que baixa/recebe o arquivo do SINAPI e chama `executarIngestao`
-      de ponta a ponta (equivalente a `ingerirCatalogoComprasGov` do M16) — hoje só existem as peças
-      (`fontesSinapi.ts`, `sinapi.ts`, `runner.ts`), não a ligação entre elas. Decisão em aberto do
-      próprio spike (§4, "risco residual"): o WAF da Caixa bloqueia acesso automatizado mesmo com
-      headers de navegador completos (confirmado nesta sessão, `429` persistente) — a ingestão
-      provavelmente precisa ser semiautomática (upload manual do arquivo já baixado, sistema só
-      processa), não um `baixar()` que faz `fetch` direto como o runner genérico assume por padrão.
-      Decidir o mecanismo de baixa/upload antes de escrever o orquestrador.
+- [x] Função orquestradora `ingerirSinapi()` (`src/lib/ingestao/ingerirSinapi.ts`) ligando
+      `fontesSinapi.ts` + `sinapi.ts` + `runner.ts` — decidido com o usuário: **upload manual**, não
+      download automático. O WAF da Caixa bloqueia acesso automatizado mesmo com headers de
+      navegador completos (confirmado nesta sessão, `429` persistente); `baixar()` do runner
+      genérico aqui só embrulha o `Buffer` já recebido por upload, sem `fetch`. A competência é
+      **extraída do arquivo** (cabeçalho de contexto), não digitada pelo operador — evita divergência
+      entre nome do arquivo e conteúdo. Rota administrativa `POST /api/admin/ingerir-sinapi`
+      (multipart: campos `arquivo` + `regime`), mesmo padrão de auth fail-closed dos vizinhos
+      (`ADMIN_MIGRATE_SECRET`, CLAUDE.md §9.45). 6 + 7 testes (orquestrador + rota, incluindo
+      ingestão de ponta a ponta contra o arquivo real de 7.829 linhas); `pnpm build` confirma a rota
+      compilando e listada no build de produção.
 - [ ] Provedor de consulta (expõe `PrecoReferencia` do SINAPI para o motor de similaridade —
       equivalente ao wiring do M16 no registry)
 - [ ] Exibir competência, regime de desoneração **e localidade de referência (capital, não o
@@ -733,3 +736,17 @@ de falha sistêmica no agregado. Suíte completa (737 testes), typecheck e lint 
 da ingestão real:** função orquestradora ligando `fontesSinapi.ts` + `sinapi.ts` + `runner.ts` —
 depende de decidir o mecanismo de baixa (o WAF da Caixa bloqueia acesso automatizado mesmo com
 headers de navegador, confirmado nesta sessão; provavelmente upload manual, não `fetch` direto).
+
+**Estado em 2026-08-07 (continuação — orquestrador e rota administrativa do M17):** +1 tarefa
+concluída (`[x]`) — **39 concluídas, 18 pendentes**. Decidido com o usuário: upload manual (a
+tentativa de download automatizado nesta mesma sessão confirmou o bloqueio do WAF mesmo com headers
+completos de navegador). `ingerirSinapi()` liga as três peças; rota `POST /api/admin/ingerir-sinapi`
+recebe o arquivo por multipart. TDD ponta a ponta, incluindo teste de ingestão real contra o arquivo
+de 7.829 linhas com mocks de banco. `pnpm build` confirma a rota no build de produção. **Achado de
+infraestrutura de teste, não do código de produção:** `Request`/`FormData` do ambiente jsdom (usado
+pela suíte) serializam `File` como string em vez do objeto real — contornado mockando
+`request.formData()` diretamente no teste da rota, documentado no próprio arquivo de teste para não
+ser redescoberto. Suíte completa: 750/751 (1 falha pré-existente e não relacionada,
+`painelPrecos.test.ts`, timeout de rede — confirmado por `git log` que nenhum arquivo daquele módulo
+foi tocado nesta sessão), typecheck e lint verdes. Falta do M17: provedor de consulta (wiring no
+registry de similaridade), exibição na UI, e as duas verificações finais.
