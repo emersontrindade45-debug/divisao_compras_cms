@@ -178,6 +178,9 @@ export async function processarPesquisaSimilaridade(
             scoreUnidadeQuantidade: r.scoreUnidadeQuantidade,
             adaptado: r.adaptado,
             justificativa: r.justificativa,
+            competenciaReferencia: r.candidato.metadadosPrecoReferencia?.competencia ?? null,
+            regimeReferencia: r.candidato.metadadosPrecoReferencia?.regime ?? null,
+            localidadeReferencia: r.candidato.metadadosPrecoReferencia?.localidade ?? null,
           })),
         });
       }

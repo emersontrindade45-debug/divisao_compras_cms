@@ -60,6 +60,36 @@ describe("buscarCandidatosSinapi", () => {
     });
   });
 
+  it("preenche metadadosPrecoReferencia (competencia/regime/localidade) quando regime é conhecido", async () => {
+    mocks.db.precoReferencia.findMany.mockResolvedValue([LINHA_BASE]);
+
+    const resultado = await buscarCandidatosSinapi("assentamento de tubo ferro fundido agua");
+
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].metadadosPrecoReferencia).toEqual({
+      competencia: "2024-12",
+      regime: "nao_desonerado",
+      localidade: "SAO PAULO",
+    });
+  });
+
+  it("não preenche metadadosPrecoReferencia quando o regime gravado não é um valor conhecido", async () => {
+    mocks.db.precoReferencia.findMany.mockResolvedValue([{ ...LINHA_BASE, regime: "" }]);
+
+    const resultado = await buscarCandidatosSinapi("assentamento de tubo ferro fundido agua");
+
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].metadadosPrecoReferencia).toBeUndefined();
+  });
+
+  it("usa 'não informada' como localidade quando metadados não trazem o campo", async () => {
+    mocks.db.precoReferencia.findMany.mockResolvedValue([{ ...LINHA_BASE, metadados: null }]);
+
+    const resultado = await buscarCandidatosSinapi("assentamento de tubo ferro fundido agua");
+
+    expect(resultado[0].metadadosPrecoReferencia?.localidade).toBe("não informada");
+  });
+
   it("descarta linhas cuja sobreposição de tokens com o termo é zero", async () => {
     mocks.db.precoReferencia.findMany.mockResolvedValue([
       { ...LINHA_BASE, descricaoNormalizada: "produto completamente nao relacionado xyz" },
