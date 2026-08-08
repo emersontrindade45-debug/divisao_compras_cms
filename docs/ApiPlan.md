@@ -767,8 +767,12 @@ Migration `20260807190000_m19_qualificacao_fornecedor` escrita manualmente (não
 `prisma migrate dev`): Docker Desktop não estava acessível neste ambiente de execução (serviço
 parado, requer elevação para iniciar, fora do escopo autorizado) e não havia `.env` com banco de
 dev configurado. O SQL foi conferido linha a linha contra o padrão das migrations anteriores do
-projeto — **não aplicada nem em dev nem em produção**; aplicação em produção exige autorização
-explícita do usuário (CLAUDE.md §8), como os milestones anteriores.
+projeto. **Aplicada em produção em 2026-08-08**, com autorização explícita do usuário (CLAUDE.md
+§8), via `POST /api/admin/migrate` (mesmo canal do M15/M16, CLAUDE.md §9.7) — junto com
+`20260807195603_m17_preco_referencia_regime` (M17, pendente havia mais tempo, aplicada na mesma
+chamada porque a rota aplica todas as pendentes de uma vez). Confirmado por `GET
+/api/admin/migrate` logo em seguida: `pendentes: []`, as 12 migrations do projeto em `aplicadas`
+(§9.19 — nunca deu por pronta só pela ausência de erro no POST).
 
 **(d) Verificação por mutação (§9.39/§9.45/§9.53).** A guarda fail-closed foi testada em duas
 camadas, cada uma com a mutação inversa aplicada e revertida:
@@ -786,7 +790,8 @@ camadas, cada uma com a mutação inversa aplicada e revertida:
 **Pendências explícitas para quando houver token real:** (1) validar o caminho de sucesso de
 `consultarSancoesCnpj` com uma chamada real a um CNPJ sancionado conhecido; (2) rodar
 `prisma migrate dev` contra um banco real para gerar a migration pelo caminho normal e comparar
-com a escrita manualmente; (3) aplicar a migration em produção sob autorização explícita.
+com a escrita manualmente. (3) — aplicar a migration em produção — **concluída em 2026-08-08**,
+ver nota acima.
 
 ---
 
