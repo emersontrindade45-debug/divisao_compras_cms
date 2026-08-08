@@ -445,17 +445,52 @@ primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.1
 - [x] Schema: campo `regime` em `PrecoReferencia` + chave única regravada (bloqueador identificado
       pelo spike, ver nota no §3.2 acima) — migration `20260807195603_m17_preco_referencia_regime`
       aplicada em dev, testes do runner cobrindo o campo (inclusive verificação por mutação)
-- [ ] Ingestão mensal de insumos e composições para SP
-- [ ] Provedor de consulta
-- [ ] Exibir competência, regime de desoneração **e localidade de referência (capital, não o
-      estado)** de forma explícita (dois preços legítimos para o mesmo código não podem se misturar
-      na série — confirmado por fonte primária, mecânica exata do arquivo ainda não)
-- [ ] Runner rejeita lote com cabeçalho inesperado e **falha visivelmente** (§9.22)
-- [ ] Runner sinaliza/rejeita lote **estruturalmente válido mas com preços zerados em massa** —
+- [x] Runner rejeita lote com cabeçalho inesperado e **falha visivelmente** (§9.22) —
+      `validarCabecalhoSinapi()` em `src/lib/ingestao/sinapi.ts`, compara as 12 colunas do relatório
+      de Composições Sintético uma a uma contra o layout medido no spike; layout diferente rejeita o
+      lote inteiro (não tenta adivinhar). Confirmado por mutação.
+- [x] Runner sinaliza/rejeita lote **estruturalmente válido mas com preços zerados em massa** —
       precedente real: a Caixa publicou os relatórios de out/2025 a dez/2025 com custos zerados por
       falha de envio do IBGE ("Nota 12/2025 nº 01"), sanado só em 22/12/2025. "Cabeçalho ok" não é
-      garantia de "preço utilizável".
-- [ ] **Verificação:** uma competência importada, contagem conferida contra o arquivo de origem
+      garantia de "preço utilizável". `detectarZeramentoEmMassa()` (limiar 50% das linhas com custo
+      ≤ 0) + hook opcional `validarLinhas` novo no runner genérico (`runner.ts`) — checagem sobre o
+      **conjunto** de linhas, separada da rejeição por linha que `normalizarLinha` já fazia (sem
+      isso, um lote 100% zerado apareceria como "todas as linhas rejeitadas" sem sinalizar causa
+      sistêmica). Confirmado por mutação; hook é genérico, reutilizável por fonte futura com o mesmo
+      problema.
+- [x] Parser do relatório de **Composições Sintético** (`src/lib/ingestao/sinapi.ts`) — decisão do
+      spike (§1.3): composição é a referência certa para pesquisa de preço, não insumo avulso;
+      "Sintético", não "Analítico" (que traz a receita de insumos, útil para decomposição, não para
+      a série principal). `parsearLinhasSinapi`/`normalizarLinhaSinapi` extraem competência e
+      localidade do cabeçalho de contexto (linha 3 do arquivo), tratam separador de milhar
+      brasileiro (`5.602,92`) e recebem `regime` como parâmetro externo (não é coluna da planilha —
+      é o ZIP de origem que determina, confirmado no spike §4). **Testado contra os dois tipos de
+      fixture** (CLAUDE.md §9.46): sintética gerada em memória (`XLSX.utils.aoa_to_sheet`, casos de
+      borda) e o **arquivo real de dezembro/2024** baixado pelo usuário
+      (`src/lib/ingestao/__fixtures__/sinapi_composicoes_sintetico_sp_202412.xlsx`, 7.829 linhas,
+      commitado no repo para reprodutibilidade) — 24 testes, incluindo verificação de que >99% das
+      linhas reais normalizam com sucesso e que a competência real (sem episódio de zeramento) não
+      dispara falso positivo na guarda nova.
+- [x] `FonteReferencia` "sinapi" cadastrada via upsert idempotente
+      (`src/lib/ingestao/fontesSinapi.ts`, `garantirFonteSinapi()`) — `baseLegal` já com o inciso
+      exato confirmado pelo spike (Lei 14.133 art. 23 §2º I), ao contrário do CATMAT/CATSER do M16
+      (que registram o enquadramento como "não verificado").
+- [ ] **Falta:** função orquestradora que baixa/recebe o arquivo do SINAPI e chama `executarIngestao`
+      de ponta a ponta (equivalente a `ingerirCatalogoComprasGov` do M16) — hoje só existem as peças
+      (`fontesSinapi.ts`, `sinapi.ts`, `runner.ts`), não a ligação entre elas. Decisão em aberto do
+      próprio spike (§4, "risco residual"): o WAF da Caixa bloqueia acesso automatizado mesmo com
+      headers de navegador completos (confirmado nesta sessão, `429` persistente) — a ingestão
+      provavelmente precisa ser semiautomática (upload manual do arquivo já baixado, sistema só
+      processa), não um `baixar()` que faz `fetch` direto como o runner genérico assume por padrão.
+      Decidir o mecanismo de baixa/upload antes de escrever o orquestrador.
+- [ ] Provedor de consulta (expõe `PrecoReferencia` do SINAPI para o motor de similaridade —
+      equivalente ao wiring do M16 no registry)
+- [ ] Exibir competência, regime de desoneração **e localidade de referência (capital, não o
+      estado)** de forma explícita na UI (os três já são capturados pelo parser em
+      `metadados`/`regime`/`dataReferencia`/`uf` — falta o componente que os renderiza)
+- [ ] **Verificação:** uma competência importada, contagem conferida contra o arquivo de origem —
+      parser já testado contra o arquivo real (24 testes acima), mas isto é sobre a ingestão de
+      ponta a ponta (banco), que depende do orquestrador acima
 - [ ] **Verificação:** três composições conferidas manualmente contra a planilha oficial
 
 **Peso legal (corrigido pelo spike).** O SINAPI não deriva peso da IN 65/2021 — ela não se aplica a
@@ -686,3 +721,15 @@ Registro completo em [ApiPlan-M17-spike.md](ApiPlan-M17-spike.md).
 (`migrate status`: `Database schema is up to date!`), garantia validada por mutação (§9.39). Suíte
 completa (717 testes), typecheck e lint verdes após a mudança. Produção fica para quando o runner do
 SINAPI for escrito, com autorização explícita.
+
+**Estado em 2026-08-07 (continuação — parser e guardas do M17, TDD):** +4 tarefas concluídas
+(`FonteReferencia` sinapi, parser de Composições Sintético, guarda de cabeçalho inesperado, guarda
+de zeramento em massa — todas `[x]`) — **38 concluídas, 19 pendentes**. TDD em todas as peças: teste
+escrito antes da implementação, cada guarda nova confirmada por mutação (§9.39). Parser testado
+contra fixture sintética **e** o arquivo real de dezembro/2024 baixado pelo usuário (7.829 linhas,
+commitado como fixture em `src/lib/ingestao/__fixtures__/` — CLAUDE.md §9.46). Hook `validarLinhas`
+novo no runner genérico (`runner.ts`) é reutilizável por qualquer fonte futura com o mesmo problema
+de falha sistêmica no agregado. Suíte completa (737 testes), typecheck e lint verdes. **Falta antes
+da ingestão real:** função orquestradora ligando `fontesSinapi.ts` + `sinapi.ts` + `runner.ts` —
+depende de decidir o mecanismo de baixa (o WAF da Caixa bloqueia acesso automatizado mesmo com
+headers de navegador, confirmado nesta sessão; provavelmente upload manual, não `fetch` direto).

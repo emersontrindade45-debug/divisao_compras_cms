@@ -51,6 +51,18 @@ export interface ConfigIngestao<TLinhaBruta> {
   parsearLinhas: (conteudo: Buffer) => TLinhaBruta[];
   /** Normaliza uma linha bruta, ou explica por que ela é rejeitada. */
   normalizarLinha: (linhaBruta: TLinhaBruta) => NormalizacaoLinha;
+  /**
+   * Checagem opcional sobre o **conjunto** de linhas já parseadas, antes de
+   * normalizar qualquer uma — para falhas sistêmicas que só aparecem no
+   * agregado (ex.: SINAPI publicando um lote inteiro com custo zerado por
+   * falha de envio do IBGE, precedente real out-nov/2025,
+   * docs/ApiPlan-M17-spike.md §2). `normalizarLinha` já rejeita valor <= 0
+   * linha a linha; sem este hook em separado, um lote inteiro zerado
+   * apareceria como "100% das linhas rejeitadas" sem nenhum sinal de que a
+   * causa é uma falha da fonte, não um erro de parsing. Ausente = sem
+   * checagem adicional (nenhuma fonte hoje exige isso além do SINAPI).
+   */
+  validarLinhas?: (linhasBrutas: TLinhaBruta[]) => { valido: boolean; motivo?: string };
 }
 
 export interface ResumoIngestao {
@@ -129,6 +141,16 @@ export async function executarIngestao<TLinhaBruta>(
   } catch (err) {
     const motivo = err instanceof Error ? err.message : "Falha ao interpretar o arquivo.";
     return marcarLoteComErro(lote.id, motivo);
+  }
+
+  if (config.validarLinhas) {
+    const validacao = config.validarLinhas(linhasBrutas);
+    if (!validacao.valido) {
+      return marcarLoteComErro(
+        lote.id,
+        validacao.motivo ?? "Conjunto de linhas reprovado na validação agregada.",
+      );
+    }
   }
 
   const validas: PrecoReferenciaNormalizado[] = [];

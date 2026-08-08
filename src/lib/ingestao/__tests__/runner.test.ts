@@ -202,4 +202,44 @@ describe("executarIngestao", () => {
     expect(resumo.erro).toBe("Arquivo corrompido");
     expect(mocks.db.precoReferencia.createMany).not.toHaveBeenCalled();
   });
+
+  it("rejeita o lote inteiro quando validarLinhas (opcional) reprova, sem normalizar nada", async () => {
+    const validarLinhas = vi.fn().mockReturnValue({
+      valido: false,
+      motivo: "Lote suspeito de zeramento em massa (precedente out-nov/2025).",
+    });
+    const config = configBase({ validarLinhas });
+
+    const resumo = await executarIngestao(config);
+
+    expect(validarLinhas).toHaveBeenCalledWith([
+      { codigo: "001", descricao: "Item A", valor: "10.00" },
+      { codigo: "002", descricao: "Item B", valor: "-5" },
+    ]);
+    expect(resumo.sucesso).toBe(false);
+    expect(resumo.erro).toBe("Lote suspeito de zeramento em massa (precedente out-nov/2025).");
+    expect(mocks.db.precoReferencia.createMany).not.toHaveBeenCalled();
+    expect(mocks.db.loteIngestao.update).toHaveBeenCalledWith({
+      where: { id: LOTE_ID },
+      data: {
+        concluidoEm: expect.any(Date),
+        erro: "Lote suspeito de zeramento em massa (precedente out-nov/2025).",
+      },
+    });
+  });
+
+  it("prossegue normalmente quando validarLinhas (opcional) aprova o lote", async () => {
+    const validarLinhas = vi.fn().mockReturnValue({ valido: true });
+    const config = configBase({ validarLinhas });
+
+    const resumo = await executarIngestao(config);
+
+    expect(resumo.sucesso).toBe(true);
+    expect(mocks.db.precoReferencia.createMany).toHaveBeenCalled();
+  });
+
+  it("sem validarLinhas configurado, ingestão prossegue normalmente (hook opcional)", async () => {
+    const resumo = await executarIngestao(configBase());
+    expect(resumo.sucesso).toBe(true);
+  });
 });
