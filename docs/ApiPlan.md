@@ -516,7 +516,7 @@ primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.1
       gravado for um dos dois valores conhecidos — dado legado/corrompido não inventa um valor) →
       três colunas nullable novas em `ResultadoSimilaridade`
       (`competenciaReferencia`/`regimeReferencia`/`localidadeReferencia`, migration
-      `20260808124610_m17_metadados_preco_referencia_similaridade`, aplicada em dev) → persistidas
+      `20260808124610_m17_metadados_preco_referencia_similaridade`) → persistidas
       em `pesquisaSimilaridade.ts` (`createMany`) → `select` explícito acrescentado em
       `obterFontesSimilaridade` (`listar.ts`, CLAUDE.md §9.46) → renderizadas em
       `FontesSimilaridadeList.tsx` (componente que já lista os candidatos de similaridade de
@@ -526,6 +526,19 @@ primário por trás (Notas_SINAPI.pdf, Livro_Metodologias.pdf da Caixa, Lei 14.1
       inteiro — só renderiza quando `tipoCandidato === "preco_referencia"`. 8 testes novos (3 no
       provedor, 2 na action, 2 no componente + verificação de ausência do bloco para
       `contratacao_publica`).
+
+      **Incidente em produção (2026-08-08).** A migration acima só tinha sido aplicada em dev
+      (mesmo padrão de "aplicação em produção exige autorização explícita" seguido nos milestones
+      anteriores) — mas o código que a exige (`select` em `obterFontesSimilaridade`) já estava em
+      `main` e foi ao ar. Usuário reportou erro real ao abrir um processo (`Minified React error
+      #419`, Server Component). `get_runtime_errors` (Vercel) identificou a causa exata:
+      `PrismaClientKnownRequestError P2022 — column resultados_similaridade.competenciaReferencia
+      does not exist`. Aplicada em produção no mesmo dia, com autorização explícita, via
+      `POST /api/admin/migrate`; `GET` seguinte confirmou `pendentes: []`, 13/13 migrations
+      aplicadas. **Lição:** mesclar código que depende de uma migration não aplicada em produção é
+      um defeito latente até alguém exercitar o caminho — reforça CLAUDE.md §9.19/§9.46: a
+      aplicação em produção devia ter sido feita (ou pelo menos oferecida) no mesmo momento do
+      merge desta tarefa, não deixada para depois.
 - [x] **Verificação:** uma competência importada, contagem conferida contra o arquivo de origem.
       **Fechado em 2026-08-08 contra banco de dev local real** (não mock, não produção — ver nota
       abaixo): upload do fixture real de dezembro/2024
