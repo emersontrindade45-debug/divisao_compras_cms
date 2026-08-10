@@ -26,6 +26,14 @@ import type {
  */
 export const MODELO_ASSISTENTE_PADRAO = "gpt-5.4-mini";
 
+/**
+ * Teto por chamada ao modelo. Dimensionado para caber no `maxDuration = 60` da
+ * rota junto com o orçamento de ferramentas (`ORCAMENTO_TEMPO_TURNO_MS`): mesmo
+ * quando o laço para no limite de tempo, ainda sobra folga para a chamada de
+ * fechamento, a gravação da mensagem e a auditoria.
+ */
+const TIMEOUT_MODELO_MS = 15_000;
+
 export function modeloAssistente(): string {
   return process.env.OPENAI_ASSISTENTE_MODEL?.trim() || MODELO_ASSISTENTE_PADRAO;
 }
@@ -194,12 +202,19 @@ export class AssistenteOpenAI implements ModeloConversacional {
       }
     }
 
-    const resposta = await ai.responses.create({
-      model: modeloAssistente(),
-      instructions: this.opcoes.instrucoesSistema,
-      input: historicoParaInput(historico),
-      ...(tools.length > 0 ? { tools } : {}),
-    });
+    const resposta = await ai.responses.create(
+      {
+        model: modeloAssistente(),
+        instructions: this.opcoes.instrucoesSistema,
+        input: historicoParaInput(historico),
+        ...(tools.length > 0 ? { tools } : {}),
+      },
+      // O padrão do SDK é 10 MINUTOS de timeout com 2 retries — inofensivo num
+      // script, fatal aqui: a rota tem `maxDuration = 60`, então uma chamada
+      // pendurada não devolve erro, ela deixa a função ser morta no meio do
+      // stream SSE e o cliente fica girando (CLAUDE.md §9.64).
+      { timeout: TIMEOUT_MODELO_MS, maxRetries: 1 },
+    );
 
     const interpretada = interpretarResposta(resposta.output);
     this.ultimasCitacoes = interpretada.citacoes;

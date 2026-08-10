@@ -16,6 +16,32 @@ const MAX_TENTATIVAS = 3;
 const BACKOFF_BASE_MS = 1000;
 const LOTE_BUSCA_ITENS = 5;
 
+/**
+ * Timeout por requisição. **Sem ele o `fetch` do Node herda o padrão do undici,
+ * que é de 300s por fase** — uma única requisição pendurada consome sozinha todo
+ * o `maxDuration` da função serverless, e no assistente isso mata o stream SSE
+ * no meio (o cliente fica com o passo girando para sempre).
+ *
+ * 10s é folga larga sobre a latência real medida contra a API em 2026-08-10:
+ * ~2,5s na busca textual, ~1,4s por página de `/itens`, ~47ms em `/resultados`.
+ * O corte precisa ser generoso o bastante para não descartar resposta lenta
+ * legítima, e curto o bastante para o retry ainda caber no orçamento do turno.
+ */
+const TIMEOUT_REQUISICAO_MS = 10_000;
+
+/**
+ * Teto de tempo da busca inteira. O timeout por requisição não basta: o custo
+ * agregado é que estoura o orçamento — 82 requisições HTTP numa única busca,
+ * medido em 2026-08-10, e isso com apenas 7 editais dos 20 que a busca textual
+ * pode devolver.
+ *
+ * Verificado ENTRE lotes, nunca no meio de um: abortar um lote pela metade
+ * desperdiçaria requisições já pagas e devolveria candidatos de um subconjunto
+ * arbitrário dos itens de uma compra. Devolver menos editais, todos completos, é
+ * preferível — o assistente pode refinar o termo no turno seguinte.
+ */
+const TEMPO_MAX_BUSCA_MS = 20_000;
+
 // **O padrão de `/itens` é 10 registros por página** — medido contra a API real em
 // 2026-07-30, não documentado. Sem paginar, toda contratação com mais de 10 itens era
 // truncada no décimo em silêncio: numa compra de 418 itens, enxergávamos 2,4% dela.
@@ -48,7 +74,12 @@ async function fetchComRetry(url: string): Promise<Response> {
   let ultimoErro: unknown;
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
     try {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      // Sinal novo a cada tentativa: um `AbortSignal.timeout` já disparado
+      // aborta a requisição seguinte instantaneamente, anulando o retry.
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(TIMEOUT_REQUISICAO_MS),
+      });
       const retryavel = res.status === 429 || res.status >= 500;
       if (res.ok || !retryavel || tentativa === MAX_TENTATIVAS) return res;
       console.warn(`[PNCP] HTTP ${res.status} (tentativa ${tentativa}/${MAX_TENTATIVAS}): ${url}`);
@@ -340,9 +371,16 @@ export async function buscarContratosPNCP(
   if (!termo.trim()) return [];
 
   try {
+    const inicio = Date.now();
     const processos = await buscarPorTexto(termo);
     const itensPorProcesso: CandidatoSimilaridade[][] = [];
     for (let i = 0; i < processos.length; i += LOTE_BUSCA_ITENS) {
+      if (Date.now() - inicio >= TEMPO_MAX_BUSCA_MS) {
+        console.warn(
+          `[PNCP] Teto de tempo atingido em "${termo}": ${i} de ${processos.length} editais lidos.`,
+        );
+        break;
+      }
       const lote = processos.slice(i, i + LOTE_BUSCA_ITENS);
       itensPorProcesso.push(
         ...(await Promise.all(lote.map((processo) => buscarItensDaCompra(processo, termo)))),

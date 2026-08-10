@@ -19,6 +19,33 @@ import type { CandidatoSugerido } from "./sugestoes";
  */
 export const MAX_PASSOS_POR_TURNO = 8;
 
+/**
+ * Teto de TEMPO gasto com ferramentas por mensagem do usuário.
+ *
+ * O teto de passos não bastava: uma única `buscar_pncp` pode custar dezenas de
+ * segundos — medido contra a API real em 2026-08-10, o termo "lavagem fachada
+ * predio novo pastilhas pele de vidro" gastou 11s e 82 requisições HTTP com
+ * apenas 7 editais; com os 20 que a busca textual pode devolver, passa de 30s.
+ * Duas buscas assim estouram o `maxDuration = 60` da rota.
+ *
+ * E estourar o `maxDuration` não é uma falha benigna: a Vercel mata a função no
+ * meio do stream SSE, o cliente nunca recebe `fim` nem `erro`, e o passo em
+ * andamento gira para sempre — junto com ele, os candidatos já encontrados ficam
+ * inaprováveis, porque o `mensagemId` só chega no `fim`.
+ *
+ * 35s deixa ~25s de folga para o fechamento com o modelo (teto de 15s), a
+ * gravação da mensagem e a auditoria. Ao esgotar, o caminho é o MESMO do teto de
+ * passos: pede fechamento ao modelo e marca `orcamentoEsgotado`, que a UI
+ * transforma no botão "Continuar procurando".
+ *
+ * O orçamento é conferido ANTES de cada ferramenta, então ele não interrompe uma
+ * ferramenta já em curso — quem limita essa ponta são os tetos internos de cada
+ * integração (ver `TEMPO_MAX_BUSCA_MS` no PNCP). A combinação cobre o caso comum
+ * com folga; para a cauda que ainda assim estourar, a rede de segurança é o
+ * cliente tratar stream truncado (`AssistenteChat`), não este número.
+ */
+export const ORCAMENTO_TEMPO_TURNO_MS = 35_000;
+
 /** Quantos caracteres de resultado de ferramenta entram no rastro exibido. */
 const TAMANHO_RESUMO_PASSO = 500;
 
@@ -89,6 +116,8 @@ export interface OpcoesTurno {
   modelo: ModeloConversacional;
   executar: ExecutorFerramenta;
   maxPassos?: number;
+  /** Teto de tempo de ferramentas. Ver `ORCAMENTO_TEMPO_TURNO_MS`. */
+  orcamentoMs?: number;
   onEvento?: (evento: EventoTurno) => void;
   agora?: () => number;
 }
@@ -96,7 +125,11 @@ export interface OpcoesTurno {
 export interface ResultadoTurno {
   texto: string;
   passos: PassoRegistrado[];
-  /** true quando o laço parou por teto de passos, não por decisão do modelo. */
+  /**
+   * true quando o laço parou por teto (de passos ou de tempo), não por decisão
+   * do modelo. Os dois casos são a mesma coisa para a UI: ainda há caminho a
+   * seguir, e o usuário decide se quer gastar outro turno nele.
+   */
   orcamentoEsgotado: boolean;
   /** Histórico acrescido das mensagens do turno, pronto para persistir. */
   historico: TurnoMensagem[];
@@ -123,19 +156,26 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
     modelo,
     executar,
     maxPassos = MAX_PASSOS_POR_TURNO,
+    orcamentoMs = ORCAMENTO_TEMPO_TURNO_MS,
     onEvento,
     agora = () => Date.now(),
   } = opcoes;
 
   const historico: TurnoMensagem[] = [...historicoInicial];
   const passos: PassoRegistrado[] = [];
+  const inicioTurno = agora();
   let textoFinal = "";
   let orcamentoEsgotado = false;
+
+  // O tempo é medido, e não estimado, porque o custo de uma busca varia em uma
+  // ordem de grandeza conforme o termo: uma compra com 1.039 itens obriga a
+  // paginar `/itens` três vezes, outra resolve em uma requisição.
+  const tempoEsgotado = () => agora() - inicioTurno >= orcamentoMs;
 
   // `maxPassos` conta ferramentas executadas, não idas ao modelo. Um orçamento
   // de 0 é válido e significa "responda sem pesquisar".
   while (true) {
-    const podeUsarFerramentas = passos.length < maxPassos;
+    const podeUsarFerramentas = passos.length < maxPassos && !tempoEsgotado();
     const resposta = await modelo.responder(historico, podeUsarFerramentas);
 
     if (resposta.texto) {
@@ -158,14 +198,22 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
     // executa-se o que cabe, e o restante entra como resultado explicando o corte
     // — melhor do que ignorar a chamada e deixar o modelo esperando.
     for (const chamada of resposta.chamadas) {
-      if (passos.length >= maxPassos) {
+      // O tempo é reavaliado a CADA chamada, não uma vez por rodada: o modelo
+      // costuma pedir várias buscas de uma vez, e sem esta checagem a primeira
+      // delas poderia consumir o orçamento inteiro e as seguintes rodariam
+      // assim mesmo, estourando o `maxDuration`.
+      const semTempo = tempoEsgotado();
+      if (passos.length >= maxPassos || semTempo) {
         orcamentoEsgotado = true;
         historico.push({
           papel: "tool",
           chamadaId: chamada.id,
           conteudo: JSON.stringify({
-            erro: "Orçamento de buscas deste turno esgotado. Não execute mais ferramentas: " +
-              "responda ao usuário com o que já encontrou e diga o que tentaria em seguida.",
+            erro: semTempo
+              ? "Tempo de pesquisa deste turno esgotado. Não execute mais ferramentas: " +
+                "responda ao usuário com o que já encontrou e diga o que tentaria em seguida."
+              : "Orçamento de buscas deste turno esgotado. Não execute mais ferramentas: " +
+                "responda ao usuário com o que já encontrou e diga o que tentaria em seguida.",
           }),
         });
         continue;
@@ -208,7 +256,7 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
       });
     }
 
-    if (passos.length >= maxPassos) {
+    if (passos.length >= maxPassos || tempoEsgotado()) {
       orcamentoEsgotado = true;
       // Fechamento obrigatório: sem esta chamada o turno terminaria com o último
       // texto do modelo (frequentemente vazio, porque ele estava pedindo

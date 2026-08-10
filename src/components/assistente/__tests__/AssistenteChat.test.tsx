@@ -306,4 +306,90 @@ describe("AssistenteChat", () => {
     const corpo = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)) as Record<string, unknown>;
     expect(corpo.processoId).toBeNull();
   });
+
+  // -------------------------------------------------------------------------
+  // Stream cortado no meio (CLAUDE.md §9.64).
+  //
+  // Quando a Vercel mata a função por `maxDuration`, o corpo da resposta fecha
+  // sem `fim` nem `erro`. `lerStreamSSE` resolve normalmente — fim de stream é
+  // indistinguível de fim de conteúdo — então o `catch` não roda e nada apaga o
+  // `emAndamento`. Era o defeito relatado: o passo girava para sempre.
+  // -------------------------------------------------------------------------
+
+  const PASSO_ABERTO = [
+    bloco("conversa", { conversaId: "conv-1" }),
+    bloco("passo_inicio", {
+      ferramenta: "buscar_pncp",
+      argumentos: '{"termo":"lavagem fachada predio novo pastilhas pele de vidro"}',
+    }),
+  ];
+
+  it("enquanto a busca corre, o passo aparece girando", async () => {
+    // Controle do caso seguinte: prova que o seletor do spinner encontra algo
+    // de verdade. Sem ele, `toBeNull()` lá embaixo passaria mesmo se a correção
+    // fosse removida — bastaria eu ter errado a classe.
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const b of PASSO_ABERTO) controller.enqueue(encoder.encode(b));
+        // Deliberadamente NÃO fecha: é o turno ainda em andamento.
+      },
+    });
+    mockFetch(new Response(body, { status: 200 }));
+    const { container } = render(<AssistenteChat processoId="proc-1" />);
+
+    perguntar("procure");
+
+    await waitFor(() => {
+      expect(screen.getByText("Buscando contratações no PNCP")).toBeInTheDocument();
+    });
+    expect(container.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("para de girar e avisa quando o stream fecha sem `fim` nem `erro`", async () => {
+    mockFetch(respostaSSE(PASSO_ABERTO));
+    const { container } = render(<AssistenteChat processoId="proc-1" />);
+
+    perguntar("procure");
+
+    await waitFor(() => {
+      expect(screen.getByText(/interrompida antes de terminar/i)).toBeInTheDocument();
+    });
+    expect(container.querySelector(".animate-spin")).toBeNull();
+    // O passo continua listado: o usuário precisa ver o que chegou a ser
+    // tentado, e o termo é o que ele vai encurtar na próxima tentativa.
+    expect(screen.getByText("Buscando contratações no PNCP")).toBeInTheDocument();
+  });
+
+  it("o turno completo não dispara o aviso de interrupção", async () => {
+    mockFetch(respostaSSE(TURNO_SIMPLES));
+    render(<AssistenteChat processoId="proc-1" />);
+
+    perguntar("procure");
+
+    await waitFor(() => {
+      expect(screen.getByText("Encontrei 3 contratações comparáveis.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/interrompida antes de terminar/i)).not.toBeInTheDocument();
+  });
+
+  it("o evento `erro` do servidor prevalece sobre o aviso de interrupção", async () => {
+    mockFetch(
+      respostaSSE([
+        ...PASSO_ABERTO,
+        bloco("erro", { conversaId: "conv-1", mensagem: "O PNCP está fora do ar." }),
+      ]),
+    );
+    const { container } = render(<AssistenteChat processoId="proc-1" />);
+
+    perguntar("procure");
+
+    await waitFor(() => {
+      expect(screen.getByText("O PNCP está fora do ar.")).toBeInTheDocument();
+    });
+    // Erro explícito do servidor é um final legítimo: não pode ser sobrescrito
+    // pela mensagem genérica de stream truncado, que diria a causa errada.
+    expect(screen.queryByText(/interrompida antes de terminar/i)).not.toBeInTheDocument();
+    expect(container.querySelector(".animate-spin")).toBeNull();
+  });
 });

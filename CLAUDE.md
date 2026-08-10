@@ -767,3 +767,29 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     como "não verificada contra a API ao vivo", isso é bloqueante para considerar o componente
     pronto — resolver antes do merge (uma chamada real basta) ou, se adiado por decisão explícita,
     o merge não pode carregar checkbox `[x]` para as partes que dependem dela.
+64. **Stream fechado sem evento de término é sucesso silencioso para o leitor — todo consumidor de
+    SSE precisa de um final explícito.** O assistente ficava com o passo "Buscando contratações no
+    PNCP" girando para sempre. A causa não estava no PNCP nem no laço: `lerStreamSSE` faz
+    `if (done) break` e **resolve normalmente**, porque fim de stream é indistinguível de fim de
+    conteúdo. Quando a Vercel matava a função por `maxDuration = 60`, o corpo fechava sem `fim` nem
+    `erro`, o `catch` do cliente não rodava, e nada apagava o `emAndamento` — que só era limpo pelos
+    handlers desses dois eventos. Pior que o spinner: os candidatos já exibidos ficavam
+    inaprováveis, porque o `mensagemId` que autoriza a aprovação só chega no `fim`, e a mensagem do
+    assistente só é gravada depois do turno inteiro. Regra: ao consumir stream, o cliente rastreia
+    se viu um final legítimo e trata a ausência como falha explícita; nunca deduzir sucesso de "a
+    leitura terminou sem exceção". Vale para SSE, WebSocket e resposta em chunks.
+    **Corolário sobre o orçamento de tempo:** rota com `maxDuration` que chama API externa em
+    fan-out precisa de teto de tempo próprio, e o teto tem de existir em três níveis, porque cada um
+    cobre um modo de falha diferente — por requisição (`AbortSignal.timeout`; sem ele o `fetch` do
+    Node herda os **300s** do undici, não algum padrão razoável), por integração (custo agregado:
+    uma `buscar_pncp` gastou 11s e **82 requisições HTTP** medidas contra a API real, e isso com 7
+    dos 20 editais possíveis) e por turno (`ORCAMENTO_TEMPO_TURNO_MS`, conferido antes de cada
+    ferramenta). Nenhum deles substitui os outros: timeout por requisição não vê o agregado, e teto
+    por turno não interrompe ferramenta já em curso. Cuidado com o padrão do SDK: o cliente da
+    OpenAI vem com **10 minutos** de timeout e 2 retries — inofensivo num script, fatal numa função
+    serverless de 60s.
+    **E cuidado com o custo escondido no termo de busca:** o filtro de relevância do PNCP mantém o
+    item que compartilhe **qualquer** token com o termo, então frase longa em linguagem natural
+    aumenta o custo e piora o resultado ao mesmo tempo. Em "lavagem fachada predio novo pastilhas
+    pele de vidro", o token `novo` sozinho respondeu por 125 dos matches, trazendo argamassa e
+    abraçadeira de nylon como candidatos a referência de preço.

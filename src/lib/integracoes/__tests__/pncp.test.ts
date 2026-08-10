@@ -610,3 +610,74 @@ describe("conformidade da evidência PNCP", () => {
     expect(resultado.map((c) => c.fonteOrgaoOuId)).toEqual(["Prefeitura A", "Prefeitura B"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tetos de tempo (CLAUDE.md §9.64).
+//
+// Medido contra a API real em 2026-08-10: um termo longo gastou 11s e 82
+// requisições HTTP com apenas 7 dos 20 editais que a busca textual pode
+// devolver. Sem teto, uma única busca estoura o `maxDuration = 60` da rota do
+// assistente — e estourar não devolve erro, mata a função no meio do stream.
+// ---------------------------------------------------------------------------
+
+describe("tetos de tempo", () => {
+  it("passa um AbortSignal em toda requisição, para não herdar os 300s do undici", async () => {
+    const spy = mockPncp({ processos: [processoPadrao] });
+
+    await buscarContratosPNCP("cadeira");
+
+    expect(spy.mock.calls.length).toBeGreaterThan(0);
+    for (const [, init] of spy.mock.calls) {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+
+  it("para de ler editais ao atingir o teto de tempo, devolvendo o que já achou", async () => {
+    const processos = Array.from({ length: 12 }, (_, i) => ({
+      ...processoPadrao,
+      numero_controle_pncp: `ctrl-${i}`,
+      numero_sequencial: String(i + 1),
+    }));
+
+    let relogio = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => relogio);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Cada requisição "gasta" 3s: o primeiro lote de 5 editais já passa dos 20s.
+    mockPncp({
+      processos,
+      onUrl: () => {
+        relogio += 3_000;
+      },
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    // Só o primeiro lote entrou; sem o teto seriam os 12 editais.
+    expect(resultado).toHaveLength(5);
+    // Truncar em silêncio esconderia uma busca incompleta atrás de um resultado
+    // que parece completo — o corte precisa deixar rastro no log.
+    const avisos = warnSpy.mock.calls.filter((args) => String(args[0]).includes("Teto de tempo"));
+    expect(avisos).toHaveLength(1);
+  });
+
+  it("não corta nada quando a busca cabe no teto", async () => {
+    const processos = Array.from({ length: 12 }, (_, i) => ({
+      ...processoPadrao,
+      numero_controle_pncp: `ctrl-${i}`,
+      numero_sequencial: String(i + 1),
+    }));
+
+    let relogio = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => relogio);
+    mockPncp({
+      processos,
+      onUrl: () => {
+        relogio += 10;
+      },
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toHaveLength(12);
+  });
+});

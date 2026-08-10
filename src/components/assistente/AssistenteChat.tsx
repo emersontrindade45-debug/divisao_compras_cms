@@ -177,6 +177,14 @@ export function AssistenteChat({
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // `fim` e `erro` são os dois únicos finais legítimos do stream, e ambos
+      // apagam o giro dos passos. Quando a função serverless é morta por
+      // `maxDuration`, o corpo da resposta fecha sem nenhum dos dois: o
+      // `lerStreamSSE` resolve normalmente (fim de stream é indistinguível de
+      // fim de conteúdo), o `catch` abaixo não roda, e sem esta flag o último
+      // passo girava para sempre. Ver CLAUDE.md §9.64.
+      let concluido = false;
+
       try {
         const res = await fetch("/api/assistente/chat", {
           method: "POST",
@@ -254,6 +262,7 @@ export function AssistenteChat({
             return;
           }
           if (nome === "fim") {
+            concluido = true;
             atualizar((m) => ({
               ...m,
               conteudo: String(dados.texto ?? m.conteudo),
@@ -268,6 +277,7 @@ export function AssistenteChat({
             return;
           }
           if (nome === "erro") {
+            concluido = true;
             atualizar((m) => ({
               ...m,
               erro: String(dados.mensagem ?? "Falha ao processar a mensagem."),
@@ -275,6 +285,23 @@ export function AssistenteChat({
             }));
           }
         });
+
+        if (!concluido) {
+          // O turno foi cortado no meio (quase sempre o teto de tempo da função
+          // na Vercel). O que já apareceu na tela continua legível, mas nada
+          // disso ficou gravado: a mensagem do assistente só é criada no fim do
+          // turno, e é dela que sai o `mensagemId` que autoriza aprovar os
+          // candidatos. Por isso o texto manda repetir, em vez de sugerir que a
+          // busca "quase" deu certo.
+          atualizar((m) => ({
+            ...m,
+            erro:
+              "A pesquisa foi interrompida antes de terminar e não ficou gravada. " +
+              "Tente de novo com um termo mais curto e específico — termos longos " +
+              "multiplicam as consultas ao PNCP e estouram o tempo da requisição.",
+            passos: m.passos.map((p) => ({ ...p, emAndamento: false })),
+          }));
+        }
       } catch (erro) {
         if (erro instanceof DOMException && erro.name === "AbortError") return;
         atualizar((m) => ({

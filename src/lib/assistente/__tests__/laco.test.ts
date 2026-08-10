@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   executarTurno,
   MAX_PASSOS_POR_TURNO,
+  ORCAMENTO_TEMPO_TURNO_MS,
   type ChamadaFerramenta,
   type EventoTurno,
   type ModeloConversacional,
@@ -268,5 +269,123 @@ describe("executarTurno", () => {
 
   it("o teto padrão é o documentado", () => {
     expect(MAX_PASSOS_POR_TURNO).toBe(8);
+  });
+
+  // -------------------------------------------------------------------------
+  // Orçamento de TEMPO.
+  //
+  // O teto de passos não protegia o `maxDuration = 60` da rota: uma única
+  // `buscar_pncp` custa dezenas de segundos (11s e 82 requisições HTTP medidos
+  // contra a API real). Estourar o `maxDuration` mata a função no meio do
+  // stream SSE, e o passo em andamento gira para sempre no cliente.
+  // -------------------------------------------------------------------------
+
+  it("para de executar ferramentas quando o tempo do turno esgota", async () => {
+    let relogio = 0;
+    const executar = vi.fn(async () => {
+      // Cada busca "gasta" 20s — duas já passam do orçamento de 35s.
+      relogio += 20_000;
+      return { conteudo: "{}" };
+    });
+    const modelo = modeloRoteirizado([
+      { texto: "", chamadas: [chamada("buscar_pncp", "c1")] },
+      { texto: "", chamadas: [chamada("buscar_pncp", "c2")] },
+      // Terceira ida ao modelo já é o fechamento: aos 40s o laço não pede mais
+      // ferramenta nenhuma.
+      { texto: "Fechamento com o que achei.", chamadas: [] },
+    ]);
+
+    const res = await executarTurno({
+      historico: [{ papel: "user", conteudo: "procure" }],
+      modelo,
+      executar,
+      agora: () => relogio,
+    });
+
+    // Duas rodaram (relógio em 0s e 20s); a terceira nem chegou a ser pedida.
+    expect(executar).toHaveBeenCalledTimes(2);
+    expect(res.passos).toHaveLength(2);
+    expect(res.orcamentoEsgotado).toBe(true);
+    // Não pode acabar em silêncio: o turno fecha com texto para o usuário.
+    expect(res.texto).toBe("Fechamento com o que achei.");
+  });
+
+  it("com o tempo esgotado, o fechamento é pedido sem ferramentas", async () => {
+    let relogio = 0;
+    const modelo = modeloRoteirizado([
+      { texto: "", chamadas: [chamada("buscar_pncp", "c1")] },
+      { texto: "Fechei.", chamadas: [] },
+    ]);
+
+    await executarTurno({
+      historico: [{ papel: "user", conteudo: "procure" }],
+      modelo,
+      executar: async () => {
+        relogio += 40_000;
+        return { conteudo: "{}" };
+      },
+      agora: () => relogio,
+    });
+
+    // A última ida ao modelo tem de proibir ferramentas: com elas liberadas o
+    // modelo pediria outra busca e o laço gastaria mais uma rodada inteira.
+    expect(modelo.chamadasRecebidas.at(-1)).toBe(false);
+  });
+
+  it("não interfere no turno rápido: nada é cortado dentro do orçamento", async () => {
+    let relogio = 0;
+    const executar = vi.fn(async () => {
+      relogio += 500;
+      return { conteudo: "{}" };
+    });
+    const modelo = modeloRoteirizado([
+      { texto: "", chamadas: [chamada("a", "c1"), chamada("b", "c2")] },
+      { texto: "Pronto.", chamadas: [] },
+    ]);
+
+    const res = await executarTurno({
+      historico: [{ papel: "user", conteudo: "x" }],
+      modelo,
+      executar,
+      agora: () => relogio,
+    });
+
+    expect(executar).toHaveBeenCalledTimes(2);
+    expect(res.orcamentoEsgotado).toBe(false);
+  });
+
+  it("o orçamento é reavaliado a cada chamada do mesmo lote", async () => {
+    let relogio = 0;
+    const executar = vi.fn(async () => {
+      relogio += 40_000;
+      return { conteudo: "{}" };
+    });
+    // O modelo pede três buscas DE UMA VEZ. Sem reavaliar o tempo dentro do
+    // laço, as três rodariam porque o orçamento estava intacto no início.
+    const modelo = modeloRoteirizado([
+      { texto: "", chamadas: [chamada("a", "c1"), chamada("b", "c2"), chamada("c", "c3")] },
+      { texto: "Fechei.", chamadas: [] },
+    ]);
+
+    const res = await executarTurno({
+      historico: [{ papel: "user", conteudo: "x" }],
+      modelo,
+      executar,
+      agora: () => relogio,
+    });
+
+    expect(executar).toHaveBeenCalledTimes(1);
+    expect(res.orcamentoEsgotado).toBe(true);
+    // As duas chamadas cortadas precisam voltar ao modelo dizendo POR QUE
+    // foram cortadas — a Responses API exige resposta para toda chamada, e sem
+    // o motivo o modelo repete a mesma busca no turno seguinte.
+    const tools = res.historico.filter((m) => m.papel === "tool");
+    expect(tools).toHaveLength(3);
+    expect(tools[1]!.conteudo).toMatch(/tempo/i);
+    expect(tools[2]!.conteudo).toMatch(/tempo/i);
+  });
+
+  it("o orçamento de tempo padrão é o documentado", () => {
+    expect(ORCAMENTO_TEMPO_TURNO_MS).toBe(35_000);
   });
 });
