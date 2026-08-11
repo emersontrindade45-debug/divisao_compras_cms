@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // `buscarPrecosPainelPrecos` delega para `buscarContratosComprasGov`
 // (comprasGov.ts), que desde o M16 consulta `ItemCatalogoReferencia` antes de
@@ -11,6 +11,28 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { buscarPrecosPainelPrecos } from "../painelPrecos";
+
+// Sem este mock, o banco vazio (findMany: []) aciona o fallback
+// `baixarCatalogoServicosPorRequest`, que faz fetch real para
+// dadosabertos.compras.gov.br — confirmado: o teste levava 2,8–3,2s e emitia
+// "[ComprasGov] ItemCatalogoReferencia vazia para catser — usando fallback por
+// request". Simula API devolvendo catálogo vazio, o que é o estado esperado
+// neste ambiente de teste (sem ingestão rodada).
+beforeEach(() => {
+  vi.spyOn(global, "fetch").mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      resultado: [],
+      totalRegistros: 0,
+      totalPaginas: 1,
+      paginasRestantes: 0,
+    }),
+  } as Response);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("buscarPrecosPainelPrecos", () => {
   it("retorna lista vazia (integração desativada — sem busca por texto livre na API pública)", async () => {

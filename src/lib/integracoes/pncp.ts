@@ -65,11 +65,14 @@ const RESERVA_LOTE_MS = 2_000;
  * custaram 15,6s. O custo vem de quantos editais a busca textual devolve e de
  * quantos itens cada um tem, não do tamanho do termo.
  *
- * 120 cobre ~12 editais completos, e a busca nunca exibe mais que
- * `MAX_SUGESTOES_POR_BUSCA` (25) candidatos — consultar mais que isso era
- * trabalho jogado fora.
+ * Era 120 (12 editais); aumentado para 150 (15 editais) junto com a busca em
+ * duas páginas paralelas. Com pool de 40 editais, o ranqueador por IDF escolhe
+ * os 15 mais aderentes, em vez de 12 de 20 — mesma linha de custo de tempo
+ * (~7,5s efetivos após busca textual + reserva de lote). A busca nunca exibe
+ * mais que `MAX_SUGESTOES_POR_BUSCA` (25) candidatos — consultar mais que isso
+ * é trabalho jogado fora.
  */
-const MAX_RESULTADOS_POR_BUSCA = 120;
+const MAX_RESULTADOS_POR_BUSCA = 150;
 
 // **O padrão de `/itens` é 10 registros por página** — medido contra a API real em
 // 2026-07-30, não documentado. Sem paginar, toda contratação com mais de 10 itens era
@@ -251,7 +254,16 @@ function limparDescricao(bruta: string): string {
  * livre — esse endpoint é o que permite encontrar processos relevantes ao
  * termo do item, em vez de uma amostra aleatória de publicações recentes.
  */
-async function buscarPorTexto(termo: string, ctx: ContextoBusca): Promise<PNCPSearchItem[]> {
+/**
+ * Busca textual para uma página específica da API. Chamada em paralelo para as
+ * páginas 1 e 2 em `buscarContratosPNCP`; expõe o parâmetro para que os testes
+ * possam asserir que ambas as páginas são pedidas.
+ */
+async function buscarPorTexto(
+  termo: string,
+  ctx: ContextoBusca,
+  pagina = 1,
+): Promise<PNCPSearchItem[]> {
   const params = new URLSearchParams({
     q: termo,
     tipos_documento: "edital",
@@ -259,7 +271,7 @@ async function buscarPorTexto(termo: string, ctx: ContextoBusca): Promise<PNCPSe
     // (corte de 365 dias); ordenar por data aqui só traz os editais mais recentes
     // que casam vagamente com o termo, sacrificando os realmente relevantes.
     ordenacao: "relevancia",
-    pagina: "1",
+    pagina: String(pagina),
     tam_pagina: String(TAMANHO_PAGINA),
   });
 
@@ -605,7 +617,26 @@ export async function buscarContratosPNCP(
 
   const ctx = criarContextoBusca();
   try {
-    const processos = await buscarPorTexto(termo, ctx);
+    // Páginas 1 e 2 em paralelo — mesmo custo na parede que uma só (ambas
+    // levam ~2,5s mas correm ao mesmo tempo), mas dobra o pool de 20 para 40
+    // editais. O ranqueador por IDF então escolhe os 15 mais aderentes de 40,
+    // em vez de 12 de 20. A página 2 retorna vazio quando há menos de 20
+    // editais relevantes para o termo: sem custo extra de processamento.
+    const [pg1, pg2] = await Promise.all([
+      buscarPorTexto(termo, ctx, 1),
+      buscarPorTexto(termo, ctx, 2),
+    ]);
+    // Deduplicação por número de controle — um edital não pode aparecer em
+    // duas páginas da busca (a API ordena por relevância sem repetição), mas
+    // o check é defensivo.
+    const vistos = new Set<string>();
+    const processos: PNCPSearchItem[] = [];
+    for (const item of [...pg1, ...pg2]) {
+      if (!vistos.has(item.numero_controle_pncp)) {
+        vistos.add(item.numero_controle_pncp);
+        processos.push(item);
+      }
+    }
     const itensPorProcesso: CandidatoSimilaridade[][] = [];
     for (let i = 0; i < processos.length; i += LOTE_BUSCA_ITENS) {
       // Reserva, não só "ainda não venceu": um lote iniciado a 200ms do fim é

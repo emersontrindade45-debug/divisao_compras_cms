@@ -1241,3 +1241,41 @@ valor tem uso legítimo — cortar disparate, e há bastante (CV de 969% no pipe
 candidato de R$ 831.040,00). Mas selecionar contrato porque ele cai na faixa já esperada inverte a
 lógica da pesquisa de preços e é frágil sob questionamento da IN 65/2021. Não há mudança de código
 proposta: é decisão de processo do usuário.
+
+### M14.2 — Busca textual em duas páginas paralelas + teto de resultados ampliado (2026-08-11)
+
+Duas melhorias nascidas da análise dos itens pendentes do M14.1, ambas implementadas no mesmo PR:
+
+**Item 1 — Defeito latente no teste `painelPrecos`.**
+O teste levava 2,8–3,2s (confirmado por medição) e emitia
+`[ComprasGov] ItemCatalogoReferencia vazia para "catser" — usando fallback por request"` durante a
+execução. O mock de `@/lib/db` simulava banco vazio, mas não impedia o fallback
+`baixarCatalogoServicosPorRequest`, que fazia fetch real para `dadosabertos.compras.gov.br` sem
+timeout configurado. Corrigido adicionando `vi.spyOn(global, "fetch")` no `beforeEach` para simular
+API vazia — o teste passa em 3ms, sem dependência de rede.
+
+**Item 2 — Pool de editais dobrado sem custo extra de tempo.**
+A busca textual do PNCP buscava apenas a página 1 (20 editais). Implementação em `buscarPorTexto`
+com parâmetro `pagina` e `Promise.all([buscarPorTexto(1), buscarPorTexto(2)])` em
+`buscarContratosPNCP`: ambas as páginas correm em paralelo (~2,5s wall time, igual a antes). Pool
+cresce de 20 para 40 editais. O ranqueador por IDF então escolhe os melhores de 40 em vez de 20.
+Deduplicação por `numero_controle_pncp` é defensiva (a API não repete, mas o check é barato).
+
+`MAX_RESULTADOS_POR_BUSCA` elevado de 120 para 150 (15 editais vs. 12 antes): alinha o orçamento
+de resultados com o que o orçamento de tempo permite (~7,5s efetivos / 1,9s por lote × 5 editais).
+
+| Parâmetro | Antes | Depois |
+|---|---|---|
+| Páginas da busca textual | 1 (20 editais) | 2 em paralelo (até 40 editais) |
+| `MAX_RESULTADOS_POR_BUSCA` | 120 (12 editais) | 150 (15 editais) |
+| Custo de tempo extra | — | 0ms (paralelo) |
+
+Verificação: typecheck limpo, ESLint 0 erros, **816 testes / 92 arquivos** (3 novos + 5 existentes
+atualizados para refletir 2 requests de busca textual). Os 3 testes novos provam: (a) ambas as
+páginas são pedidas, (b) candidatos exclusivos da página 2 chegam ao resultado, (c) edital em ambas
+as páginas não vira candidato duplicado.
+
+> **EM ABERTO — verificação funcional pelo usuário.** Falta usar o assistente em produção e
+> confirmar que os candidatos retornados são mais aderentes ao termo do que antes. Se 12s cortar
+> edital relevante demais, `TEMPO_MAX_BUSCA_MS` e `MAX_RESULTADOS_POR_BUSCA` são os dois números.
+> Sem migration: rollback é `git revert`.

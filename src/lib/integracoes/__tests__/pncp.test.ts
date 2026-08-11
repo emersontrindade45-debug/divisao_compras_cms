@@ -53,9 +53,13 @@ function resultadoDe(over: Record<string, unknown> = {}) {
 /**
  * Roteia as três chamadas do fluxo. A ordem importa: a URL de resultados
  * (`/itens/1/resultados`) também casa com "/itens", então ela é testada primeiro.
+ *
+ * `processos` aceita array (replicado para todas as páginas da busca textual)
+ * ou função `(pagina: number) => unknown[]` (para testes que precisam controlar
+ * o conteúdo de cada página independentemente).
  */
 function mockPncp(opcoes: {
-  processos: unknown[];
+  processos: unknown[] | ((pagina: number) => unknown[]);
   itens?: unknown[] | ((pagina: number) => unknown[]);
   resultados?: unknown[] | ((numeroItem: number) => unknown[]);
   onUrl?: (url: string) => void;
@@ -66,7 +70,11 @@ function mockPncp(opcoes: {
     const url = String(input);
     onUrl?.(url);
 
-    if (url.includes("/api/search/")) return mockBusca(processos);
+    if (url.includes("/api/search/")) {
+      const paginaBusca = Number(new URL(url).searchParams.get("pagina") ?? 1);
+      const itensBusca = typeof processos === "function" ? processos(paginaBusca) : processos;
+      return mockBusca(itensBusca);
+    }
 
     if (url.includes("/resultados")) {
       const numeroItem = Number(url.match(/\/itens\/(\d+)\/resultados/)?.[1] ?? 0);
@@ -154,7 +162,9 @@ describe("buscarContratosPNCP", () => {
     await vi.runAllTimersAsync();
     await promessa;
 
-    expect(chamadasBusca).toBe(2);
+    // Com duas páginas em paralelo: página 1 (falha, chamadasBusca=1),
+    // página 2 (sucede, chamadasBusca=2), retry de página 1 (sucede, chamadasBusca=3).
+    expect(chamadasBusca).toBe(3);
     vi.useRealTimers();
   });
 
@@ -171,7 +181,8 @@ describe("buscarContratosPNCP", () => {
     const resultado = await promessa;
 
     expect(resultado).toEqual([]);
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    // Duas páginas em paralelo × 3 tentativas cada = 6 requisições totais.
+    expect(fetchSpy).toHaveBeenCalledTimes(6);
     vi.useRealTimers();
   });
 
@@ -605,8 +616,11 @@ describe("conformidade da evidência PNCP", () => {
   const CNPJ_PROPRIO = "49203409000102";
 
   function processoDe(orgaoCnpj: string, nome = "Órgão Externo") {
+    // numero_controle_pncp derivado do CNPJ para que cada órgão gere um ID
+    // único — deduplicação por esse campo descartaria todos os que viessem
+    // depois do primeiro se o campo fosse constante.
     return {
-      numero_controle_pncp: "12345678000199-1-000123/2026",
+      numero_controle_pncp: `${orgaoCnpj}-1-000123/2026`,
       orgao_nome: nome,
       orgao_cnpj: orgaoCnpj,
       ano: "2026",
@@ -749,13 +763,17 @@ describe("tetos de tempo", () => {
     let relogio = 0;
     vi.spyOn(Date, "now").mockImplementation(() => relogio);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Cada requisição "gasta" 1s. O primeiro lote de 5 editais custa 11s (busca
-    // textual + 5 páginas + 5 resultados) e cabe nos 12s; o segundo não tem a
-    // reserva mínima para começar.
+    // Cada requisição "gasta" 900ms. As duas buscas textuais em paralelo custam
+    // 1,8s (2 × 900ms). O primeiro lote de 5 editais custa mais 9s
+    // (5 páginas + 5 resultados × 900ms) → 10,8s total, dentro dos 12s.
+    // O segundo lote não tem a reserva mínima de 2s para começar (1,2s restantes).
+    // Nota: 1000ms por requisição não funciona mais — com 2 buscas textuais o
+    // primeiro lote chegaria a exatamente 12s, e ctx.vencido() descartaria os
+    // resultados do próprio primeiro lote (12000 ≥ 12000).
     mockPncp({
       processos,
       onUrl: () => {
-        relogio += 1_000;
+        relogio += 900;
       },
     });
 
@@ -780,9 +798,9 @@ describe("tetos de tempo", () => {
     vi.spyOn(Date, "now").mockImplementation(() => relogio);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const urls: string[] = [];
-    // 10,5s consumidos no primeiro lote: sobra 1,5s, abaixo da reserva de 2s.
-    // Sem a reserva o segundo lote começaria, pagaria 5 requisições de página e
-    // seria descartado inteiro pelo prazo — trabalho puro jogado fora.
+    // 11,4s consumidos no primeiro lote (2 buscas textuais + 5 páginas + 5 resultados):
+    // sobra 0,6s, abaixo da reserva de 2s. Sem a reserva o segundo lote começaria,
+    // pagaria 5 requisições de página e seria descartado inteiro pelo prazo.
     mockPncp({
       processos,
       onUrl: (u) => {
@@ -793,9 +811,9 @@ describe("tetos de tempo", () => {
 
     await buscarContratosPNCP("cadeira");
 
-    // 1 busca textual + 5 páginas + 5 resultados = 11 requisições. Nenhuma do
+    // 2 buscas textuais + 5 páginas + 5 resultados = 12 requisições. Nenhuma do
     // segundo lote (que começaria pedindo /itens de ctrl-5).
-    expect(urls).toHaveLength(11);
+    expect(urls).toHaveLength(12);
     expect(urls.some((u) => u.includes("/compras/2026/6/itens"))).toBe(false);
   });
 
@@ -915,8 +933,9 @@ describe("tetos de tempo", () => {
 
     const consultasResultado = urls.filter((u) => u.includes("/resultados"));
     // Sem os dois tetos seriam 20 × 30 = 600 requisições, numa busca que exibe
-    // no máximo 25 candidatos.
-    expect(consultasResultado).toHaveLength(120);
+    // no máximo 25 candidatos. Com MAX_RESULTADOS_POR_BUSCA = 150 e 10 itens
+    // por compra: 15 compras × 10 = 150.
+    expect(consultasResultado).toHaveLength(150);
     expect(
       warnSpy.mock.calls.some((args) => String(args[0]).includes("Orçamento de resultados")),
     ).toBe(true);
@@ -941,6 +960,59 @@ describe("tetos de tempo", () => {
     const resultado = await buscarContratosPNCP("cadeira");
 
     expect(resultado).toHaveLength(12);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Busca textual em duas páginas paralelas (M14.2).
+//
+// A busca textual do PNCP devolve no máximo TAMANHO_PAGINA (20) editais por
+// página. Buscar as páginas 1 e 2 em paralelo dobra o pool para o ranqueador
+// por IDF sem custo extra de tempo na parede, já que ambas as requisições
+// correm ao mesmo tempo (~2,5s total). O teto MAX_RESULTADOS_POR_BUSCA = 150
+// (15 editais) alinha o orçamento de resultados com o que o tempo permite.
+// ---------------------------------------------------------------------------
+
+describe("busca textual em duas páginas paralelas", () => {
+  it("pede as páginas 1 e 2 da busca textual", async () => {
+    const urls: string[] = [];
+    mockPncp({ processos: [], onUrl: (u) => urls.push(u) });
+
+    await buscarContratosPNCP("cadeira");
+
+    const urlsBusca = urls.filter((u) => u.includes("/api/search/"));
+    expect(urlsBusca).toHaveLength(2);
+    expect(urlsBusca.some((u) => u.includes("pagina=1"))).toBe(true);
+    expect(urlsBusca.some((u) => u.includes("pagina=2"))).toBe(true);
+  });
+
+  it("inclui candidatos exclusivos da página 2", async () => {
+    const processoPg2 = {
+      ...processoPadrao,
+      numero_controle_pncp: "pg2-exclusivo",
+      numero_sequencial: "2",
+    };
+    mockPncp({
+      processos: (pagina) => (pagina === 1 ? [processoPadrao] : [processoPg2]),
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    // Candidatos de ambas as páginas chegam ao resultado final.
+    expect(resultado).toHaveLength(2);
+  });
+
+  it("deduplica edital que aparece nas duas páginas", async () => {
+    // Improvável na prática, mas defensivo: mesmo edital nas duas páginas não
+    // pode gerar dois candidatos distintos para o mesmo item.
+    mockPncp({
+      processos: (pagina) => (pagina <= 2 ? [processoPadrao] : []),
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    // Um único candidato — a deduplicação por numero_controle_pncp funcionou.
+    expect(resultado).toHaveLength(1);
   });
 });
 
