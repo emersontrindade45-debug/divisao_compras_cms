@@ -793,3 +793,46 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     aumenta o custo e piora o resultado ao mesmo tempo. Em "lavagem fachada predio novo pastilhas
     pele de vidro", o token `novo` sozinho respondeu por 125 dos matches, trazendo argamassa e
     abraçadeira de nylon como candidatos a referência de preço.
+    **Ressalva medida em 2026-08-11 (ver §9.67): o tamanho do termo NÃO prevê o custo.** Em 16
+    buscas reais, 6 tokens custaram 8,2s e 3 tokens custaram 15,6s; a busca de 26s tinha 4 tokens.
+    O custo vem de quantos editais a busca textual devolve e de quantos itens cada um tem — a
+    correção que funciona é teto no número de requisições, não no tamanho do termo.
+65. **Teto de tempo verificado só entre lotes é conselho, não prazo — e API pública devolve
+    data-sentinela em vez de nulo.** Dois defeitos achados auditando o uso real do assistente em
+    2026-08-11, ambos em `pncp.ts`.
+    (a) O teto de 20s era testado **entre** lotes de editais; um lote iniciado aos 19,9s rodava até
+    o fim e a busca levava **27,7s**, consumindo sozinha o orçamento de 35s do turno e derrubando a
+    função no `maxDuration` — sem gravar mensagem nem `AuditLog` (2 turnos por dia morriam assim).
+    Prazo real precisa das três pontas: `AbortSignal` composto com o timeout por requisição, para
+    abortar o que está em voo; checagem antes de **cada** requisição, não só entre lotes; e reserva
+    mínima para começar um lote, senão paga-se um lote inteiro que será descartado. A garantia que
+    motivou o desenho original (nunca devolver subconjunto arbitrário dos itens de uma compra)
+    continua valendo por outro caminho: compra interrompida é descartada **inteira**.
+    (b) O PNCP devolve `0001-01-01`, `1858-11-17` (epoch do MJD) e `1900-01-01` (epoch do Excel)
+    como data de resultado — 5 em 264 candidatos. Sem janela de plausibilidade, `new Date(...)`
+    aceita todas: o preço entraria na memória de cálculo com data falsa, e o filtro de recência de
+    365 dias o descartaria **em silêncio**. Toda data vinda de fonte externa passa por janela fixa
+    (não comparar com `Date.now()`, que acopla a regra ao relógio e quebra sob clock mockado).
+66. **Ao auditar o banco por script, o valor lido pode estar deslocado ou significar outra coisa —
+    conferir o fuso e o caminho de escrita antes de interpretar.** Duas leituras erradas na mesma
+    sessão, ambas corrigidas antes de virarem conclusão.
+    (a) O Prisma mapeia `DateTime` para `timestamp(3)` **sem fuso**, e o `node-pg` interpreta esse
+    tipo no fuso do **cliente**. Rodando do WSL em `America/Sao_Paulo`, todo `createdAt` saiu 3h
+    adiantado no `toISOString()`, enquanto `now()` (que é `timestamptz`) veio correto — a
+    contradição "registro no futuro" foi o que denunciou. Formatar no banco (`to_char`) ou fixar
+    `TZ=UTC` no script; e desconfiar quando timestamps de tabelas diferentes não se ordenam.
+    (b) `scoreFinal = 0` em 119 de 161 candidatos foi lido como falha do ranqueamento; é o
+    **registro de descarte** que `descartarCandidato` grava (linha-lápide com score zero e
+    justificativa fixa). Antes de tratar um agregado como sintoma, achar quem escreve aquela
+    coluna. Corolário: agregado que mistura lápide com dado real mente sobre média e dispersão.
+67. **Correção proposta a partir de correlação plausível, sem medir, ataca o alvo errado — medir
+    custa uma consulta.** Nesta sessão recomendei "limitar o termo a 3–4 tokens" como uma das três
+    correções, por parecer óbvio que termo longo encarece a busca (a §9.64 registrava o mecanismo).
+    Bastou cruzar duração × contagem de tokens das 16 buscas gravadas para derrubar a hipótese: não
+    há correlação, e a busca de 26s tinha 4 tokens — o limite não teria evitado nada. O mecanismo
+    da §9.64 era real e mesmo assim não era o gargalo; **mecanismo plausível não é causa
+    dominante**. Quando os dados para testar a hipótese já estão no banco (duração por ferramenta
+    vive em `MensagemAssistente.ferramentasUsadas`), medir antes de propor é mais barato que
+    implementar e descobrir depois. Vale também para o que já foi prometido ao usuário: dizer que a
+    hipótese caiu e trocar a correção é melhor que entregar o que foi combinado sabendo que é
+    inócuo (§9.24, §9.35).

@@ -642,11 +642,13 @@ describe("tetos de tempo", () => {
     let relogio = 0;
     vi.spyOn(Date, "now").mockImplementation(() => relogio);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Cada requisição "gasta" 3s: o primeiro lote de 5 editais já passa dos 20s.
+    // Cada requisição "gasta" 1s. O primeiro lote de 5 editais custa 11s (busca
+    // textual + 5 páginas + 5 resultados) e cabe nos 12s; o segundo não tem a
+    // reserva mínima para começar.
     mockPncp({
       processos,
       onUrl: () => {
-        relogio += 3_000;
+        relogio += 1_000;
       },
     });
 
@@ -658,6 +660,159 @@ describe("tetos de tempo", () => {
     // que parece completo — o corte precisa deixar rastro no log.
     const avisos = warnSpy.mock.calls.filter((args) => String(args[0]).includes("Teto de tempo"));
     expect(avisos).toHaveLength(1);
+  });
+
+  it("não começa um lote que não caberia na reserva mínima de tempo", async () => {
+    const processos = Array.from({ length: 12 }, (_, i) => ({
+      ...processoPadrao,
+      numero_controle_pncp: `ctrl-${i}`,
+      numero_sequencial: String(i + 1),
+    }));
+
+    let relogio = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => relogio);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const urls: string[] = [];
+    // 10,5s consumidos no primeiro lote: sobra 1,5s, abaixo da reserva de 2s.
+    // Sem a reserva o segundo lote começaria, pagaria 5 requisições de página e
+    // seria descartado inteiro pelo prazo — trabalho puro jogado fora.
+    mockPncp({
+      processos,
+      onUrl: (u) => {
+        urls.push(u);
+        relogio += 950;
+      },
+    });
+
+    await buscarContratosPNCP("cadeira");
+
+    // 1 busca textual + 5 páginas + 5 resultados = 11 requisições. Nenhuma do
+    // segundo lote (que começaria pedindo /itens de ctrl-5).
+    expect(urls).toHaveLength(11);
+    expect(urls.some((u) => u.includes("/compras/2026/6/itens"))).toBe(false);
+  });
+
+  it("descarta a compra INTEIRA quando o prazo vence no meio dela", async () => {
+    let relogio = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => relogio);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Página de itens barata; cada resultado custa 5s. O primeiro resultado cabe
+    // nos 12s, o segundo estoura — e aí a compra sai inteira, não pela metade.
+    mockPncp({
+      processos: [processoPadrao],
+      itens: [itemDe({ numeroItem: 1 }), itemDe({ numeroItem: 2 })],
+      resultados: (numeroItem) => [resultadoDe({ numeroItem })],
+      onUrl: (u) => {
+        relogio += u.includes("/resultados") ? 5_000 : 1_000;
+      },
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    // Meia compra seria pior que nenhuma: um recorte arbitrário dos itens vira
+    // série de preços enviesada, sem nada na tela indicando que faltou item.
+    expect(resultado).toEqual([]);
+  });
+
+  it("não gasta consultas de resultado numa compra já truncada na paginação", async () => {
+    let relogio = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => relogio);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const urls: string[] = [];
+    // Página cheia (500) mantém a paginação andando; cada página custa 7s, então
+    // o prazo vence com a lista de itens da compra ainda incompleta.
+    const paginaCheia = Array.from({ length: 500 }, (_, i) => itemDe({ numeroItem: i + 1 }));
+    mockPncp({
+      processos: [processoPadrao],
+      itens: () => paginaCheia,
+      resultados: (numeroItem) => [resultadoDe({ numeroItem })],
+      onUrl: (u) => {
+        urls.push(u);
+        relogio += u.includes("/resultados") ? 1_000 : u.includes("/itens") ? 7_000 : 1_000;
+      },
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toEqual([]);
+    // A asserção que importa: a compra é abandonada ANTES de pagar os
+    // /resultados. Descartá-la só no fim daria o mesmo resultado vazio depois de
+    // gastar 10 requisições do orçamento — o desperdício que o teto existe para
+    // evitar.
+    expect(urls.some((u) => u.includes("/resultados"))).toBe(false);
+  });
+
+  it("aborta as requisições em voo quando o prazo vence", async () => {
+    vi.useFakeTimers();
+    const sinais = new Map<string, AbortSignal | undefined>();
+
+    // A requisição precisa COMEÇAR tarde para o teste provar alguma coisa: o
+    // timeout por requisição é 10s e o prazo da busca é 12s, então uma chamada
+    // iniciada em t=0 aborta pelo timeout dela mesma e o teste passaria mesmo
+    // sem o prazo composto. Fazendo as duas primeiras custarem 3s cada, a de
+    // /resultados começa em t≈6s e só venceria sozinha em t≈16s.
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const etapa = url.includes("/resultados")
+        ? "resultados"
+        : url.includes("/itens")
+          ? "itens"
+          : "busca";
+      sinais.set(etapa, init?.signal ?? undefined);
+
+      // /resultados nunca resolve: é a requisição pendurada que o prazo corta.
+      if (etapa === "resultados") return new Promise<Response>(() => {});
+
+      await new Promise((r) => setTimeout(r, 3_000));
+      return etapa === "busca" ? mockBusca([processoPadrao]) : mockJson([itemDe()]);
+    });
+
+    void buscarContratosPNCP("cadeira");
+    await vi.advanceTimersByTimeAsync(6_500);
+
+    const sinalResultados = sinais.get("resultados");
+    expect(sinalResultados).toBeDefined();
+    expect(sinalResultados!.aborted).toBe(false);
+
+    // Aos 12s o prazo vence. Como o timeout próprio desta requisição só venceria
+    // em ~16s, abortar aqui só pode vir do prazo da busca — que é o que impede a
+    // requisição de seguir consumindo o `maxDuration` da função depois do teto.
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(sinalResultados!.aborted).toBe(true);
+
+    vi.useRealTimers();
+  });
+
+  it("respeita o teto global de consultas a /resultados", async () => {
+    const processos = Array.from({ length: 20 }, (_, i) => ({
+      ...processoPadrao,
+      numero_controle_pncp: `ctrl-${i}`,
+      numero_sequencial: String(i + 1),
+    }));
+    // 30 itens relevantes por compra; o teto por compra corta em 10, e o teto
+    // global (120) corta na décima segunda compra.
+    const muitosItens = Array.from({ length: 30 }, (_, i) => itemDe({ numeroItem: i + 1 }));
+
+    const urls: string[] = [];
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockPncp({
+      processos,
+      itens: muitosItens,
+      resultados: (numeroItem) => [resultadoDe({ numeroItem })],
+      onUrl: (u) => urls.push(u),
+    });
+
+    await buscarContratosPNCP("cadeira");
+
+    const consultasResultado = urls.filter((u) => u.includes("/resultados"));
+    // Sem os dois tetos seriam 20 × 30 = 600 requisições, numa busca que exibe
+    // no máximo 25 candidatos.
+    expect(consultasResultado).toHaveLength(120);
+    expect(
+      warnSpy.mock.calls.some((args) => String(args[0]).includes("Orçamento de resultados")),
+    ).toBe(true);
   });
 
   it("não corta nada quando a busca cabe no teto", async () => {
@@ -679,5 +834,56 @@ describe("tetos de tempo", () => {
     const resultado = await buscarContratosPNCP("cadeira");
 
     expect(resultado).toHaveLength(12);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Data de referência (CLAUDE.md §9.65).
+//
+// Medido em produção em 2026-08-11: o PNCP devolve data-sentinela em vez de nulo
+// em parte dos resultados — 0001-01-01, 1858-11-17 (epoch do MJD) e 1900-01-01
+// (epoch do Excel), em 5 de 264 candidatos. Preço com data falsa não sustenta a
+// estimativa da IN 65/2021, e o filtro de recência o descarta em silêncio.
+// ---------------------------------------------------------------------------
+
+describe("validação da data de referência", () => {
+  it.each(["0001-01-01", "1858-11-17", "1900-01-01", "não é data"])(
+    "descarta o candidato quando nenhuma data é plausível (%s)",
+    async (dataRuim) => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockPncp({
+        processos: [processoPadrao],
+        itens: [itemDe({ dataAtualizacao: dataRuim })],
+        resultados: [resultadoDe({ dataResultado: dataRuim })],
+      });
+
+      const resultado = await buscarContratosPNCP("cadeira");
+
+      expect(resultado).toEqual([]);
+      expect(
+        warnSpy.mock.calls.some((args) => String(args[0]).includes("data de referência implausível")),
+      ).toBe(true);
+    },
+  );
+
+  it("cai para dataAtualizacao quando só dataResultado é implausível", async () => {
+    mockPncp({
+      processos: [processoPadrao],
+      itens: [itemDe({ dataAtualizacao: "2026-01-10T00:00:00Z" })],
+      resultados: [resultadoDe({ dataResultado: "0001-01-01" })],
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0]!.dataReferencia.toISOString()).toBe("2026-01-10T00:00:00.000Z");
+  });
+
+  it("mantém dataResultado quando ela é plausível", async () => {
+    mockPncp({ processos: [processoPadrao] });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado[0]!.dataReferencia.toISOString()).toBe("2026-02-20T00:00:00.000Z");
   });
 });

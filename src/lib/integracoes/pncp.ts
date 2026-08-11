@@ -1,4 +1,5 @@
 import "server-only";
+import { setMaxListeners } from "node:events";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 import { cnpjOrgaoProprio, normalizarCnpj } from "@/lib/domain/orgaoProprio";
 import { tokenizar, raizPlural } from "@/lib/similaridade/texto";
@@ -30,17 +31,45 @@ const LOTE_BUSCA_ITENS = 5;
 const TIMEOUT_REQUISICAO_MS = 10_000;
 
 /**
- * Teto de tempo da busca inteira. O timeout por requisição não basta: o custo
- * agregado é que estoura o orçamento — 82 requisições HTTP numa única busca,
- * medido em 2026-08-10, e isso com apenas 7 editais dos 20 que a busca textual
- * pode devolver.
+ * Teto de tempo da busca inteira, como **prazo real**: um `AbortSignal` criado no
+ * começo aborta toda requisição em voo quando vence, e nenhuma requisição nova
+ * começa depois disso.
  *
- * Verificado ENTRE lotes, nunca no meio de um: abortar um lote pela metade
- * desperdiçaria requisições já pagas e devolveria candidatos de um subconjunto
- * arbitrário dos itens de uma compra. Devolver menos editais, todos completos, é
- * preferível — o assistente pode refinar o termo no turno seguinte.
+ * A versão anterior só verificava o relógio ENTRE lotes, para não devolver um
+ * subconjunto arbitrário dos itens de uma compra. O efeito medido em produção em
+ * 2026-08-11: um lote iniciado aos 19,9s rodava até o fim, e o teto de 20s virava
+ * **27,7s** — sozinho isso consumia o orçamento de 35s do turno do assistente e
+ * derrubava a função no `maxDuration`, sem gravar nada.
+ *
+ * A garantia original continua valendo, por outro caminho: compra interrompida
+ * pelo prazo é descartada INTEIRA (ver `buscarItensDaCompra`), nunca entregue pela
+ * metade. Compras que terminaram entram; as que ficaram no meio somem.
  */
-const TEMPO_MAX_BUSCA_MS = 20_000;
+const TEMPO_MAX_BUSCA_MS = 12_000;
+
+/**
+ * Reserva mínima para começar um lote novo. Sem ela, um lote iniciado a 200ms do
+ * fim é sempre descartado inteiro — pagamos as requisições e jogamos fora. 2s é
+ * folga sobre o custo mínimo de uma compra (~1,4s de `/itens` + ~50ms por
+ * resultado, medidos contra a API real).
+ */
+const RESERVA_LOTE_MS = 2_000;
+
+/**
+ * Teto global de consultas a `/resultados` por busca — o custo real, e o que o
+ * teto de tempo sozinho não controla (rede rápida = mais requisições no mesmo
+ * prazo, não menos trabalho).
+ *
+ * A hipótese de que o termo longo é que encarecia a busca **foi medida e não se
+ * sustenta**: em 16 buscas reais de 2026-08, 6 tokens custaram 8,2s e 3 tokens
+ * custaram 15,6s. O custo vem de quantos editais a busca textual devolve e de
+ * quantos itens cada um tem, não do tamanho do termo.
+ *
+ * 120 cobre ~12 editais completos, e a busca nunca exibe mais que
+ * `MAX_SUGESTOES_POR_BUSCA` (25) candidatos — consultar mais que isso era
+ * trabalho jogado fora.
+ */
+const MAX_RESULTADOS_POR_BUSCA = 120;
 
 // **O padrão de `/itens` é 10 registros por página** — medido contra a API real em
 // 2026-07-30, não documentado. Sem paginar, toda contratação com mais de 10 itens era
@@ -52,9 +81,26 @@ const ITENS_MAX_PAGINAS = 20;
 
 // Cada item relevante custa uma requisição a mais (o valor homologado vive em endpoint
 // separado). O teto evita que uma única compra gigante monopolize o orçamento de tempo
-// da função serverless.
+// da função serverless. Era 40: com 20 editais possíveis isso autorizava 800 consultas
+// a `/resultados` numa busca que exibe no máximo 25 candidatos. 10 por compra ainda dá
+// mais candidatos do que cabe na tela, por uma fração do custo.
 const LOTE_BUSCA_RESULTADOS = 5;
-const MAX_ITENS_RELEVANTES_POR_COMPRA = 40;
+const MAX_ITENS_RELEVANTES_POR_COMPRA = 10;
+
+/**
+ * Janela de plausibilidade da data de referência. O PNCP devolve data-sentinela em
+ * vez de nulo em parte dos resultados: medido em produção em 2026-08-11,
+ * `0001-01-01` (3 ocorrências), `1858-11-17` (epoch do MJD) e `1900-01-01` (epoch
+ * do Excel), em 5 de 264 candidatos.
+ *
+ * Preço sem data verdadeira não pode entrar na estimativa (IN 65/2021 exige fonte
+ * + data + evidência), e o estrago é silencioso: o filtro de recência de 365 dias
+ * descarta a linha sem dizer por quê, e a memória de cálculo sairia com uma data
+ * falsa. Os limites são fixos de propósito — comparar com `Date.now()` acoplaria a
+ * regra ao relógio e quebraria sob clock mockado.
+ */
+const DATA_REFERENCIA_MINIMA = new Date("2000-01-01T00:00:00Z");
+const DATA_REFERENCIA_MAXIMA = new Date("2100-01-01T00:00:00Z");
 
 // A exclusão do próprio órgão (IN 65/2021, CLAUDE.md §9.9) mora em
 // `domain/orgaoProprio.ts`. Ela saiu daqui para virar fonte única: enquanto era
@@ -70,15 +116,64 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchComRetry(url: string): Promise<Response> {
+/**
+ * Prazo e orçamento de uma busca. Um por chamada de `buscarContratosPNCP`, passado
+ * a todas as funções que fazem requisição — é o que torna o teto de tempo real em
+ * vez de conselho (ver `TEMPO_MAX_BUSCA_MS`).
+ */
+interface ContextoBusca {
+  /** Aborta as requisições em voo quando o prazo vence. */
+  readonly sinal: AbortSignal;
+  vencido(): boolean;
+  restanteMs(): number;
+  /**
+   * Reserva `quantidade` consultas a `/resultados` do orçamento global. Tudo ou
+   * nada: uma compra que não cabe inteira não gasta requisição nenhuma, já que
+   * seria descartada no fim de qualquer forma.
+   */
+  reservarResultados(quantidade: number): boolean;
+  encerrar(): void;
+}
+
+function criarContextoBusca(): ContextoBusca {
+  const fimEm = Date.now() + TEMPO_MAX_BUSCA_MS;
+  const controle = new AbortController();
+  const timer = setTimeout(
+    () => controle.abort(new Error("[PNCP] Prazo da busca esgotado.")),
+    TEMPO_MAX_BUSCA_MS,
+  );
+  // Não segurar o processo (nem o teste) vivo por causa do prazo.
+  timer.unref?.();
+  // Cada requisição compõe este sinal com o timeout dela via `AbortSignal.any`, o
+  // que registra um listener aqui. Sem isto, uma busca com dezenas de requisições
+  // dispara MaxListenersExceededWarning no log de produção.
+  setMaxListeners(0, controle.signal);
+
+  let resultadosRestantes = MAX_RESULTADOS_POR_BUSCA;
+
+  return {
+    sinal: controle.signal,
+    vencido: () => controle.signal.aborted || Date.now() >= fimEm,
+    restanteMs: () => fimEm - Date.now(),
+    reservarResultados(quantidade) {
+      if (quantidade > resultadosRestantes) return false;
+      resultadosRestantes -= quantidade;
+      return true;
+    },
+    encerrar: () => clearTimeout(timer),
+  };
+}
+
+async function fetchComRetry(url: string, ctx: ContextoBusca): Promise<Response> {
   let ultimoErro: unknown;
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
     try {
       // Sinal novo a cada tentativa: um `AbortSignal.timeout` já disparado
-      // aborta a requisição seguinte instantaneamente, anulando o retry.
+      // aborta a requisição seguinte instantaneamente, anulando o retry. O prazo
+      // da busca entra composto, para que vencer o prazo aborte o que está em voo.
       const res = await fetch(url, {
         headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(TIMEOUT_REQUISICAO_MS),
+        signal: AbortSignal.any([AbortSignal.timeout(TIMEOUT_REQUISICAO_MS), ctx.sinal]),
       });
       const retryavel = res.status === 429 || res.status >= 500;
       if (res.ok || !retryavel || tentativa === MAX_TENTATIVAS) return res;
@@ -88,6 +183,8 @@ async function fetchComRetry(url: string): Promise<Response> {
       if (tentativa === MAX_TENTATIVAS) throw err;
       console.warn(`[PNCP] Falha de rede (tentativa ${tentativa}/${MAX_TENTATIVAS}): ${url}`, err);
     }
+    // Prazo vencido não se resolve com backoff: esperar aqui só atrasa o fim.
+    if (ctx.vencido()) throw ultimoErro ?? new Error("[PNCP] Prazo esgotado durante o retry.");
     await esperar(BACKOFF_BASE_MS * 2 ** (tentativa - 1));
   }
   throw ultimoErro ?? new Error("[PNCP] Tentativas esgotadas.");
@@ -154,7 +251,7 @@ function limparDescricao(bruta: string): string {
  * livre — esse endpoint é o que permite encontrar processos relevantes ao
  * termo do item, em vez de uma amostra aleatória de publicações recentes.
  */
-async function buscarPorTexto(termo: string): Promise<PNCPSearchItem[]> {
+async function buscarPorTexto(termo: string, ctx: ContextoBusca): Promise<PNCPSearchItem[]> {
   const params = new URLSearchParams({
     q: termo,
     tipos_documento: "edital",
@@ -167,7 +264,7 @@ async function buscarPorTexto(termo: string): Promise<PNCPSearchItem[]> {
   });
 
   const url = `${PNCP_SEARCH_BASE_URL}/?${params.toString()}`;
-  const res = await fetchComRetry(url);
+  const res = await fetchComRetry(url, ctx);
   if (!res.ok) {
     console.error(`[PNCP] Falha na busca textual ("${termo}"): HTTP ${res.status}`);
     return [];
@@ -182,13 +279,27 @@ async function buscarPorTexto(termo: string): Promise<PNCPSearchItem[]> {
   return itens.filter((item) => normalizarCnpj(item.orgao_cnpj) !== proprio);
 }
 
-/** Percorre todas as páginas de `/itens`. Ver ITENS_TAMANHO_PAGINA. */
-async function buscarTodosItens(processo: PNCPSearchItem): Promise<PNCPItemResponse[]> {
+/**
+ * Percorre todas as páginas de `/itens`. Ver ITENS_TAMANHO_PAGINA.
+ *
+ * `completo: false` significa que o prazo venceu no meio da paginação — o
+ * chamador precisa saber disso para descartar a compra inteira, em vez de tratar
+ * meia coleção de itens como se fosse a compra toda.
+ */
+async function buscarTodosItens(
+  processo: PNCPSearchItem,
+  ctx: ContextoBusca,
+): Promise<{ itens: PNCPItemResponse[]; completo: boolean }> {
   const base = `${PNCP_ITENS_BASE_URL}/orgaos/${processo.orgao_cnpj}/compras/${processo.ano}/${processo.numero_sequencial}/itens`;
   const todos: PNCPItemResponse[] = [];
 
   for (let pagina = 1; pagina <= ITENS_MAX_PAGINAS; pagina++) {
-    const res = await fetchComRetry(`${base}?pagina=${pagina}&tamanhoPagina=${ITENS_TAMANHO_PAGINA}`);
+    if (ctx.vencido()) return { itens: todos, completo: false };
+
+    const res = await fetchComRetry(
+      `${base}?pagina=${pagina}&tamanhoPagina=${ITENS_TAMANHO_PAGINA}`,
+      ctx,
+    );
     if (!res.ok) {
       console.error(
         `[PNCP] Falha ao buscar itens de ${processo.numero_controle_pncp} (página ${pagina}): HTTP ${res.status}`,
@@ -204,7 +315,7 @@ async function buscarTodosItens(processo: PNCPSearchItem): Promise<PNCPItemRespo
     if (lote.length < ITENS_TAMANHO_PAGINA) break;
   }
 
-  return todos;
+  return { itens: todos, completo: true };
 }
 
 /**
@@ -223,6 +334,19 @@ function filtrarPorRelevancia(termo: string, itens: PNCPItemResponse[]): PNCPIte
       .map(raizPlural)
       .some((token) => tokensTermo.has(token)),
   );
+}
+
+/**
+ * Converte a data crua do PNCP, devolvendo `null` quando ela não é utilizável como
+ * referência de preço — inválida, ausente ou fora da janela plausível. Ver
+ * DATA_REFERENCIA_MINIMA para as sentinelas que motivaram a checagem.
+ */
+function dataPlausivel(bruta: string | null | undefined): Date | null {
+  if (!bruta) return null;
+  const data = new Date(bruta);
+  if (Number.isNaN(data.getTime())) return null;
+  if (data < DATA_REFERENCIA_MINIMA || data >= DATA_REFERENCIA_MAXIMA) return null;
+  return data;
 }
 
 /**
@@ -248,10 +372,11 @@ function escolherResultado(resultados: PNCPResultadoItem[]): PNCPResultadoItem |
 async function buscarResultadoDoItem(
   processo: PNCPSearchItem,
   numeroItem: number,
+  ctx: ContextoBusca,
 ): Promise<PNCPResultadoItem | null> {
   const url = `${PNCP_ITENS_BASE_URL}/orgaos/${processo.orgao_cnpj}/compras/${processo.ano}/${processo.numero_sequencial}/itens/${numeroItem}/resultados`;
 
-  const res = await fetchComRetry(url);
+  const res = await fetchComRetry(url, ctx);
   if (!res.ok) {
     // 404 é esperado em item sem julgamento — não é erro operacional.
     if (res.status !== 404) {
@@ -269,9 +394,13 @@ async function buscarResultadoDoItem(
 async function buscarItensDaCompra(
   processo: PNCPSearchItem,
   termo: string,
+  ctx: ContextoBusca,
 ): Promise<CandidatoSimilaridade[]> {
   try {
-    const todos = await buscarTodosItens(processo);
+    const { itens: todos, completo } = await buscarTodosItens(processo, ctx);
+    // Compra com a lista de itens truncada pelo prazo é descartada inteira: os
+    // candidatos que sobrariam viriam de um recorte arbitrário da compra.
+    if (!completo) return [];
 
     // `temResultado === false` dispensa a chamada extra; ausente (contrato antigo da
     // API) é tratado como "pode ter" para não descartar item válido por omissão.
@@ -279,16 +408,29 @@ async function buscarItensDaCompra(
       .filter((item) => item.temResultado !== false)
       .slice(0, MAX_ITENS_RELEVANTES_POR_COMPRA);
 
+    // Reserva antes de gastar: sem orçamento para a compra inteira ela seria
+    // descartada no fim, então não vale pagar nenhuma requisição por ela.
+    if (candidatos.length > 0 && !ctx.reservarResultados(candidatos.length)) {
+      console.warn(
+        `[PNCP] Orçamento de resultados esgotado; ${processo.numero_controle_pncp} não foi consultado.`,
+      );
+      return [];
+    }
+
     const resultados = await processarComConcorrencia(
       candidatos,
       LOTE_BUSCA_RESULTADOS,
-      (item) => buscarResultadoDoItem(processo, item.numeroItem),
+      (item) => buscarResultadoDoItem(processo, item.numeroItem, ctx),
       (item, erro) =>
         console.warn(
           `[PNCP] Erro no resultado do item ${item.numeroItem} de ${processo.numero_controle_pncp}:`,
           erro,
         ),
     );
+
+    // Prazo vencido durante as consultas de resultado: mesma regra do truncamento
+    // acima — a compra sai inteira, não pela metade.
+    if (ctx.vencido()) return [];
 
     const encontrados: CandidatoSimilaridade[] = [];
     candidatos.forEach((item, indice) => {
@@ -298,15 +440,28 @@ async function buscarItensDaCompra(
       // anterior ao certame e distorce a estimativa (IN 65/2021).
       if (!resultado?.valorUnitarioHomologado) return;
 
+      // `dataResultado` é a data do julgamento — referência correta do preço.
+      // `dataAtualizacao` do item muda por edição cadastral e vale só como recurso.
+      // Sem data plausível o candidato não entra: preço sem data não sustenta a
+      // estimativa (IN 65/2021). Ver DATA_REFERENCIA_MINIMA.
+      const dataReferencia =
+        dataPlausivel(resultado.dataResultado) ?? dataPlausivel(item.dataAtualizacao);
+      if (!dataReferencia) {
+        console.warn(
+          `[PNCP] Item ${item.numeroItem} de ${processo.numero_controle_pncp} descartado: ` +
+            `data de referência implausível (resultado=${resultado.dataResultado ?? "ausente"}, ` +
+            `atualização=${item.dataAtualizacao ?? "ausente"}).`,
+        );
+        return;
+      }
+
       encontrados.push({
         tipoCandidato: "contratacao_publica",
         fonteDescricao: limparDescricao(item.descricao),
         fonteOrgaoOuId: processo.orgao_nome,
         fonteUrl: montarUrlEdital(processo),
         valorUnitario: resultado.valorUnitarioHomologado,
-        // `dataResultado` é a data do julgamento — referência correta do preço.
-        // `dataAtualizacao` do item muda por edição cadastral e não representa nada.
-        dataReferencia: new Date(resultado.dataResultado ?? item.dataAtualizacao),
+        dataReferencia,
         unidade: item.unidadeMedida,
         quantidade: resultado.quantidadeHomologada ?? item.quantidade,
         // Identidade estruturada da compra: alimenta a deduplicação entre
@@ -370,12 +525,14 @@ export async function buscarContratosPNCP(
 ): Promise<CandidatoSimilaridade[]> {
   if (!termo.trim()) return [];
 
+  const ctx = criarContextoBusca();
   try {
-    const inicio = Date.now();
-    const processos = await buscarPorTexto(termo);
+    const processos = await buscarPorTexto(termo, ctx);
     const itensPorProcesso: CandidatoSimilaridade[][] = [];
     for (let i = 0; i < processos.length; i += LOTE_BUSCA_ITENS) {
-      if (Date.now() - inicio >= TEMPO_MAX_BUSCA_MS) {
+      // Reserva, não só "ainda não venceu": um lote iniciado a 200ms do fim é
+      // descartado inteiro depois, então começá-lo é requisição paga por nada.
+      if (ctx.restanteMs() < RESERVA_LOTE_MS) {
         console.warn(
           `[PNCP] Teto de tempo atingido em "${termo}": ${i} de ${processos.length} editais lidos.`,
         );
@@ -383,12 +540,14 @@ export async function buscarContratosPNCP(
       }
       const lote = processos.slice(i, i + LOTE_BUSCA_ITENS);
       itensPorProcesso.push(
-        ...(await Promise.all(lote.map((processo) => buscarItensDaCompra(processo, termo)))),
+        ...(await Promise.all(lote.map((processo) => buscarItensDaCompra(processo, termo, ctx)))),
       );
     }
     return filtrarPorValor(itensPorProcesso.flat(), filtroValor);
   } catch (err) {
     console.error(`[PNCP] Erro inesperado ao buscar contratações para "${termo}":`, err);
     return [];
+  } finally {
+    ctx.encerrar();
   }
 }

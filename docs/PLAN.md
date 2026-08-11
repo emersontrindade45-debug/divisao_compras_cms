@@ -1188,3 +1188,56 @@ com `?sslmode=no-verify` (§9.57).
 Não há milestone pendente no plano: M0 a M13 estão concluídos. Próximo trabalho é decisão do
 usuário — usar o sistema em processos reais e deixar o uso apontar o que falta é o caminho mais
 provável de render um M14 útil. Os três itens do PR #9 acima são o candidato mais concreto a M14.
+
+### M14.1 — Prazo real da busca no PNCP e validação da data de referência (2026-08-11)
+
+Nasceu de auditoria do uso real do assistente, não de plano prévio: o usuário relatou que o
+assistente estava travando. A leitura do banco de produção (somente-leitura, via Session pooler)
+mostrou **8 turnos sem nenhuma resposta** em dois dias — 2 de 4 em 11/08 e 6 de 14 em 10/08 —
+contra zero nos dias anteriores a 30/07.
+
+**Causa medida.** As duas `buscar_pncp` de 11/08 levaram 27.760ms e 26.462ms, contra média de
+5.552ms nas 99 chamadas registradas. O teto de `TEMPO_MAX_BUSCA_MS` era verificado apenas entre
+lotes de editais, então um lote iniciado aos 19,9s rodava até o fim. Uma busca de 27s sozinha
+estourava o orçamento de 35s do turno; passando de 60s, a Vercel matava a função sem gravar
+mensagem nem `AuditLog` — daí os turnos que somem por completo.
+
+**Hipótese descartada.** A primeira recomendação foi limitar o termo a 3–4 tokens (§9.64). Cruzar
+duração × tokens das 16 buscas gravadas refutou: 6 tokens custaram 8,2s, 3 tokens custaram 15,6s, e
+a busca de 26s tinha 4 tokens. O custo vem do número de requisições, não do termo. Regra em §9.67.
+
+| Mudança | Antes | Depois |
+|---|---|---|
+| Teto de tempo da busca | 20s, checado entre lotes | 12s como prazo real (`AbortSignal` composto + checagem por requisição + reserva de 2s por lote) |
+| Consultas a `/resultados` por compra | 40 | 10 |
+| Consultas a `/resultados` por busca | sem teto (até ~800) | 120 |
+| Data de referência | `new Date(...)` sem checagem | janela fixa 2000–2100; candidato sem data plausível é descartado |
+
+A garantia original ("nunca devolver subconjunto arbitrário dos itens de uma compra") foi
+preservada por outro caminho: compra interrompida pelo prazo é descartada **inteira**, e a
+paginação truncada é abandonada antes de gastar as consultas de resultado.
+
+**Achado de dados.** 5 dos 264 candidatos tinham data-sentinela do PNCP (`0001-01-01` ×3,
+`1858-11-17`, `1900-01-01`). Todos eram linhas de descarte, então **nenhuma série de preços foi
+contaminada** — mas se tivessem sido adicionados, entrariam na memória de cálculo com data falsa e
+o filtro de recência os eliminaria em silêncio.
+
+Verificação: typecheck limpo, ESLint 0 erros, **808 testes / 92 arquivos** (10 novos), `next build`
+compilando. As 6 garantias novas foram confirmadas **por mutação**, uma a uma — a primeira rodada
+mostrou que o descarte de paginação truncada não tinha teste (a mutação sobreviveu), e o teste foi
+escrito sobre a garantia que ele realmente dá: não gastar requisição numa compra que será
+descartada.
+
+> **EM ABERTO — verificação funcional pelo usuário.** Falta usar o assistente em produção depois do
+> deploy e confirmar que (a) os turnos deixam de morrer sem resposta e (b) 2 buscas cabem num turno,
+> em vez de 1. Se 12s cortar edital relevante demais, é um número em `pncp.ts`. Sem migration:
+> rollback é `git revert` do commit.
+
+### Pendência de conformidade levantada na mesma auditoria (decisão do usuário)
+
+Os argumentos gravados mostram `buscar_pncp` sendo chamada com faixas de valor que vêm do valor
+esperado pelo próprio analista (`valorMinimo: 70000, valorMaximo: 90000`; depois `1` a `5`). Filtrar
+valor tem uso legítimo — cortar disparate, e há bastante (CV de 969% no pipeline automático, com um
+candidato de R$ 831.040,00). Mas selecionar contrato porque ele cai na faixa já esperada inverte a
+lógica da pesquisa de preços e é frágil sob questionamento da IN 65/2021. Não há mudança de código
+proposta: é decisão de processo do usuário.
