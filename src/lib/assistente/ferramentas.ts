@@ -426,46 +426,26 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     const temFiltroValor = valorMinimo !== undefined || valorMaximo !== undefined;
     const encontrados = await buscarContratosPNCP(termo, { valorMinimo, valorMaximo });
 
-    // Carrega URLs já descartadas pelo analista neste processo para não reapresentar
-    // contratos que ele já avaliou e decidiu não usar. A exclusão é por URL para cobrir
-    // todos os itens do processo — um contrato irrelevante para um item tende a ser
-    // irrelevante para os outros também.
-    let urlsDescartadas = new Set<string>();
-    if (ctx.processoId && encontrados.length > 0) {
-      const descartados = await db.resultadoSimilaridade.findMany({
-        where: {
-          item: { processoId: ctx.processoId },
-          descartado: true,
-          fonteUrl: { not: null },
-        },
-        select: { fonteUrl: true },
-      });
-      urlsDescartadas = new Set(
-        descartados.map((d) => d.fonteUrl).filter((u): u is string => Boolean(u)),
-      );
-    }
-
-    const semDescartados = encontrados.filter(
-      (c) => !c.fonteUrl || !urlsDescartadas.has(c.fonteUrl),
-    );
-    const qtdExcluidos = encontrados.length - semDescartados.length;
-
-    if (semDescartados.length === 0) {
+    // Todos os candidatos devolvidos pelo PNCP viram card, mesmo que o analista
+    // tenha descartado esse contrato numa busca anterior. O filtro por URL
+    // descartada foi removido porque impedia o analista de mudar de ideia: ele
+    // clicava "Descartar", depois queria adicionar aquele contrato, mas ele
+    // sumia permanentemente das pesquisas seguintes (nunca virava card de novo,
+    // só aparecia no texto do modelo — sem botão para adicionar).
+    // O botão "Descartar" no card ainda existe para remover da tela os que não
+    // interessam nesta sessão, mas o histórico de descartes não bloqueia mais
+    // o surgimento do card em buscas novas.
+    if (encontrados.length === 0) {
       return {
         resposta: {
           termo,
-          total: encontrados.length,
+          total: 0,
           candidatos: [],
-          excluidos_descartados: qtdExcluidos,
-          observacao:
-            encontrados.length === 0
-              ? temFiltroValor
-                ? "O PNCP não devolveu nada para este termo dentro da faixa de valor informada. " +
-                  "Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
-                : "O PNCP não devolveu nada para este termo. Tente outro recorte: troque o " +
-                  "substantivo-núcleo, remova qualificadores ou use o nome comercial do produto."
-              : `Todos os ${qtdExcluidos} resultado(s) retornados já foram descartados pelo analista nesta pesquisa. ` +
-                "Tente um termo diferente.",
+          observacao: temFiltroValor
+            ? "O PNCP não devolveu nada para este termo dentro da faixa de valor informada. " +
+              "Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
+            : "O PNCP não devolveu nada para este termo. Tente outro recorte: troque o " +
+              "substantivo-núcleo, remova qualificadores ou use o nome comercial do produto.",
         },
         sugestoes: [] as CandidatoSugerido[],
       };
@@ -474,26 +454,20 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     // O mesmo corte vale para o que o modelo lê e para o que vira cartão: se o
     // modelo enxergasse mais do que a tela mostra, ele citaria um candidato sem
     // botão para aprovar.
-    const candidatos = semDescartados.slice(0, MAX_SUGESTOES_POR_BUSCA);
+    const candidatos = encontrados.slice(0, MAX_SUGESTOES_POR_BUSCA);
     const catalogados = catalogar(candidatos);
-
-    const obsDescartados =
-      qtdExcluidos > 0
-        ? ` (${qtdExcluidos} ocultado(s) por já terem sido descartados pelo analista)`
-        : "";
 
     return {
       resposta: {
         termo,
         total: encontrados.length,
         exibidos: catalogados.length,
-        excluidos_descartados: qtdExcluidos,
         candidatos: catalogados,
         observacao:
           "Estes candidatos já apareceram na tela do usuário, cada um com link e botão para " +
           "adicionar à lista do processo. Você NÃO registra nada: comente o que achou de cada " +
           "um (por que é ou não comparável) e deixe a decisão com o servidor. Os valores vêm " +
-          `da fonte — não os repita de memória nem estime score.${obsDescartados}`,
+          "da fonte — não os repita de memória nem estime score.",
       },
       sugestoes: catalogados.map((c) =>
         paraSugestao(c.id, catalogo.get(c.id)!, {
