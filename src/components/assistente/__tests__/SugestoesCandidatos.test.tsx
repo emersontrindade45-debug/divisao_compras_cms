@@ -38,6 +38,9 @@ const ITENS = [
   { id: "item-2", descricao: "Limpeza das calhas" },
 ];
 
+/** Três itens para exercitar o cartão que segue ativo entre uma adição e outra. */
+const TRES_ITENS = [...ITENS, { id: "item-3", descricao: "Limpeza das calçadas" }];
+
 describe("SugestoesCandidatos", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -82,7 +85,81 @@ describe("SugestoesCandidatos", () => {
     fireEvent.click(screen.getByRole("button", { name: /Adicionar à lista/ }));
 
     await waitFor(() => expect(refreshMock).toHaveBeenCalled());
-    expect(await screen.findByText("Na lista do processo")).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Na lista de: Lavagem da fachada/, { selector: "span" }),
+    ).toBeInTheDocument();
+  });
+
+  // O mesmo contrato costuma servir a mais de um item do processo (fachadas
+  // diferentes com o mesmo serviço), e o servidor deduplica por item + URL da
+  // fonte — não por candidato. O cartão não pode fechar no primeiro clique.
+  it("segue ativo depois de adicionar, para o candidato ir a outro item", async () => {
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={TRES_ITENS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar à lista/ }));
+    await waitFor(() => expect(adicionarMock).toHaveBeenCalledTimes(1));
+    expect(adicionarMock.mock.calls[0]![0].itemId).toBe("item-1");
+
+    const seletor = await screen.findByLabelText("Item que receberá o candidato");
+    fireEvent.change(seletor, { target: { value: "item-3" } });
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar a outro item/ }));
+
+    await waitFor(() => expect(adicionarMock).toHaveBeenCalledTimes(2));
+    expect(adicionarMock.mock.calls[1]![0].itemId).toBe("item-3");
+    expect(
+      await screen.findByText(/Lavagem da fachada · Limpeza das calçadas/, { selector: "span" }),
+    ).toBeInTheDocument();
+  });
+
+  // Oferecer de novo um item que já recebeu o candidato seria prometer uma ação
+  // que o servidor recusa (CLAUDE.md §9.40).
+  it("tira do seletor os itens que já receberam o candidato", async () => {
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={TRES_ITENS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar à lista/ }));
+
+    await waitFor(() => expect(adicionarMock).toHaveBeenCalled());
+    const seletor = await screen.findByLabelText<HTMLSelectElement>(
+      "Item que receberá o candidato",
+    );
+    const opcoes = Array.from(seletor.options).map((o) => o.value);
+    expect(opcoes).toEqual(["item-2", "item-3"]);
+    // Sem escolha manual, o seletor cai sozinho no primeiro pendente — o item
+    // sugerido pelo modelo ("item-1") já não serve.
+    expect(seletor.value).toBe("item-2");
+  });
+
+  it("encerra o cartão quando todos os itens já receberam o candidato", async () => {
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={ITENS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar à lista/ }));
+    await waitFor(() => expect(adicionarMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: /Adicionar a outro item/ }));
+    await waitFor(() => expect(adicionarMock).toHaveBeenCalledTimes(2));
+    expect(adicionarMock.mock.calls[1]![0].itemId).toBe("item-2");
+
+    expect(
+      await screen.findByText(/Todos os itens do processo já receberam este candidato/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Adicionar/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Item que receberá o candidato")).not.toBeInTheDocument();
+  });
+
+  it("não marca o item como recebido quando o servidor recusa", async () => {
+    adicionarMock.mockResolvedValue({ ok: false, mensagem: "Já está na lista deste item." });
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={TRES_ITENS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar à lista/ }));
+
+    await waitFor(() => expect(adicionarMock).toHaveBeenCalled());
+    const seletor = screen.getByLabelText<HTMLSelectElement>("Item que receberá o candidato");
+    expect(Array.from(seletor.options).map((o) => o.value)).toEqual([
+      "item-1",
+      "item-2",
+      "item-3",
+    ]);
+    expect(screen.queryByText(/Na lista de:/)).not.toBeInTheDocument();
   });
 
   it("usa o item escolhido no seletor, e não o sugerido pelo modelo", async () => {

@@ -18,6 +18,12 @@ import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 // O cartão manda ao servidor apenas três identificadores (mensagem, candidato,
 // item). Valor, órgão e data são relidos da mensagem gravada, então nada que se
 // digite aqui no navegador consegue virar preço de uma estimativa pública.
+//
+// O mesmo candidato pode servir a mais de um item do processo (serviços
+// parecidos em fachadas diferentes, por exemplo), e o servidor deduplica por
+// `itemId + fonteUrl` — não por candidato. Por isso o cartão segue ativo depois
+// de adicionar: registra em quais itens já entrou e continua oferecendo os que
+// faltam, saindo do ar só quando todos receberam o candidato.
 
 const formatarMoeda = (valor: number) =>
   valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -35,7 +41,8 @@ export function SugestoesCandidatos({
   itens: { id: string; descricao: string }[];
 }) {
   const router = useRouter();
-  const [adicionados, setAdicionados] = useState<Record<string, boolean>>({});
+  /** Por candidato, os itens que já o receberam nesta sessão. */
+  const [adicionados, setAdicionados] = useState<Record<string, string[]>>({});
   const [emCurso, setEmCurso] = useState<string | null>(null);
   const [itemEscolhido, setItemEscolhido] = useState<Record<string, string>>({});
   const [descartados, setDescartados] = useState<Set<string>>(new Set());
@@ -67,17 +74,38 @@ export function SugestoesCandidatos({
   };
 
   const idsItens = new Set(itens.map((it) => it.id));
+  const descricaoDoItem = new Map(itens.map((it) => [it.id, it.descricao]));
+
+  /**
+   * Estado de destino de um candidato: onde já entrou, o que ainda falta e qual
+   * item o seletor mostra agora. Tudo derivado na renderização, nunca espelhado
+   * em estado (CLAUDE.md §9.41) — quando um item recebe o candidato, a escolha
+   * guardada deixa de ser válida e o seletor cai sozinho no próximo pendente.
+   *
+   * `itemIdSugerido` é validado contra os pendentes: além de poder apontar para
+   * item deletado numa re-sincronização, ele fica obsoleto assim que o item que
+   * o modelo sugeriu já recebeu o candidato.
+   */
+  const destinosDe = (sugestao: CandidatoSugerido) => {
+    const jaRecebidos = adicionados[sugestao.id] ?? [];
+    const pendentes = itens.filter((it) => !jaRecebidos.includes(it.id));
+    const escolha = itemEscolhido[sugestao.id];
+    const escolhaValida =
+      escolha !== undefined && pendentes.some((it) => it.id === escolha) ? escolha : null;
+    const sugeridoValido =
+      sugestao.itemIdSugerido && pendentes.some((it) => it.id === sugestao.itemIdSugerido)
+        ? sugestao.itemIdSugerido
+        : null;
+    return {
+      jaRecebidos,
+      pendentes,
+      itemId: escolhaValida ?? sugeridoValido ?? pendentes[0]?.id ?? null,
+    };
+  };
 
   const adicionar = async (sugestao: CandidatoSugerido) => {
     if (!mensagemId) return;
-    // Valida que itemIdSugerido ainda existe no banco (pode ter sido deletado numa
-    // re-sincronização anterior à correção). Se inválido, cai para o primeiro item.
-    const itemIdSugeridoValido =
-      sugestao.itemIdSugerido && idsItens.has(sugestao.itemIdSugerido)
-        ? sugestao.itemIdSugerido
-        : null;
-    const itemId =
-      itemEscolhido[sugestao.id] ?? itemIdSugeridoValido ?? itens[0]?.id ?? null;
+    const { itemId } = destinosDe(sugestao);
     if (!itemId) return;
 
     setEmCurso(sugestao.id);
@@ -88,7 +116,10 @@ export function SugestoesCandidatos({
         itemId,
       });
       if (resultado.ok) {
-        setAdicionados((atual) => ({ ...atual, [sugestao.id]: true }));
+        setAdicionados((atual) => ({
+          ...atual,
+          [sugestao.id]: [...(atual[sugestao.id] ?? []), itemId],
+        }));
         toast.success(resultado.mensagem);
         // A tabela de candidatos é renderizada no servidor: sem isto o registro
         // entra no banco e a tela ao lado continua a mesma até um F5.
@@ -111,13 +142,11 @@ export function SugestoesCandidatos({
         </li>
       )}
       {sugestoesVisiveis.map((sugestao) => {
-        const jaAdicionado = adicionados[sugestao.id] === true;
-        const itemIdSugeridoValido =
-          sugestao.itemIdSugerido && idsItens.has(sugestao.itemIdSugerido)
-            ? sugestao.itemIdSugerido
-            : null;
-        const itemId =
-          itemEscolhido[sugestao.id] ?? itemIdSugeridoValido ?? itens[0]?.id ?? "";
+        const { jaRecebidos, pendentes, itemId } = destinosDe(sugestao);
+        const jaAdicionado = jaRecebidos.length > 0;
+        // Só quando todos os itens do processo já receberam o candidato é que
+        // não sobra ação — aí o cartão vira indicador (CLAUDE.md §9.40).
+        const esgotado = jaAdicionado && pendentes.length === 0;
         // Botão que não faz nada é pior que botão ausente (CLAUDE.md §9.40):
         // quando falta processo, item ou id de mensagem, ele sai desabilitado
         // com o motivo no title.
@@ -169,44 +198,64 @@ export function SugestoesCandidatos({
               )}
             </div>
 
-            {jaAdicionado ? (
-              <p className="inline-flex items-center gap-1 text-success-strong">
-                <Check className="size-3.5" aria-hidden />
-                Na lista do processo
-              </p>
-            ) : (
-              <div className="space-y-1.5">
-                {/* A janela de recência aceita pelo servidor vem de Item.natureza
-                    (classificado na lista de fontes do processo), não de uma escolha
-                    feita aqui — evita depender do analista lembrar o tipo a cada clique. */}
-                {itens.length > 1 && (
-                  <select
-                    value={itemId}
-                    onChange={(e) =>
-                      setItemEscolhido((atual) => ({ ...atual, [sugestao.id]: e.target.value }))
-                    }
-                    aria-label="Item que receberá o candidato"
-                    className="min-w-0 flex-1 rounded-md border bg-background px-1.5 py-1 text-xs"
+            <div className="space-y-1.5">
+              {jaAdicionado && (
+                <p className="flex items-start gap-1 text-success-strong">
+                  <Check className="mt-px size-3.5 shrink-0" aria-hidden />
+                  <span>
+                    Na lista de:{" "}
+                    {jaRecebidos
+                      .map((id) => descricaoDoItem.get(id) ?? id)
+                      .join(" · ")}
+                  </span>
+                </p>
+              )}
+              {esgotado ? (
+                <p className="text-muted-foreground">
+                  Todos os itens do processo já receberam este candidato.
+                </p>
+              ) : (
+                <>
+                  {/* A janela de recência aceita pelo servidor vem de Item.natureza
+                      (classificado na lista de fontes do processo), não de uma escolha
+                      feita aqui — evita depender do analista lembrar o tipo a cada clique.
+
+                      Os itens que já receberam o candidato saem da lista: o servidor
+                      recusaria a repetição, e oferecer a opção seria prometer uma ação
+                      que não acontece (CLAUDE.md §9.40). */}
+                  {itens.length > 1 && (
+                    <select
+                      value={itemId ?? ""}
+                      onChange={(e) =>
+                        setItemEscolhido((atual) => ({ ...atual, [sugestao.id]: e.target.value }))
+                      }
+                      aria-label="Item que receberá o candidato"
+                      className="min-w-0 flex-1 rounded-md border bg-background px-1.5 py-1 text-xs"
+                    >
+                      {pendentes.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.descricao}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={impedimento !== null || emCurso === sugestao.id}
+                    title={impedimento ?? undefined}
+                    onClick={() => void adicionar(sugestao)}
                   >
-                    {itens.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.descricao}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={impedimento !== null || emCurso === sugestao.id}
-                  title={impedimento ?? undefined}
-                  onClick={() => void adicionar(sugestao)}
-                >
-                  <Plus aria-hidden />
-                  {emCurso === sugestao.id ? "Adicionando…" : "Adicionar à lista"}
-                </Button>
-              </div>
-            )}
+                    <Plus aria-hidden />
+                    {emCurso === sugestao.id
+                      ? "Adicionando…"
+                      : jaAdicionado
+                        ? "Adicionar a outro item"
+                        : "Adicionar à lista"}
+                  </Button>
+                </>
+              )}
+            </div>
           </li>
         );
       })}
