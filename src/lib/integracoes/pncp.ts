@@ -319,21 +319,97 @@ async function buscarTodosItens(
 }
 
 /**
- * Mantém só os itens com palavra em comum com o termo pesquisado. Uma compra pode
- * ter centenas de itens e cada um custa uma requisição a mais para obter o valor
- * homologado; sem esse corte, buscar "certificado digital" consultaria os 418 itens
- * de uma ata de medicamentos. Termo sem token utilizável não filtra nada — errar
- * para o lado de consultar demais é preferível a devolver zero candidatos.
+ * Tokens que aparecem em quase toda descrição de item público e por isso não
+ * distinguem nada. Ficam de fora do casamento porque **um token genérico sozinho
+ * é suficiente para o item entrar**: em "lavagem fachada predio novo pastilhas
+ * pele de vidro", `novo` respondeu por 125 dos matches e trouxe argamassa e
+ * abraçadeira de nylon como candidatos a referência de preço (CLAUDE.md §9.64).
+ *
+ * A lista é curta e conservadora de propósito — cortar demais derruba recall, e
+ * recall perdido aqui é silencioso. Só entram duas famílias:
+ *
+ * 1. **Meta-vocabulário do ato administrativo** (`aquisicao`, `contratacao`,
+ *    `servico`, ...): nomeia a compra, nunca o produto.
+ * 2. **Chaves de atributo do CATMAT** (`material`, `tipo`, `cor`, ...): itens com
+ *    código de catálogo vêm como pares `chave: valor` — medido contra a API real
+ *    em 2026-08-11, 265 a 472 caracteres por descrição. O sinal está no valor
+ *    (`aço`, `giratória`), nunca na chave, que se repete em categorias
+ *    inteiramente diferentes.
+ *
+ * Palavra que nomeie produto ou serviço não entra aqui, mesmo parecendo genérica
+ * (`limpeza`, `conjunto`, `kit`): é ela que sustenta buscas como "material de
+ * limpeza", onde `material` sai e `limpeza` carrega o significado.
  */
-function filtrarPorRelevancia(termo: string, itens: PNCPItemResponse[]): PNCPItemResponse[] {
-  const tokensTermo = new Set(tokenizar(termo).map(raizPlural));
+const TOKENS_SEM_PODER_DISCRIMINANTE: ReadonlySet<string> = new Set(
+  [
+    // Meta-vocabulário do ato administrativo.
+    "aquisicao", "contratacao", "fornecimento", "prestacao", "servico", "objeto",
+    "item", "lote", "produto", "empresa", "eventual", "futura", "demanda",
+    // Chaves de atributo do CATMAT e sucata de descrição.
+    "material", "tipo", "modelo", "marca", "cor", "caracteristica", "adicional",
+    "aplicacao", "referencia", "medida", "unidade", "descricao", "especificacao",
+    "componente", "acessorio", "formato", "apresentacao",
+    // Adjetivos de estado, que valem para qualquer coisa.
+    "novo", "usado", "comum", "geral", "diverso", "outro", "demais", "similar",
+  ].map(raizPlural),
+);
+
+/**
+ * Ordena os itens da compra pela relevância ao termo e descarta os que não casam
+ * em nada. Uma compra pode ter centenas de itens e cada um custa uma requisição a
+ * mais para obter o valor homologado; o chamador consulta só os
+ * `MAX_ITENS_RELEVANTES_POR_COMPRA` primeiros, então **a ordem aqui decide em que
+ * itens o orçamento é gasto** — antes vinham os 10 primeiros na ordem da API, que
+ * é a ordem do edital e não tem relação com a busca.
+ *
+ * O peso de cada token casado é o IDF dentro da própria compra: token presente em
+ * todos os itens não separa nada (numa ata só de cadeiras, `cadeira` é ruído e
+ * `giratoria` é o sinal), token raro separa muito. Isso ranqueia; quem *exclui* o
+ * ruído entre categorias diferentes é a `TOKENS_SEM_PODER_DISCRIMINANTE`, porque
+ * IDF calculado dentro de uma compra não enxerga o que é genérico fora dela.
+ *
+ * Termo sem token utilizável não filtra nada — errar para o lado de consultar
+ * demais é preferível a devolver zero candidatos.
+ */
+function ranquearPorRelevancia(termo: string, itens: PNCPItemResponse[]): PNCPItemResponse[] {
+  const tokensTermo = new Set(
+    tokenizar(termo)
+      .map(raizPlural)
+      .filter((token) => !TOKENS_SEM_PODER_DISCRIMINANTE.has(token)),
+  );
   if (tokensTermo.size === 0) return itens;
 
-  return itens.filter((item) =>
-    tokenizar(limparDescricao(item.descricao))
-      .map(raizPlural)
-      .some((token) => tokensTermo.has(token)),
+  const tokensPorItem = itens.map(
+    (item) => new Set(tokenizar(limparDescricao(item.descricao)).map(raizPlural)),
   );
+
+  // Frequência de documento de cada token do termo, medida nos itens desta compra.
+  const frequencia = new Map<string, number>();
+  for (const token of tokensTermo) {
+    frequencia.set(token, tokensPorItem.reduce((n, tokens) => n + (tokens.has(token) ? 1 : 0), 0));
+  }
+
+  const total = itens.length;
+  const pontuar = (tokens: Set<string>): number => {
+    let pontos = 0;
+    for (const token of tokensTermo) {
+      if (!tokens.has(token)) continue;
+      // +1 no denominador evita divisão por zero; +1 dentro do log mantém o peso
+      // positivo mesmo para token presente em todos os itens.
+      pontos += Math.log(1 + total / (1 + (frequencia.get(token) ?? 0)));
+    }
+    return pontos;
+  };
+
+  return itens
+    .map((item, indice) => ({ item, pontos: pontuar(tokensPorItem[indice]!) }))
+    .filter((entrada) => entrada.pontos > 0)
+    // Empate preserva a ordem do edital sem desempate explícito: `sort` é estável
+    // por especificação desde a ES2019. Havia aqui um `|| a.indice - b.indice`
+    // com um comentário dizendo que a determinística dependia dele — a mutação
+    // mostrou que nenhum teste o distinguia, e ele saiu (CLAUDE.md §9.35).
+    .sort((a, b) => b.pontos - a.pontos)
+    .map((entrada) => entrada.item);
 }
 
 /**
@@ -404,7 +480,9 @@ async function buscarItensDaCompra(
 
     // `temResultado === false` dispensa a chamada extra; ausente (contrato antigo da
     // API) é tratado como "pode ter" para não descartar item válido por omissão.
-    const candidatos = filtrarPorRelevancia(termo, todos)
+    // O `slice` corta pela ordem de `ranquearPorRelevancia`, que é decrescente em
+    // relevância — quem sobra são os mais aderentes ao termo, não os primeiros do edital.
+    const candidatos = ranquearPorRelevancia(termo, todos)
       .filter((item) => item.temResultado !== false)
       .slice(0, MAX_ITENS_RELEVANTES_POR_COMPRA);
 

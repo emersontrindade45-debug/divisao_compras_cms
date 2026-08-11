@@ -836,3 +836,30 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     implementar e descobrir depois. Vale também para o que já foi prometido ao usuário: dizer que a
     hipótese caiu e trocar a correção é melhor que entregar o que foi combinado sabendo que é
     inócuo (§9.24, §9.35).
+
+68. **O campo `url`/`uri` do PNCP vem com a porta interna (`:43660`) e não conecta — reconstruir
+    sempre.** Medido em 2026-08-11 no endpoint de anexos
+    (`/orgaos/{cnpj}/compras/{ano}/{seq}/arquivos`): o JSON devolve
+    `https://pncp.gov.br:43660/...`, cujo TCP dá timeout, enquanto **o mesmo caminho na 443
+    responde `200` com o PDF em 0,77s**. É proxy reverso vazando porta interna por não setar
+    `X-Forwarded-Port`. Gravado como veio, todo link de evidência de edital nasce morto — a §9.8
+    ("validar abrindo a URL real gerada") aplicada a um campo que *parecia* confiável por vir
+    pronto da API. Regra geral: URL montada pelo servidor de origem é dado a validar, não verdade
+    a propagar; derivar a URL a partir dos identificadores (CNPJ/ano/sequencial) em vez de aceitar
+    a que veio.
+69. **Afirmar propriedade de um dado sem medir custa a proposta inteira construída em cima dela.**
+    Nesta sessão isso aconteceu três vezes, com o mesmo formato. (a) Analisei 2 dos 17 actors de
+    PNCP da Apify e generalizei "nenhum devolve homologado por item" para o conjunto — havia um
+    que devolvia, e a correção só apareceu porque o usuário mandou olhar a lista inteira.
+    (b) Justifiquei extrair o PDF do edital dizendo que a `descricao` da API era "curta e suja" e
+    que a especificação real só estaria no anexo; a medição mostrou o contrário — itens com código
+    CATMAT trazem 265 a 472 caracteres de especificação estruturada em pares `chave: valor`, e o
+    PDF não acrescentava nada. A proposta foi retirada. (c) Escrevi um desempate explícito no
+    `sort` com um comentário afirmando que a determinística dependia dele; a mutação mostrou que
+    nenhum teste o distinguia, porque `Array.prototype.sort` é estável por especificação desde a
+    ES2019. Nos três casos a verificação custava minutos e a afirmação errada custava uma
+    implementação inteira. **Antes de justificar desenho com uma propriedade do dado ("o campo é
+    pobre", "a API não expõe", "a lista toda é assim"), medir a propriedade** — amostrar o campo,
+    chamar o endpoint, rodar a mutação. Corolário da §9.35 e da §9.68: vale igualmente para a
+    amostra de uma vitrine de terceiros, onde ler duas fichas e concluir sobre dezessete é o mesmo
+    erro em escala maior.

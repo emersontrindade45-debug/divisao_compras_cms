@@ -412,6 +412,113 @@ describe("filtro de relevância e limpeza da descrição", () => {
     expect(urls.some((u) => u.includes("/itens/7/resultados"))).toBe(true);
   });
 
+  it("não filtra nada quando sobra só token genérico no termo", async () => {
+    const urls: string[] = [];
+    mockPncp({
+      processos: [processoPadrao],
+      itens: [itemDe({ numeroItem: 7, descricao: "Item qualquer" })],
+      onUrl: (u) => urls.push(u),
+    });
+
+    // Todos os tokens caem na lista de sem-poder-discriminante: o termo fica vazio
+    // e vale a mesma regra de "consultar demais é melhor que devolver zero".
+    await buscarContratosPNCP("aquisicao de material novo");
+
+    expect(urls.some((u) => u.includes("/itens/7/resultados"))).toBe(true);
+  });
+});
+
+// O modo de falha da CLAUDE.md §9.64: o filtro antigo mantinha o item que
+// compartilhasse **qualquer** token com o termo, e um token genérico bastava.
+describe("relevância: token genérico não sustenta candidato (§9.64)", () => {
+  it("não consulta item que casa só por palavra sem poder discriminante", async () => {
+    const urls: string[] = [];
+    mockPncp({
+      processos: [processoPadrao],
+      itens: [
+        itemDe({ numeroItem: 1, descricao: "Lavagem de fachada com pastilhas" }),
+        // O caso real: entrou na série de preços por causa de "novo".
+        itemDe({ numeroItem: 2, descricao: "Argamassa colante para assentamento novo" }),
+        itemDe({ numeroItem: 3, descricao: "Abraçadeira de nylon, material plástico" }),
+      ],
+      onUrl: (u) => urls.push(u),
+    });
+
+    await buscarContratosPNCP("lavagem fachada predio novo pastilhas pele de vidro");
+
+    const consultados = urls.filter((u) => u.includes("/resultados"));
+    expect(consultados).toHaveLength(1);
+    expect(consultados[0]).toContain("/itens/1/resultados");
+  });
+
+  it("mantém o item quando a palavra genérica vem acompanhada de token real", async () => {
+    const urls: string[] = [];
+    mockPncp({
+      processos: [processoPadrao],
+      itens: [itemDe({ numeroItem: 4, descricao: "Material de limpeza — detergente neutro" })],
+      onUrl: (u) => urls.push(u),
+    });
+
+    // "material" sai do termo, "limpeza" fica e sustenta o casamento sozinha.
+    await buscarContratosPNCP("material de limpeza");
+
+    expect(urls.some((u) => u.includes("/itens/4/resultados"))).toBe(true);
+  });
+});
+
+// Cada item relevante custa uma requisição a `/resultados` e o teto por compra é
+// MAX_ITENS_RELEVANTES_POR_COMPRA (10): a ordem define em que itens o orçamento
+// é gasto. Antes era a ordem do edital, que não tem relação com a busca.
+describe("relevância: ranqueamento decide o gasto do orçamento", () => {
+  /** 10 itens que casam só pelo token comum, mais um, no fim, que casa por inteiro. */
+  function compraCom11Itens() {
+    const genericos = Array.from({ length: 10 }, (_, i) =>
+      itemDe({ numeroItem: i + 1, descricao: "Cadeira fixa de plástico" }),
+    );
+    return [...genericos, itemDe({ numeroItem: 11, descricao: "Cadeira giratória ergonômica" })];
+  }
+
+  it("consulta o item mais aderente mesmo quando ele é o último da compra", async () => {
+    const urls: string[] = [];
+    mockPncp({
+      processos: [processoPadrao],
+      itens: compraCom11Itens(),
+      onUrl: (u) => urls.push(u),
+    });
+
+    await buscarContratosPNCP("cadeira giratoria");
+
+    const consultados = urls.filter((u) => u.includes("/resultados"));
+    // O teto por compra continua valendo: 11 casam, 10 são consultados.
+    expect(consultados).toHaveLength(10);
+    // O item 11 casa "cadeira" + "giratoria"; os outros só "cadeira".
+    expect(consultados[0]).toContain("/itens/11/resultados");
+  });
+
+  it("empate preserva a ordem do edital, para a escolha ser determinística", async () => {
+    const urls: string[] = [];
+    mockPncp({
+      processos: [processoPadrao],
+      itens: [
+        itemDe({ numeroItem: 5, descricao: "Cadeira giratória" }),
+        itemDe({ numeroItem: 6, descricao: "Cadeira giratória" }),
+        itemDe({ numeroItem: 7, descricao: "Cadeira giratória" }),
+      ],
+      onUrl: (u) => urls.push(u),
+    });
+
+    await buscarContratosPNCP("cadeira giratoria");
+
+    const consultados = urls.filter((u) => u.includes("/resultados"));
+    expect(consultados.map((u) => u.match(/\/itens\/(\d+)\/resultados/)?.[1])).toEqual([
+      "5",
+      "6",
+      "7",
+    ]);
+  });
+});
+
+describe("limpeza da descrição do item", () => {
   it("remove HTML e entidades da descrição do item", async () => {
     mockPncp({
       processos: [processoPadrao],
