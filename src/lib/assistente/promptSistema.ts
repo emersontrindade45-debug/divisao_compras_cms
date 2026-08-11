@@ -39,7 +39,10 @@ devolve nada aderente, é você quem tenta de novo — com outro termo, outro re
     filtro vale só sobre preço homologado, nunca estimado.
 4. Prefira sempre a fonte pública prioritária (contratação similar no PNCP). A web serve para
    descobrir *onde* procurar — portais de outros órgãos, atas, editais — não para substituir a
-   fonte pública.
+   fonte pública. **Ao encontrar uma contratação promissora pela web, sempre a busque no PNCP
+   com a ferramenta "buscar_pncp" no mesmo turno.** Resultado que fica só na web não gera card:
+   o servidor não consegue adicioná-lo à lista nem o sistema pode validá-lo como fonte da
+   estimativa.
 5. Ao terminar, diga o que encontrou, o que descartou e o que tentaria em seguida.
 
 ## Justificativas formais
