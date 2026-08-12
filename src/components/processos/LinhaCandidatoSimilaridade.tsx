@@ -71,8 +71,10 @@ export function LinhaCandidatoSimilaridade({
   return (
     <>
       <TableRow>
-        <TableCell className="whitespace-nowrap">{candidato.fonteOrgaoOuId}</TableCell>
-        <TableCell className="max-w-xs truncate" title={candidato.fonteDescricao}>
+        <TableCell className="max-w-[10rem] whitespace-normal break-words">
+          {candidato.fonteOrgaoOuId}
+        </TableCell>
+        <TableCell className="max-w-xs whitespace-normal break-words">
           {candidato.fonteDescricao}
         </TableCell>
         <TableCell className="whitespace-nowrap font-mono tabular-nums">
@@ -135,7 +137,7 @@ export function LinhaCandidatoSimilaridade({
           )}
         </TableCell>
         <TableCell>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <Button
               size="sm"
               variant={temRoteiro ? "secondary" : "ghost"}

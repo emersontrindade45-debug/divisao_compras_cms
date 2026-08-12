@@ -85,4 +85,27 @@ describe("redigirMemoriaCalculo", () => {
 
     expect(texto).toBeNull();
   });
+
+  // Campo livre para o analista complementar o texto gerado automaticamente —
+  // entra como último parágrafo, depois do valor considerado.
+  it("acrescenta a justificativa complementar como parágrafo final, quando informada", () => {
+    const texto = redigirMemoriaCalculo(
+      { ...ROTEIRO, justificativaComplementar: "Contrato inclui material de limpeza no preço." },
+      TR,
+      CANDIDATO,
+    )!;
+
+    expect(texto.endsWith("Contrato inclui material de limpeza no preço.")).toBe(true);
+  });
+
+  it("não acrescenta parágrafo nenhum quando a justificativa complementar está vazia", () => {
+    const semComplemento = redigirMemoriaCalculo(ROTEIRO, TR, CANDIDATO)!;
+    const comVazia = redigirMemoriaCalculo(
+      { ...ROTEIRO, justificativaComplementar: "   " },
+      TR,
+      CANDIDATO,
+    )!;
+
+    expect(comVazia).toBe(semComplemento);
+  });
 });

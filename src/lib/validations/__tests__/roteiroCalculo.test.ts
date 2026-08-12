@@ -78,6 +78,15 @@ describe("roteiroCalculoSchema", () => {
     }));
     expect(roteiroCalculoSchema.safeParse({ valorInicial: 10, passos }).success).toBe(false);
   });
+
+  it("aceita unidade no passo e justificativa complementar no roteiro", () => {
+    const res = roteiroCalculoSchema.safeParse({
+      valorInicial: 10,
+      passos: [{ operacao: "multiplicacao", origem: "livre", valor: 4500, unidade: "m²" }],
+      justificativaComplementar: "Contrato inclui material de limpeza no preço.",
+    });
+    expect(res.success).toBe(true);
+  });
 });
 
 describe("lerRoteiro", () => {
@@ -86,6 +95,17 @@ describe("lerRoteiro", () => {
     expect(roteiro).not.toBeNull();
     expect(roteiro!.valorInicial).toBe(6.89);
     expect(roteiro!.passos).toHaveLength(1);
+  });
+
+  it("lê a unidade do passo e a justificativa complementar", () => {
+    const roteiro = lerRoteiro({
+      valorInicial: 10,
+      passos: [{ operacao: "multiplicacao", origem: "livre", valor: 4500, unidade: "m²" }],
+      justificativaComplementar: "Ressalva do analista.",
+    });
+    expect(roteiro).not.toBeNull();
+    expect(roteiro!.passos[0]!.unidade).toBe("m²");
+    expect(roteiro!.justificativaComplementar).toBe("Ressalva do analista.");
   });
 
   it("devolve null para null/undefined, sem lançar", () => {

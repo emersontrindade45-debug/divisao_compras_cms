@@ -153,7 +153,9 @@ export async function salvarRoteiroCalculo(
       origem: p.origem,
       valor: p.valor ?? null,
       rotulo: p.rotulo ?? null,
+      unidade: p.unidade ?? null,
     })),
+    justificativaComplementar: parsed.data.roteiro.justificativaComplementar ?? null,
   };
 
   const execucao = executarRoteiro(roteiro, tr);
