@@ -71,10 +71,10 @@ export function LinhaCandidatoSimilaridade({
   return (
     <>
       <TableRow>
-        <TableCell className="max-w-[10rem] whitespace-normal break-words">
+        <TableCell className="max-w-[10rem] whitespace-normal break-words text-xs text-muted-foreground">
           {candidato.fonteOrgaoOuId}
         </TableCell>
-        <TableCell className="max-w-xs whitespace-normal break-words">
+        <TableCell className="max-w-xs whitespace-normal break-words text-xs text-muted-foreground">
           {candidato.fonteDescricao}
         </TableCell>
         <TableCell className="whitespace-nowrap font-mono tabular-nums">
