@@ -267,15 +267,68 @@ model ResultadoSimilaridade {
   competenciaReferencia  String?
   regimeReferencia       String?
   localidadeReferencia   String?
+  // ── Ajuste manual do valor pelo analista (M20) ──────────────────────────────
+  // O `valorUnitario` acima vem como a fonte publicou. No PNCP isso é
+  // frequentemente o valor CHEIO do contrato, não o preço por unidade: um
+  // contrato de R$ 15.000,00 por 150 m² entra como "R$ 15.000,00" e inflaria a
+  // série de preços em 150x. Estes campos guardam a correção feita na tela, com
+  // os operandos à vista para o auditor refazer a conta (memória de cálculo):
+  //   valorUnitarioAjustado = ajusteValorBase (op) ajusteQuantidade
+  // Quando `valorUnitarioAjustado` está preenchido, é ELE que vale como preço
+  // do candidato — ver `valorUnitarioEfetivo` em domain/ajusteValorCandidato.ts.
+  // Todos nulos = candidato sem ajuste, valendo o valor original da fonte.
+  ajusteValorBase        Decimal?                  @db.Decimal(14, 2)
+  ajusteOperacao         OperacaoAjusteValor?
+  ajusteQuantidade       Decimal?                  @db.Decimal(14, 4)
+  ajusteUnidadeMedida    String?
+  // Quantidade do TR da Câmara (origem da pesquisa). Só projeta o custo do
+  // objeto próprio a partir do unitário ajustado — NÃO entra na mediana, que é
+  // sempre calculada sobre valores unitários.
+  ajusteQuantidadeTR     Decimal?                  @db.Decimal(14, 4)
+  // Vigência do contrato de referência: registro documental para o auditor.
+  // Não converte nem normaliza valor nenhum (decidido com o usuário em
+  // 2026-08-12) — um contrato mensal e um anual entram na série pelo seu
+  // próprio unitário.
+  ajustePeriodicidade    PeriodicidadeContrato?
+  valorUnitarioAjustado  Decimal?                  @db.Decimal(12, 2)
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
 
-  item     Item                @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  fonte    Fonte?
-  conversa ConversaAssistente? @relation(fields: [conversaId], references: [id], onDelete: SetNull)
+  item               Item                @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  fonte              Fonte?
+  conversa           ConversaAssistente? @relation(fields: [conversaId], references: [id], onDelete: SetNull)
+  precosConsolidados PrecoConsolidado[]
 
   @@index([conversaId])
   @@map("resultados_similaridade")
+}
+
+/**
+ * Operação que transforma o valor publicado pela fonte no preço unitário
+ * comparável. `divisao` é o caso dominante (valor cheio do contrato ÷
+ * quantidade contratada); as outras existem porque a forma como cada órgão
+ * publica o preço varia demais para caber numa regra fixa.
+ */
+enum OperacaoAjusteValor {
+  divisao
+  multiplicacao
+  soma
+}
+
+/**
+ * Vigência do contrato usado como referência. Campo documental (ver
+ * `ajustePeriodicidade`). Valores com prefixo `meses_` porque enum do Prisma
+ * não aceita identificador começando com dígito.
+ */
+enum PeriodicidadeContrato {
+  mensal
+  anual
+  meses_12
+  meses_18
+  meses_24
+  meses_36
+  meses_48
+  meses_60
 }
 
 model Fonte {
@@ -535,10 +588,19 @@ model PrecoConsolidado {
   valorUnitario     Decimal     @db.Decimal(12, 2)
   status            StatusPreco @default(incluido)
   motivoExclusao    String?
+  // Preenchido quando o preço nasce da promoção de um candidato de
+  // similaridade. Sem este vínculo, corrigir o valor de um candidato já
+  // promovido não teria como alcançar a linha correspondente da série (os
+  // demais campos não identificam a linha com segurança). Nulo nos outros
+  // fluxos de entrada de preço; não é @unique porque as linhas gravadas antes
+  // desta coluna existir permanecem nulas.
+  resultadoSimilaridadeId String?
   createdAt         DateTime    @default(now())
 
-  seriePreco SeriePreco @relation(fields: [seriePrecoId], references: [id], onDelete: Cascade)
+  seriePreco            SeriePreco             @relation(fields: [seriePrecoId], references: [id], onDelete: Cascade)
+  resultadoSimilaridade ResultadoSimilaridade? @relation(fields: [resultadoSimilaridadeId], references: [id], onDelete: SetNull)
 
+  @@index([resultadoSimilaridadeId])
   @@map("precos_consolidados")
 }
 

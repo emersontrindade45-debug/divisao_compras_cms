@@ -10,6 +10,7 @@ import {
   mapTipoCandidatoParaFonte,
   podePromoverCandidato,
 } from "@/lib/domain/tipoFonteSimilaridade";
+import { valorUnitarioEfetivo } from "@/lib/domain/ajusteValorCandidato";
 import type { ActionResult } from "./processos";
 
 const promoverSchema = z.object({
@@ -57,6 +58,8 @@ export async function promoverResultadoSimilaridade(
       fonteOrgaoOuId: true,
       fonteUrl: true,
       valorUnitario: true,
+      valorUnitarioAjustado: true,
+      ajusteUnidadeMedida: true,
       dataReferencia: true,
       scoreFinal: true,
       justificativa: true,
@@ -78,6 +81,18 @@ export async function promoverResultadoSimilaridade(
   const tipoFonte = mapTipoCandidatoParaFonte(resultado.tipoCandidato);
   const scoreFinal = Number(resultado.scoreFinal);
 
+  // O preço que entra na estimativa é o ajustado pelo analista quando existe —
+  // a fonte pública muitas vezes publica o valor cheio do contrato no lugar do
+  // preço por unidade (ver domain/ajusteValorCandidato.ts). Promover o valor
+  // cru nesse caso inflaria a série.
+  const valorAjustado =
+    resultado.valorUnitarioAjustado == null ? null : Number(resultado.valorUnitarioAjustado);
+  const valorUnitario = valorUnitarioEfetivo({
+    valorUnitario: Number(resultado.valorUnitario),
+    valorUnitarioAjustado: valorAjustado,
+  });
+  const houveAjuste = valorAjustado !== null;
+
   let fonteId: string;
   try {
     fonteId = await db.$transaction(async (tx) => {
@@ -92,7 +107,7 @@ export async function promoverResultadoSimilaridade(
           descricao: resultado.fonteDescricao,
           orgaoOuFornecedor: resultado.fonteOrgaoOuId,
           dataReferencia: resultado.dataReferencia,
-          valorUnitario: resultado.valorUnitario,
+          valorUnitario,
           resultadoSimilaridadeId: resultado.id,
         },
       });
@@ -103,7 +118,16 @@ export async function promoverResultadoSimilaridade(
           fonteId: fonte.id,
           dataHoraAcesso: new Date(),
           url: resultado.fonteUrl ?? null,
-          descricao: `Contratação pública similar (score ${scoreFinal.toFixed(0)}) — ${resultado.justificativa}`,
+          // O ajuste entra na descrição da evidência para o auditor ver, no
+          // próprio documento comprobatório, que o preço promovido não é o
+          // número cru publicado pela fonte.
+          descricao:
+            `Contratação pública similar (score ${scoreFinal.toFixed(0)}) — ${resultado.justificativa}` +
+            (houveAjuste
+              ? ` [valor ajustado pelo analista: R$ ${valorUnitario.toFixed(2)}` +
+                `${resultado.ajusteUnidadeMedida ? ` por ${resultado.ajusteUnidadeMedida}` : ""}` +
+                `, a partir de R$ ${Number(resultado.valorUnitario).toFixed(2)} publicados na fonte]`
+              : ""),
         },
       });
 
@@ -134,7 +158,10 @@ export async function promoverResultadoSimilaridade(
           descricaoFonte: resultado.fonteDescricao,
           fornecedorOuOrgao: resultado.fonteOrgaoOuId,
           dataReferencia: resultado.dataReferencia,
-          valorUnitario: resultado.valorUnitario,
+          valorUnitario,
+          // Vínculo com o candidato de origem: sem ele, corrigir o valor depois
+          // da promoção não teria como alcançar esta linha da série.
+          resultadoSimilaridadeId: resultado.id,
         },
       });
 
@@ -172,7 +199,15 @@ export async function promoverResultadoSimilaridade(
     userId: user.id,
     processoId: resultado.item.processoId,
     acao: "promover_resultado_similaridade",
-    detalhes: { resultadoId: resultado.id, fonteId, itemId, scoreFinal },
+    detalhes: {
+      resultadoId: resultado.id,
+      fonteId,
+      itemId,
+      scoreFinal,
+      valorUnitario,
+      valorOriginalFonte: Number(resultado.valorUnitario),
+      valorAjustadoPeloAnalista: houveAjuste,
+    },
   });
 
   revalidatePath(`/processos/${resultado.item.processoId}`);

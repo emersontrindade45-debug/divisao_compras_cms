@@ -863,3 +863,17 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     chamar o endpoint, rodar a mutação. Corolário da §9.35 e da §9.68: vale igualmente para a
     amostra de uma vitrine de terceiros, onde ler duas fichas e concluir sobre dezessete é o mesmo
     erro em escala maior.
+70. **`Number("15.000")` é 15 — parser de dinheiro em pt-BR precisa distinguir milhar de decimal, e
+    a distinção é por formato, não por intuição.** Ao criar o campo de ajuste de valor do candidato
+    (M20, 2026-08-12), o caminho óbvio era reusar `parseNumberBR` de `lib/sheets/parsePlanilha.ts`.
+    O docstring dele promete converter `"1.000"`, mas o código só trata ponto-como-milhar quando há
+    **também** vírgula: com ponto sozinho ele cai em `Number(s)`, e "15.000" vira 15 — quinze mil
+    reais entrando na série de preços como quinze, sem nenhum sinal na tela. A regra que funciona é
+    testar o formato: `/^-?\d{1,3}(\.\d{3})+$/` é milhar; qualquer outro ponto é decimal (para
+    aceitar "1.5" e "997.36"). Duas consequências: (a) todo parser novo de valor monetário precisa
+    de caso de teste para `"15.000"` **e** `"1.5"`, porque acertar um e errar o outro é o modo de
+    falha natural; (b) **docstring não é especificação** — o comentário do `parseNumberBR` descreve
+    um comportamento que a função não tem, e confiar nele teria propagado o defeito. Este
+    descompasso segue aberto em `parsePlanilha.ts` (a planilha da Câmara pode trazer "1.000" como
+    texto), e foi deixado intocado de propósito: mexer ali muda ingestão em produção e é tarefa
+    própria, não efeito colateral.
