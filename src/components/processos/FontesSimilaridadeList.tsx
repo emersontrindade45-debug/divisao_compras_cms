@@ -82,13 +82,13 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       <p className="text-xs text-muted-foreground">
         Fontes utilizadas no preenchimento da cotação, para comprovação junto ao auditor. Itens
         sem candidato suficientemente similar (score abaixo de 70) não aparecem aqui — exigem
         pesquisa direta com fornecedores.
       </p>
-      {itensComFontes.map((item) => {
+      {itensComFontes.map((item, indice) => {
         const candidatos = item.resultadosSimilaridade.map(paraView);
         const tr = parametrosTRdoItem(item);
         const grandezas = candidatos.map((c) =>
@@ -96,13 +96,24 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
         );
 
         return (
-          <Card key={item.id} size="sm">
-            <CardHeader className="flex flex-row items-start justify-between gap-3">
-              <div>
-                <CardTitle className="text-sm font-medium leading-snug">{item.descricao}</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  {item.quantidade} {item.unidade}
-                </p>
+          <Card
+            key={item.id}
+            size="sm"
+            className="gap-0 overflow-hidden border-t-2 border-t-primary/60 py-0 shadow-sm ring-1 ring-border transition-shadow duration-200 hover:shadow-md"
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-3 rounded-none border-b border-border bg-muted/40 !py-3">
+              <div className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[0.7rem] font-semibold tabular-nums text-primary">
+                  {indice + 1}
+                </span>
+                <div>
+                  <CardTitle className="text-base! font-semibold! leading-snug text-foreground">
+                    {item.descricao}
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    {item.quantidade} {item.unidade}
+                  </p>
+                </div>
               </div>
               <div className="flex items-start gap-2">
                 <ParametrosTRItem
@@ -117,7 +128,7 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
                 <SeletorNaturezaItem itemId={item.id} natureza={item.natureza} />
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="py-4">
               {grandezasDivergentes(grandezas) && (
                 <p className="mb-2 rounded-md bg-warning/10 px-2 py-1.5 text-xs text-warning-foreground ring-1 ring-warning/30">
                   Os candidatos deste item terminam em grandezas diferentes (preço por unidade x
