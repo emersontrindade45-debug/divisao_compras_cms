@@ -28,4 +28,38 @@ describe("obterFontesSimilaridade", () => {
 
     expect(argumento.select.resultadosSimilaridade.where).toEqual({ descartado: false });
   });
+
+  // A tela mostrava só 5 contratos por item: o 6º em diante ficava invisível
+  // mesmo tendo sido pesquisado e aprovado pelo analista.
+  it("traz até 10 candidatos por item", async () => {
+    await obterFontesSimilaridade("proc-1");
+
+    const argumento = mocks.db.item.findMany.mock.calls[0]![0] as {
+      select: { resultadosSimilaridade: { take?: number } };
+    };
+
+    expect(argumento.select.resultadosSimilaridade.take).toBe(10);
+  });
+
+  // Sem estas colunas no `select`, a tela não teria como exibir o valor
+  // corrigido pelo analista nem repopular o formulário de ajuste.
+  it("lê as colunas do ajuste manual de valor", async () => {
+    await obterFontesSimilaridade("proc-1");
+
+    const argumento = mocks.db.item.findMany.mock.calls[0]![0] as {
+      select: { resultadosSimilaridade: { select: Record<string, unknown> } };
+    };
+
+    for (const coluna of [
+      "ajusteValorBase",
+      "ajusteOperacao",
+      "ajusteQuantidade",
+      "ajusteUnidadeMedida",
+      "ajusteQuantidadeTR",
+      "ajustePeriodicidade",
+      "valorUnitarioAjustado",
+    ]) {
+      expect(argumento.select.resultadosSimilaridade.select).toHaveProperty(coluna, true);
+    }
+  });
 });

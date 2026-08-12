@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
     mensagemAssistente: { findUnique: vi.fn(), findFirst: vi.fn() },
     conversaAssistente: { findFirst: vi.fn() },
     item: { findUnique: vi.fn(), findMany: vi.fn() },
-    resultadoSimilaridade: { create: vi.fn(), findFirst: vi.fn() },
+    resultadoSimilaridade: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
     // Presentes de propósito: os testes provam que NUNCA são chamados.
     fonte: { create: vi.fn() },
     evidencia: { create: vi.fn() },
@@ -114,6 +114,7 @@ describe("adicionarCandidatoSugerido", () => {
     mocks.db.item.findUnique.mockResolvedValue(ITEM);
     mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue(null);
     mocks.db.resultadoSimilaridade.create.mockResolvedValue({ id: "res-1" });
+    mocks.db.resultadoSimilaridade.update.mockResolvedValue({ id: "res-1" });
     // Novo fluxo: recência aprovada por padrão; IA retorna avaliação com score alto.
     mocks.candidatoEstaNoTempo.mockReturnValue(true);
     mocks.rankearSimilaridade.mockResolvedValue([AVALIACAO]);
@@ -235,12 +236,37 @@ describe("adicionarCandidatoSugerido", () => {
   });
 
   it("não regrava contratação que já está na lista do item", async () => {
-    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue({ id: "res-existente" });
+    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue({
+      id: "res-existente",
+      descartado: false,
+    });
 
     const r = await adicionarCandidatoSugerido(PEDIDO);
 
     expect(r.ok).toBe(false);
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+    expect(mocks.db.resultadoSimilaridade.update).not.toHaveBeenCalled();
+  });
+
+  // Descartar grava uma lápide (score 0) com a mesma URL. Tratá-la como
+  // duplicata deixava o analista sem saída: ele mandava adicionar de novo,
+  // ouvia "já está na lista" e o contrato não aparecia em lugar nenhum.
+  it("revive candidato descartado antes, em vez de recusá-lo como duplicata", async () => {
+    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue({
+      id: "res-lapide",
+      descartado: true,
+    });
+
+    const r = await adicionarCandidatoSugerido(PEDIDO);
+
+    expect(r.ok).toBe(true);
+    expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+    expect(mocks.db.resultadoSimilaridade.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "res-lapide" },
+        data: expect.objectContaining({ descartado: false, scoreFinal: expect.any(Number) }),
+      }),
+    );
   });
 
   it("marca origem, conversa e termo usado no candidato gravado", async () => {

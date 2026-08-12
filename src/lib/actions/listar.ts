@@ -133,7 +133,9 @@ export async function obterFontesSimilaridade(processoId: string) {
       resultadosSimilaridade: {
         where: { descartado: false },
         orderBy: { scoreFinal: "desc" },
-        take: 5,
+        // Até 10 contratos por item: a IN 65/2021 não fixa um teto, e cortar a
+        // lista abaixo do que o analista reuniu esconde preço já pesquisado.
+        take: 10,
         select: {
           id: true,
           tipoCandidato: true,
@@ -148,6 +150,13 @@ export async function obterFontesSimilaridade(processoId: string) {
           competenciaReferencia: true,
           regimeReferencia: true,
           localidadeReferencia: true,
+          ajusteValorBase: true,
+          ajusteOperacao: true,
+          ajusteQuantidade: true,
+          ajusteUnidadeMedida: true,
+          ajusteQuantidadeTR: true,
+          ajustePeriodicidade: true,
+          valorUnitarioAjustado: true,
         },
       },
     },

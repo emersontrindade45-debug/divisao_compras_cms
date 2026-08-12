@@ -284,4 +284,63 @@ describe("promoverResultadoSimilaridade", () => {
     expect(res.error).toBe("Candidato não encontrado");
     expect(mocks.db.$transaction).not.toHaveBeenCalled();
   });
+
+  // M20: o PNCP publica com frequência o valor cheio do contrato como se fosse
+  // unitário. Promover o número cru depois de o analista ter corrigido a conta
+  // colocaria o valor errado na série — que é justamente o erro que o ajuste
+  // existe para evitar.
+  describe("com valor ajustado pelo analista", () => {
+    const AJUSTADO = { valorUnitarioAjustado: 100, ajusteUnidadeMedida: "m²" };
+
+    it("promove o valor ajustado, não o publicado pela fonte", async () => {
+      mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(
+        resultadoBase({ valorUnitario: 15000, ...AJUSTADO }),
+      );
+
+      await promoverResultadoSimilaridade(RESULTADO_ID);
+
+      expect(mocks.tx.fonte.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ valorUnitario: 100 }),
+      });
+      expect(mocks.tx.precoConsolidado.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ valorUnitario: 100 }),
+      });
+    });
+
+    it("registra o ajuste na descrição da evidência, com o valor original", async () => {
+      mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(
+        resultadoBase({ valorUnitario: 15000, ...AJUSTADO }),
+      );
+
+      await promoverResultadoSimilaridade(RESULTADO_ID);
+
+      const evidArg = mocks.tx.evidencia.create.mock.calls[0]![0] as {
+        data: { descricao: string };
+      };
+      expect(evidArg.data.descricao).toContain("R$ 100.00");
+      expect(evidArg.data.descricao).toContain("15000.00");
+      expect(evidArg.data.descricao).toContain("m²");
+    });
+
+    it("mantém o valor da fonte quando não há ajuste", async () => {
+      await promoverResultadoSimilaridade(RESULTADO_ID);
+
+      expect(mocks.tx.fonte.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ valorUnitario: 850.5 }),
+      });
+      const evidArg = mocks.tx.evidencia.create.mock.calls[0]![0] as {
+        data: { descricao: string };
+      };
+      expect(evidArg.data.descricao).not.toContain("ajustado pelo analista");
+    });
+
+    // Sem o vínculo, um ajuste posterior não alcançaria a linha da série.
+    it("vincula o PrecoConsolidado ao candidato de origem", async () => {
+      await promoverResultadoSimilaridade(RESULTADO_ID);
+
+      expect(mocks.tx.precoConsolidado.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ resultadoSimilaridadeId: RESULTADO_ID }),
+      });
+    });
+  });
 });

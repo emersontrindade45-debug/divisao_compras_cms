@@ -1,80 +1,54 @@
 import { ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/common/EmptyState";
-import { PromoverFonteButton } from "@/components/processos/PromoverFonteButton";
-import { DescartarResultadoButton } from "@/components/processos/DescartarResultadoButton";
 import { SeletorNaturezaItem } from "@/components/processos/SeletorNaturezaItem";
+import {
+  LinhaCandidatoSimilaridade,
+  type CandidatoSimilaridadeView,
+} from "@/components/processos/LinhaCandidatoSimilaridade";
 import { obterFontesSimilaridade } from "@/lib/actions/listar";
-import { cn } from "@/lib/utils";
-
-function formatarMoeda(valor: number): string {
-  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+import type {
+  OperacaoAjusteValor,
+  PeriodicidadeContrato,
+} from "@/lib/domain/ajusteValorCandidato";
 
 function formatarData(data: Date): string {
   return data.toLocaleDateString("pt-BR");
 }
 
-function scoreVariant(score: number): "default" | "secondary" | "destructive" {
-  if (score >= 70) return "default";
-  if (score >= 40) return "secondary";
-  return "destructive";
+/** `Decimal` do Prisma não atravessa a fronteira RSC — converte ou devolve null. */
+function paraNumero(valor: unknown): number | null {
+  if (valor === null || valor === undefined) return null;
+  return Number(valor);
 }
 
-// "AAAA-MM" -> "mm/aaaa". Sem tentativa de adivinhar formato diferente —
-// devolve o valor cru se não casar (nunca deveria acontecer, ver
-// `provedorSinapi.ts`, mas não quebra a tela se acontecer).
-function formatarCompetencia(competencia: string): string {
-  const m = competencia.match(/^(\d{4})-(\d{2})$/);
-  return m ? `${m[2]}/${m[1]}` : competencia;
-}
+type ResultadoDoBanco = Awaited<
+  ReturnType<typeof obterFontesSimilaridade>
+>[number]["resultadosSimilaridade"][number];
 
-// Regime de desoneração do SINAPI: dois preços legítimos e simultâneos para o
-// mesmo código (CLAUDE.md — regra de domínio, não só de UI, ver
-// `PrecoReferencia.regime` no schema) — precisam ficar visualmente distintos.
-const REGIME_LABEL: Record<string, string> = {
-  desonerado: "Desonerado",
-  nao_desonerado: "Não desonerado",
-};
-
-/**
- * Bloco de metadados de fonte de tabela de referência oficial (SINAPI — M17).
- * Só renderiza quando `tipoCandidato === "preco_referencia"` e ao menos um dos
- * três campos veio preenchido — as demais fontes (contratação pública, Painel
- * de Preços) não têm regime de desoneração nem localidade-capital.
- */
-function ReferenciaSinapiInfo({
-  competencia,
-  regime,
-  localidade,
-}: {
-  competencia: string | null;
-  regime: string | null;
-  localidade: string | null;
-}) {
-  if (!competencia && !regime && !localidade) return null;
-
-  return (
-    <div className="flex flex-wrap items-center gap-1 text-xs">
-      {competencia && (
-        <Badge variant="outline" className="font-mono tabular-nums">
-          {formatarCompetencia(competencia)}
-        </Badge>
-      )}
-      {regime && (
-        <Badge className={cn(regime === "desonerado" ? "bg-success text-success-foreground" : "bg-warning text-warning-foreground", "border-transparent")}>
-          {REGIME_LABEL[regime] ?? regime}
-        </Badge>
-      )}
-      {localidade && (
-        <span className="text-muted-foreground" title="Localidade de referência do IBGE — a capital, não o estado inteiro">
-          {localidade} (capital)
-        </span>
-      )}
-    </div>
-  );
+function paraView(fonte: ResultadoDoBanco): CandidatoSimilaridadeView {
+  return {
+    id: fonte.id,
+    tipoCandidato: fonte.tipoCandidato,
+    fonteDescricao: fonte.fonteDescricao,
+    fonteOrgaoOuId: fonte.fonteOrgaoOuId,
+    fonteUrl: fonte.fonteUrl,
+    valorUnitario: Number(fonte.valorUnitario),
+    dataFormatada: formatarData(fonte.dataReferencia),
+    scoreFinal: Number(fonte.scoreFinal),
+    promovidoParaFonte: fonte.promovidoParaFonte,
+    competenciaReferencia: fonte.competenciaReferencia,
+    regimeReferencia: fonte.regimeReferencia,
+    localidadeReferencia: fonte.localidadeReferencia,
+    ajusteValorBase: paraNumero(fonte.ajusteValorBase),
+    ajusteOperacao: (fonte.ajusteOperacao as OperacaoAjusteValor | null) ?? null,
+    ajusteQuantidade: paraNumero(fonte.ajusteQuantidade),
+    ajusteUnidadeMedida: fonte.ajusteUnidadeMedida ?? null,
+    ajusteQuantidadeTR: paraNumero(fonte.ajusteQuantidadeTR),
+    ajustePeriodicidade: (fonte.ajustePeriodicidade as PeriodicidadeContrato | null) ?? null,
+    valorUnitarioAjustado: paraNumero(fonte.valorUnitarioAjustado),
+  };
 }
 
 export async function FontesSimilaridadeList({ processoId }: { processoId: string }) {
@@ -125,59 +99,12 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
               </TableHeader>
               <TableBody>
                 {item.resultadosSimilaridade.map((fonte) => (
-                  <TableRow key={fonte.id}>
-                    <TableCell className="whitespace-nowrap">{fonte.fonteOrgaoOuId}</TableCell>
-                    <TableCell className="max-w-xs truncate" title={fonte.fonteDescricao}>
-                      {fonte.fonteDescricao}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap font-mono tabular-nums">
-                      {formatarMoeda(Number(fonte.valorUnitario))}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      {formatarData(fonte.dataReferencia)}
-                    </TableCell>
-                    <TableCell>
-                      {fonte.tipoCandidato === "preco_referencia" ? (
-                        <ReferenciaSinapiInfo
-                          competencia={fonte.competenciaReferencia}
-                          regime={fonte.regimeReferencia}
-                          localidade={fonte.localidadeReferencia}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={scoreVariant(Number(fonte.scoreFinal))}>
-                        {Number(fonte.scoreFinal).toFixed(0)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {fonte.fonteUrl ? (
-                        <a
-                          href={fonte.fonteUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-primary hover:underline"
-                        >
-                          Abrir <ExternalLink className="size-3" aria-hidden />
-                        </a>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <PromoverFonteButton
-                          resultadoId={fonte.id}
-                          jaPromovido={fonte.promovidoParaFonte}
-                        />
-                        {!fonte.promovidoParaFonte && (
-                          <DescartarResultadoButton resultadoId={fonte.id} />
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                  <LinhaCandidatoSimilaridade
+                    key={fonte.id}
+                    candidato={paraView(fonte)}
+                    quantidadeItemTR={item.quantidade}
+                    unidadeItemTR={item.unidade}
+                  />
                 ))}
               </TableBody>
             </Table>

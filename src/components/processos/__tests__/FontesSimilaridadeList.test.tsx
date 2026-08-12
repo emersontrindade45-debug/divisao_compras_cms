@@ -94,4 +94,85 @@ describe("FontesSimilaridadeList", () => {
     expect(screen.queryByText("Não desonerado")).not.toBeInTheDocument();
     expect(screen.queryByText("Desonerado")).not.toBeInTheDocument();
   });
+
+  // M20: o valor corrigido pelo analista é o que vale como preço do candidato.
+  // Exibir o número cru da fonte aqui esconderia justamente a correção que
+  // impede a série de preços de ser inflada.
+  it("exibe o valor ajustado com o valor publicado pela fonte riscado ao lado", async () => {
+    mocks.obterFontesSimilaridade.mockResolvedValue([
+      {
+        ...ITEM_BASE,
+        resultadosSimilaridade: [
+          {
+            id: "res-3",
+            tipoCandidato: "contratacao_publica",
+            fonteDescricao: "Lavagem de fachada envidraçada",
+            fonteOrgaoOuId: "MPPR",
+            fonteUrl: "https://pncp.gov.br/y",
+            valorUnitario: 15000,
+            dataReferencia: new Date("2026-06-23"),
+            scoreFinal: 77,
+            justificativa: "objeto próximo",
+            promovidoParaFonte: false,
+            competenciaReferencia: null,
+            regimeReferencia: null,
+            localidadeReferencia: null,
+            ajusteValorBase: 15000,
+            ajusteOperacao: "divisao",
+            ajusteQuantidade: 150,
+            ajusteUnidadeMedida: "m²",
+            ajusteQuantidadeTR: 940,
+            ajustePeriodicidade: "meses_12",
+            valorUnitarioAjustado: 100,
+          },
+        ],
+      },
+    ]);
+
+    const jsx = await FontesSimilaridadeList({ processoId: "proc-1" });
+    render(jsx);
+
+    expect(screen.getByText(/R\$\s*100,00/)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s*15\.000,00/)).toBeInTheDocument();
+    expect(screen.getByText("/ m²")).toBeInTheDocument();
+    expect(screen.getByText("12 meses")).toBeInTheDocument();
+  });
+
+  it("exibe o valor da fonte quando não há ajuste", async () => {
+    mocks.obterFontesSimilaridade.mockResolvedValue([
+      {
+        ...ITEM_BASE,
+        resultadosSimilaridade: [
+          {
+            id: "res-4",
+            tipoCandidato: "contratacao_publica",
+            fonteDescricao: "Contrato sem ajuste",
+            fonteOrgaoOuId: "Órgão Z",
+            fonteUrl: null,
+            valorUnitario: 997.5,
+            dataReferencia: new Date("2025-07-30"),
+            scoreFinal: 70,
+            justificativa: "ok",
+            promovidoParaFonte: true,
+            competenciaReferencia: null,
+            regimeReferencia: null,
+            localidadeReferencia: null,
+            ajusteValorBase: null,
+            ajusteOperacao: null,
+            ajusteQuantidade: null,
+            ajusteUnidadeMedida: null,
+            ajusteQuantidadeTR: null,
+            ajustePeriodicidade: null,
+            valorUnitarioAjustado: null,
+          },
+        ],
+      },
+    ]);
+
+    const jsx = await FontesSimilaridadeList({ processoId: "proc-1" });
+    render(jsx);
+
+    expect(screen.getByText(/R\$\s*997,50/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ajustar valor de Órgão Z/ })).toBeInTheDocument();
+  });
 });

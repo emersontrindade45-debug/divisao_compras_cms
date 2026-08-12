@@ -245,14 +245,22 @@ export async function adicionarCandidatoSugerido(
   // novo. A guarda forte contra duplicidade fica na promoção a Fonte, que tem
   // constraint `@unique` e update condicional (CLAUDE.md §9.14) — aqui poluir a
   // lista é o único dano, e a checagem simples resolve.
+  //
+  // Exceção: linha DESCARTADA não bloqueia. O descarte grava uma lápide
+  // (score 0, ver `descartarCandidatoAssistente`), e tratá-la como duplicata
+  // deixava o analista sem saída — ele mandava adicionar de novo, recebia "já
+  // está na lista" e o contrato não aparecia em lugar nenhum. Neste caso a
+  // lápide é revivida com os dados reais, preservando o id.
+  let idParaReviver: string | null = null;
   if (sugestao.fonteUrl) {
     const jaExiste = await db.resultadoSimilaridade.findFirst({
       where: { itemId: item.id, fonteUrl: sugestao.fonteUrl },
-      select: { id: true },
+      select: { id: true, descartado: true },
     });
-    if (jaExiste) {
+    if (jaExiste && !jaExiste.descartado) {
       return { ok: false, mensagem: "Esta contratação já está na lista deste item." };
     }
+    if (jaExiste) idParaReviver = jaExiste.id;
   }
 
   // ── 1. Validar recência com a janela da natureza cadastrada do item ───────
@@ -305,27 +313,34 @@ export async function adicionarCandidatoSugerido(
   // registrado como "adaptado" para o auditor saber que foi escolha do analista.
   const adaptado = scoreFinal < 70;
 
-  await db.resultadoSimilaridade.create({
-    select: { id: true },
-    data: {
-      itemId: item.id,
-      tipoCandidato: avaliacao.candidato.tipoCandidato,
-      fonteDescricao: avaliacao.candidato.fonteDescricao,
-      fonteOrgaoOuId: avaliacao.candidato.fonteOrgaoOuId,
-      fonteUrl: avaliacao.candidato.fonteUrl ?? null,
-      valorUnitario: avaliacao.candidato.valorUnitario,
-      dataReferencia: avaliacao.candidato.dataReferencia,
-      scoreFinal,
-      scoreDescricao: avaliacao.scoreDescricao,
-      scoreEspecificacao: avaliacao.scoreEspecificacao,
-      scoreUnidadeQuantidade: avaliacao.scoreUnidadeQuantidade,
-      adaptado,
-      justificativa: avaliacao.justificativa,
-      origem: "assistente",
-      conversaId: mensagem.conversa.id,
-      termoBuscaUsado: sugestao.termoBuscaUsado,
-    },
-  });
+  const dadosCandidato = {
+    itemId: item.id,
+    tipoCandidato: avaliacao.candidato.tipoCandidato,
+    fonteDescricao: avaliacao.candidato.fonteDescricao,
+    fonteOrgaoOuId: avaliacao.candidato.fonteOrgaoOuId,
+    fonteUrl: avaliacao.candidato.fonteUrl ?? null,
+    valorUnitario: avaliacao.candidato.valorUnitario,
+    dataReferencia: avaliacao.candidato.dataReferencia,
+    scoreFinal,
+    scoreDescricao: avaliacao.scoreDescricao,
+    scoreEspecificacao: avaliacao.scoreEspecificacao,
+    scoreUnidadeQuantidade: avaliacao.scoreUnidadeQuantidade,
+    adaptado,
+    justificativa: avaliacao.justificativa,
+    origem: "assistente" as const,
+    conversaId: mensagem.conversa.id,
+    termoBuscaUsado: sugestao.termoBuscaUsado,
+  };
+
+  if (idParaReviver) {
+    await db.resultadoSimilaridade.update({
+      where: { id: idParaReviver },
+      select: { id: true },
+      data: { ...dadosCandidato, descartado: false },
+    });
+  } else {
+    await db.resultadoSimilaridade.create({ select: { id: true }, data: dadosCandidato });
+  }
 
   await registrarAuditoria({
     userId: user.id,
@@ -341,6 +356,7 @@ export async function adicionarCandidatoSugerido(
       termoBuscaUsado: sugestao.termoBuscaUsado,
       scoreFinal,
       adaptado,
+      revividoDeDescarte: idParaReviver !== null,
     },
   });
 

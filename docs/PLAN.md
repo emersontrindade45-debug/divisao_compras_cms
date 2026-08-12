@@ -1279,3 +1279,43 @@ as páginas não vira candidato duplicado.
 > confirmar que os candidatos retornados são mais aderentes ao termo do que antes. Se 12s cortar
 > edital relevante demais, `TEMPO_MAX_BUSCA_MS` e `MAX_RESULTADOS_POR_BUSCA` são os dois números.
 > Sem migration: rollback é `git revert`.
+
+---
+
+### M20 — Ajuste manual do valor do candidato e teto de 10 contratos por item (2026-08-12)
+
+Origem: uso real. Na aba de similaridade do processo, (a) itens com mais candidatos aprovados só
+exibiam parte deles e (b) o MPPR aparecia com "R$ 15.000,00 unitário" — que é o valor CHEIO do
+contrato por 150 m², ou seja R$ 100,00/m². Promovido assim, o preço entraria na série inflado em
+150x.
+
+**Entregas**
+
+1. **Teto por item de 5 → 10** (`obterFontesSimilaridade`). Cortar abaixo do que o analista reuniu
+   esconde preço já pesquisado.
+2. **Candidato descartado volta a ser adicionável.** `adicionarCandidatoSugerido` tratava a lápide
+   do descarte (mesma URL, score 0) como duplicata e respondia "já está na lista" — o analista
+   ficava sem saída e o contrato não aparecia em lugar nenhum. Agora a lápide é revivida
+   (mesmo id, `descartado: false`).
+3. **Ajuste manual do valor** (`domain/ajusteValorCandidato.ts` + `actions/ajustarValorCandidato.ts`
+   + `AjusteValorCandidatoForm`): `valorBase (÷ × +) quantidade = valor unitário`, mais unidade de
+   medida (m², m, serviço…), vigência documental (mensal/anual/12–60 meses) e projeção
+   `unitário × quantidade do TR`. O unitário é o que entra na série; a projeção é demonstrativa.
+   Decidido com o usuário em 2026-08-12: a periodicidade **não** normaliza valor.
+4. **Propagação para a estimativa.** Promoção passa a usar o valor efetivo (ajustado quando
+   existe) e registra o ajuste na descrição da `Evidencia`. Ajustar candidato já promovido
+   atualiza `Fonte` e `PrecoConsolidado` na mesma transação — vínculo novo
+   `PrecoConsolidado.resultadoSimilaridadeId`, com backfill no SQL da migration para as promoções
+   anteriores. Reconsolidar a série continua sendo passo explícito do analista.
+
+**Migration** `20260812120000_m20_ajuste_valor_candidato` — 2 enums, 7 colunas em
+`resultados_similaridade`, 1 coluna + índice + FK em `precos_consolidados`, mais o backfill.
+Aplicada e confirmada no banco **local** (`Database schema is up to date!`). **Produção pendente**
+(§9.19): como `promoverFonte` e `obterFontesSimilaridade` passam a pedir as colunas novas no
+`select`, a migration precisa rodar em produção junto com o deploy — senão a aba de similaridade
+quebra em runtime.
+
+Verificação: typecheck limpo, ESLint 0 erros (1 warning pré-existente em `DataTable`),
+**875 testes / 96 arquivos**, `next build` compilado. Duas mutações confirmaram que os testes
+protegem o que dizem proteger: promover o valor cru derruba "promove o valor ajustado"; propagar
+sem checar `promovidoParaFonte` derruba "não toca em Fonte nem na série".
