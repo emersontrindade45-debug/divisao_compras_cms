@@ -302,8 +302,9 @@ function aplicar(acumulado: number, operacao: OperacaoPasso, operando: number): 
  * Roda o roteiro passo a passo e devolve o valor final mais a linha de cada
  * etapa (para a prévia na tela e para a memória de cálculo).
  *
- * O arredondamento para centavos acontece só no fim: arredondar a cada passo
- * acumularia erro numa cadeia longa.
+ * O arredondamento para centavos ocorre a cada passo: o valor que entra no
+ * próximo passo é idêntico ao que é exibido na tela, eliminando discrepâncias
+ * entre o resultado mostrado e o calculado.
  */
 export function executarRoteiro(roteiro: RoteiroCalculo, tr: ParametrosTR): ResultadoRoteiro {
   if (!Number.isFinite(roteiro.valorInicial) || roteiro.valorInicial <= 0) {
@@ -326,12 +327,12 @@ export function executarRoteiro(roteiro: RoteiroCalculo, tr: ParametrosTR): Resu
       };
     }
 
-    acumulado = proximo;
+    acumulado = emCentavos(proximo);
     linhas.push({
       descricao: operando.descricao,
       operacao: passo.operacao,
       operando: operando.valor,
-      acumulado: emCentavos(acumulado),
+      acumulado,
     });
   }
 

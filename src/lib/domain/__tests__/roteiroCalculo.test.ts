@@ -58,8 +58,8 @@ describe("executarRoteiro", () => {
 
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    // 75000/4500 = 16,6667 → ×940 = 15.666,67 → ×4 = 62.666,67
-    expect(res.valorFinal).toBeCloseTo(62666.67, 2);
+    // 75000/4500 = 16,67 (arredondado) → ×940 = 15.669,80 → ×4 = 62.679,20
+    expect(res.valorFinal).toBe(62679.2);
     expect(res.linhas).toHaveLength(3);
     expect(res.grandeza).toBe("escopo_tr_periodo");
   });
@@ -141,8 +141,10 @@ describe("executarRoteiro", () => {
     expect(res.ok && res.valorFinal).toBe(850);
   });
 
-  // Arredondar a cada passo acumularia erro numa cadeia de 3 ou 4 etapas.
-  it("arredonda para centavos só no resultado final", () => {
+  // Cada passo arredonda para centavos: o valor que entra no passo seguinte
+  // é idêntico ao exibido na tela, evitando discrepâncias visíveis.
+  // Consequência: 100 ÷ 3 = 33,33 (exibido e calculado); × 3 = 99,99.
+  it("arredonda para centavos a cada passo — exibido e calculado coincidem", () => {
     const res = executarRoteiro(
       {
         valorInicial: 100,
@@ -153,7 +155,10 @@ describe("executarRoteiro", () => {
       },
       TR,
     );
-    expect(res.ok && res.valorFinal).toBe(100);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.linhas[0]!.acumulado).toBe(33.33);
+    expect(res.valorFinal).toBe(99.99);
   });
 
   describe("recusas", () => {
