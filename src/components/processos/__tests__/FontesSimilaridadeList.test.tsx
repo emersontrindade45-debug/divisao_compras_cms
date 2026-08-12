@@ -29,6 +29,10 @@ const ITEM_BASE = {
   unidade: "M",
   quantidade: 10,
   natureza: null,
+  trMedida: null,
+  trMedidaUnidade: null,
+  trFrequencia: null,
+  trVigenciaMeses: null,
 };
 
 describe("FontesSimilaridadeList", () => {
@@ -95,13 +99,17 @@ describe("FontesSimilaridadeList", () => {
     expect(screen.queryByText("Desonerado")).not.toBeInTheDocument();
   });
 
-  // M20: o valor corrigido pelo analista é o que vale como preço do candidato.
-  // Exibir o número cru da fonte aqui esconderia justamente a correção que
-  // impede a série de preços de ser inflada.
-  it("exibe o valor ajustado com o valor publicado pela fonte riscado ao lado", async () => {
+  // M21: o resultado do roteiro de cálculo é o que vale como preço do
+  // candidato. Exibir o número cru da fonte aqui esconderia justamente a
+  // correção que impede a série de preços de ser inflada.
+  it("exibe o valor calculado com o valor publicado pela fonte riscado ao lado", async () => {
     mocks.obterFontesSimilaridade.mockResolvedValue([
       {
         ...ITEM_BASE,
+        trMedida: 940,
+        trMedidaUnidade: "m²",
+        trFrequencia: "semestral",
+        trVigenciaMeses: 24,
         resultadosSimilaridade: [
           {
             id: "res-3",
@@ -117,15 +125,15 @@ describe("FontesSimilaridadeList", () => {
             competenciaReferencia: null,
             regimeReferencia: null,
             localidadeReferencia: null,
-            ajusteValorBase: 15000,
-            ajusteOperacao: "divisao",
-            ajusteQuantidade: 150,
             ajusteUnidadeMedida: "m²",
-            ajusteQuantidadeTR: 940,
             ajustePeriodicidade: "meses_12",
-            ajusteBaseSerie: "unitario",
-            valorUnitarioAjustado: 100,
             valorConsiderado: 100,
+            roteiroCalculo: {
+              valorInicial: 15000,
+              rotuloInicial: "valor global do contrato",
+              unidadeInicial: "m²",
+              passos: [{ operacao: "divisao", origem: "quantidade_contrato", valor: 150 }],
+            },
           },
         ],
       },
@@ -137,10 +145,10 @@ describe("FontesSimilaridadeList", () => {
     expect(screen.getByText(/R\$\s*100,00/)).toBeInTheDocument();
     expect(screen.getByText(/R\$\s*15\.000,00/)).toBeInTheDocument();
     expect(screen.getByText("/ m²")).toBeInTheDocument();
-    expect(screen.getByText("12 meses")).toBeInTheDocument();
+    expect(screen.getByText("contrato: 12 meses")).toBeInTheDocument();
   });
 
-  it("exibe o valor da fonte quando não há ajuste", async () => {
+  it("exibe o valor da fonte quando não há roteiro de cálculo", async () => {
     mocks.obterFontesSimilaridade.mockResolvedValue([
       {
         ...ITEM_BASE,
@@ -159,15 +167,10 @@ describe("FontesSimilaridadeList", () => {
             competenciaReferencia: null,
             regimeReferencia: null,
             localidadeReferencia: null,
-            ajusteValorBase: null,
-            ajusteOperacao: null,
-            ajusteQuantidade: null,
             ajusteUnidadeMedida: null,
-            ajusteQuantidadeTR: null,
             ajustePeriodicidade: null,
-            ajusteBaseSerie: null,
-            valorUnitarioAjustado: null,
             valorConsiderado: null,
+            roteiroCalculo: null,
           },
         ],
       },
@@ -177,6 +180,6 @@ describe("FontesSimilaridadeList", () => {
     render(jsx);
 
     expect(screen.getByText(/R\$\s*997,50/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Ajustar valor de Órgão Z/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Roteiro de cálculo de Órgão Z/ })).toBeInTheDocument();
   });
 });

@@ -1333,3 +1333,67 @@ diferentes, o card avisa (`basesDivergentes`) sem bloquear. Migration
 Aplicada em local e em produção; os 2 ajustes que já existiam mantiveram o mesmo valor.
 Verificação: 888 testes, build compilado, e a mutação "ignorar a base escolhida" derruba o teste
 do caso relatado.
+
+---
+
+### M21 — Roteiro de cálculo por passos (2026-08-12)
+
+Origem: uso real revelou que a conta de padronização de um contrato de referência ao objeto do TR
+raramente é uma operação só. Serviço contínuo com contrato de valor global exige três passos
+(`÷ medida do contrato · × medida do TR · × execuções no período`); bem de consumo pode não
+precisar de nenhum. O M20 (uma operação + escolha unitário/projetado) não cobria os dois extremos.
+
+**Modelo novo — `RoteiroCalculo`:** cadeia de até 8 passos, cada um com `operação` (×, ÷, +, −,
++%, −%) e `origem` do operando. Três origens (`medida_tr`, `quantidade_tr`, `execucoes_periodo`)
+**não carregam número** — são resolvidas a partir de parâmetros do **item**, não do candidato:
+`Item.trMedida/trMedidaUnidade` (medida física do objeto) e `Item.trFrequencia/trVigenciaMeses`
+(frequência de execução × vigência pretendida = execuções no período). Ficam no item porque valem
+para todos os candidatos daquele item — corrigir a metragem recalcula os dez contratos de uma vez,
+em vez de reeditar candidato a candidato.
+
+**Duas vigências, propositalmente separadas:** a do contrato de referência (`ajustePeriodicidade`,
+documental, herdada do M20) e a do TR (`Item.trVigenciaMeses`, que multiplica). Confundir as duas
+inflaria ou reduziria a estimativa silenciosamente.
+
+**Grandeza do resultado** (`classificarGrandeza`) é derivada da cadeia, não digitada:
+`unitario_contrato` / `escopo_tr` / `escopo_tr_periodo`. `grandezasDivergentes` avisa (sem
+bloquear) quando candidatos do mesmo item terminam em grandezas diferentes — mediana entre
+R$/m² e R$ pelo escopo em 24 meses não significa nada.
+
+**Memória de cálculo redigida automaticamente** (`domain/memoriaCalculoCandidato.ts`): cada passo
+vira uma frase ("pela medida do objeto no TR (940 m²), resulta em..."), com botão de copiar na
+tela — para colar direto na cota do processo, cumprindo a exigência de justificativa da IN 65/2021.
+
+**Modelos prontos** na UI (`RoteiroCalculoEditor`): 5 sequências que se repetem
+(contínuo/valor global, contínuo/unitário, consumo/×qtd TR, consumo/direto, obra+BDI) — aplicar um
+preenche a estrutura, resta digitar os números do contrato específico.
+
+**Segurança:** a server action `salvarRoteiroCalculo` **reexecuta o roteiro no servidor** com os
+parâmetros do item lidos do banco — o valor final nunca é aceito do cliente. Coluna `Json`
+validada com Zod na entrada e na leitura (`lerRoteiro` devolve `null` em vez de lançar, para JSON
+antigo/corrompido não derrubar a tela).
+
+**Migration** `20260812160000_m21_roteiro_calculo`: `Item.trMedida/trMedidaUnidade/trFrequencia/
+trVigenciaMeses`, `ResultadoSimilaridade.roteiroCalculo` (Json), enum `FrequenciaExecucao`, valor
+`meses_30` acrescentado a `PeriodicidadeContrato` (faltava na lista do M20). Backfill converte os
+ajustes do M20 em roteiros de 1-2 passos. **Verificado por dry-run contra produção antes de
+aplicar**: reproduzindo a expressão SQL do backfill como `SELECT` (sem escrever), os 5 ajustes
+reais em produção resultaram em roteiros cujo produto bate exatamente com `valorConsiderado` já
+gravado (conferido à mão: 6,89 × 4500 × 6 = 186.030,00 ✓, e os outros 4 igual).
+
+**M20 mantido como legado read-only:** `ajusteValorBase/Operacao/Quantidade/QuantidadeTR/
+BaseSerie` continuam no schema (histórico), mas o código de escrita (`ajustarValorCandidato.ts`,
+`AjusteValorCandidatoForm.tsx`) foi removido — `roteiroCalculo.ts` é a única fonte de verdade
+para valor considerado a partir de agora.
+
+Verificação: typecheck limpo, ESLint 0 erros (1 warning pré-existente), **893 testes** (60 novos),
+build compilado, migration aplicada em local. Duas mutações confirmaram a garantia central: gravar
+`valorInicial` no lugar do resultado recalculado derruba o teste de reexecução no servidor; tratar
+candidato sem roteiro como grandeza distinta (em vez de unitária) derruba o teste de
+`grandezasDivergentes`.
+
+> **Pendente de decisão do usuário (registrada na conversa, 2026-08-12):** a mediana passa a
+> comparar valores de ESCOPO (R$ pelo objeto do TR no período), não só preços unitários, quando o
+> analista escolhe um roteiro com passos de TR. A instrução processual precisa declarar isso —
+> a memória de cálculo redigida automaticamente já inclui essa frase ("valor do escopo do TR no
+> período"). Produção pendente: aplicar `/api/admin/migrate` após o deploy (CLAUDE.md §9.19).

@@ -9,14 +9,19 @@ import { PromoverFonteButton } from "@/components/processos/PromoverFonteButton"
 import { DescartarResultadoButton } from "@/components/processos/DescartarResultadoButton";
 import { ReferenciaSinapiInfo } from "@/components/processos/ReferenciaSinapiInfo";
 import {
-  AjusteValorCandidatoForm,
   PERIODICIDADE_LABEL,
-} from "@/components/processos/AjusteValorCandidatoForm";
-import type {
-  BaseValorSerie,
-  OperacaoAjusteValor,
-  PeriodicidadeContrato,
-} from "@/lib/domain/ajusteValorCandidato";
+  RoteiroCalculoEditor,
+} from "@/components/processos/RoteiroCalculoEditor";
+
+import { formatarMoeda } from "@/components/processos/parseNumeroBR";
+import {
+  GRANDEZA_LABEL,
+  classificarGrandeza,
+  type ParametrosTR,
+  type PeriodicidadeContrato,
+  type RoteiroCalculo,
+} from "@/lib/domain/roteiroCalculo";
+
 
 /**
  * Candidato já serializado para o cliente: `Decimal` do Prisma e `Date` não
@@ -31,25 +36,17 @@ export interface CandidatoSimilaridadeView {
   fonteUrl: string | null;
   valorUnitario: number;
   dataFormatada: string;
+  dataReferenciaISO: string;
   scoreFinal: number;
   promovidoParaFonte: boolean;
   competenciaReferencia: string | null;
   regimeReferencia: string | null;
   localidadeReferencia: string | null;
-  ajusteValorBase: number | null;
-  ajusteOperacao: OperacaoAjusteValor | null;
-  ajusteQuantidade: number | null;
   ajusteUnidadeMedida: string | null;
-  ajusteQuantidadeTR: number | null;
   ajustePeriodicidade: PeriodicidadeContrato | null;
-  ajusteBaseSerie: BaseValorSerie | null;
-  valorUnitarioAjustado: number | null;
-  /** Valor que vale como preço deste candidato na série (null = sem ajuste). */
+  /** Valor que vale como preço deste candidato na série (null = sem roteiro). */
   valorConsiderado: number | null;
-}
-
-function formatarMoeda(valor: number): string {
-  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  roteiro: RoteiroCalculo | null;
 }
 
 function scoreVariant(score: number): "default" | "secondary" | "destructive" {
@@ -60,17 +57,16 @@ function scoreVariant(score: number): "default" | "secondary" | "destructive" {
 
 export function LinhaCandidatoSimilaridade({
   candidato,
-  quantidadeItemTR,
-  unidadeItemTR,
+  tr,
 }: {
   candidato: CandidatoSimilaridadeView;
-  quantidadeItemTR: number;
-  unidadeItemTR: string;
+  tr: ParametrosTR;
 }) {
   const [editando, setEditando] = useState(false);
 
-  const temAjuste = candidato.valorConsiderado !== null;
+  const temRoteiro = candidato.roteiro !== null && candidato.valorConsiderado !== null;
   const valorExibido = candidato.valorConsiderado ?? candidato.valorUnitario;
+  const grandeza = candidato.roteiro ? classificarGrandeza(candidato.roteiro.passos) : null;
 
   return (
     <>
@@ -86,25 +82,24 @@ export function LinhaCandidatoSimilaridade({
               <span className="text-muted-foreground"> / {candidato.ajusteUnidadeMedida}</span>
             )}
           </span>
-          {temAjuste && (
-            <span
-              className="block text-xs font-normal text-muted-foreground line-through"
-              title="Valor publicado pela fonte, corrigido pelo analista"
-            >
-              {formatarMoeda(candidato.valorUnitario)}
-            </span>
-          )}
-          {candidato.ajusteBaseSerie === "projetado_tr" && (
-            <span
-              className="block font-sans text-xs font-normal text-muted-foreground"
-              title="Valor unitário multiplicado pela quantidade do TR, por escolha do analista"
-            >
-              projetado p/ o TR
-            </span>
+          {temRoteiro && (
+            <>
+              <span
+                className="block text-xs font-normal text-muted-foreground line-through"
+                title="Valor publicado pela fonte, antes do roteiro de cálculo"
+              >
+                {formatarMoeda(candidato.valorUnitario)}
+              </span>
+              {grandeza && grandeza !== "unitario_contrato" && (
+                <span className="block font-sans text-xs font-normal text-muted-foreground">
+                  {GRANDEZA_LABEL[grandeza]}
+                </span>
+              )}
+            </>
           )}
           {candidato.ajustePeriodicidade && (
             <span className="block font-sans text-xs font-normal text-muted-foreground">
-              {PERIODICIDADE_LABEL[candidato.ajustePeriodicidade]}
+              contrato: {PERIODICIDADE_LABEL[candidato.ajustePeriodicidade]}
             </span>
           )}
         </TableCell>
@@ -143,39 +138,40 @@ export function LinhaCandidatoSimilaridade({
           <div className="flex items-center gap-1">
             <Button
               size="sm"
-              variant={temAjuste ? "secondary" : "ghost"}
+              variant={temRoteiro ? "secondary" : "ghost"}
               onClick={() => setEditando((v) => !v)}
               aria-expanded={editando}
-              aria-label={`Ajustar valor de ${candidato.fonteOrgaoOuId}`}
+              aria-label={`Roteiro de cálculo de ${candidato.fonteOrgaoOuId}`}
             >
               <Calculator className="size-3.5" aria-hidden />
-              {temAjuste ? "Ajustado" : "Ajustar valor"}
+              {temRoteiro ? "Calculado" : "Calcular valor"}
             </Button>
             <PromoverFonteButton
               resultadoId={candidato.id}
               jaPromovido={candidato.promovidoParaFonte}
             />
-            {!candidato.promovidoParaFonte && <DescartarResultadoButton resultadoId={candidato.id} />}
+            {!candidato.promovidoParaFonte && (
+              <DescartarResultadoButton resultadoId={candidato.id} />
+            )}
           </div>
         </TableCell>
       </TableRow>
       {editando && (
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={8} className="p-2">
-            <AjusteValorCandidatoForm
+            <RoteiroCalculoEditor
               resultadoId={candidato.id}
-              valorUnitarioOriginal={candidato.valorUnitario}
-              ajusteValorBase={candidato.ajusteValorBase}
-              ajusteOperacao={candidato.ajusteOperacao}
-              ajusteQuantidade={candidato.ajusteQuantidade}
-              ajusteUnidadeMedida={candidato.ajusteUnidadeMedida}
-              ajusteQuantidadeTR={candidato.ajusteQuantidadeTR}
-              ajustePeriodicidade={candidato.ajustePeriodicidade}
-              ajusteBaseSerie={candidato.ajusteBaseSerie}
-              temAjuste={temAjuste}
-              quantidadeItemTR={quantidadeItemTR}
-              unidadeItemTR={unidadeItemTR}
+              valorPublicado={candidato.valorUnitario}
+              roteiroSalvo={candidato.roteiro}
+              tr={tr}
               jaPromovido={candidato.promovidoParaFonte}
+              candidato={{
+                orgao: candidato.fonteOrgaoOuId,
+                descricao: candidato.fonteDescricao,
+                url: candidato.fonteUrl,
+                dataReferenciaISO: candidato.dataReferenciaISO,
+              }}
+              periodicidadeSalva={candidato.ajustePeriodicidade}
               onFechar={() => setEditando(false)}
             />
           </TableCell>

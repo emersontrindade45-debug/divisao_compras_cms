@@ -221,6 +221,19 @@ model Item {
   natureza                NaturezaObjeto?
   caracteristicasTecnicas String?
   palavrasChave           String[]
+  // ── Parâmetros do objeto no TR da Câmara (M21) ─────────────────────────────
+  // Ficam no item, e não em cada candidato, porque são os mesmos para todos:
+  // dez contratos de referência para o mesmo objeto multiplicam pela MESMA
+  // metragem e pelo MESMO número de execuções. Repetir isso candidato a
+  // candidato só cria oportunidade de divergirem entre si.
+  // `trMedida` é a medida física do objeto (940 m² de fachada), distinta de
+  // `quantidade`/`unidade`, que é como o item foi cadastrado no TR (12 unidade).
+  trMedida                Decimal?          @db.Decimal(14, 4)
+  trMedidaUnidade         String?
+  // Frequência e vigência PRETENDIDA pela Câmara — não a vigência do contrato
+  // de referência, que é outro dado e mora em ResultadoSimilaridade.
+  trFrequencia            FrequenciaExecucao?
+  trVigenciaMeses         Int?
   createdAt               DateTime          @default(now())
   updatedAt               DateTime          @updatedAt
 
@@ -294,10 +307,15 @@ model ResultadoSimilaridade {
   // na série: quando a operação é multiplicação ou soma ele é um total, não um
   // unitário. O nome ficou por compatibilidade com a migration anterior.
   valorUnitarioAjustado  Decimal?                  @db.Decimal(12, 2)
-  // Qual dos dois números o analista mandou para a série: o resultado do
-  // cálculo ou ele multiplicado pela quantidade do TR. Ver `BaseValorSerie` em
-  // domain/ajusteValorCandidato.ts.
+  // LEGADO (M20): a escolha entre unitário e projetado virou um roteiro de N
+  // passos em `roteiroCalculo`, que é a fonte de verdade desde o M21. Mantido
+  // nulo-tolerante para não perder o histórico dos ajustes convertidos.
   ajusteBaseSerie        BaseValorSerie?
+  // Roteiro de cálculo (M21): cadeia de passos que leva do valor publicado pela
+  // fonte ao valor comparável com o objeto do TR. Validado com Zod ao entrar e
+  // ao sair (CLAUDE.md §9.12) — ver domain/roteiroCalculo.ts. JSON e não tabela
+  // porque a cadeia é sempre lida inteira, nunca consultada passo a passo.
+  roteiroCalculo         Json?
   // O valor efetivamente considerado como preço deste candidato — derivado dos
   // campos acima e gravado para que série, Fonte e memória de cálculo leiam um
   // número só, sem recalcular cada uma por conta própria.
@@ -342,12 +360,28 @@ enum BaseValorSerie {
   projetado_tr
 }
 
+/**
+ * Com que frequência o serviço do TR será executado. Combinada com
+ * `Item.trVigenciaMeses`, produz o número de execuções no período — o operando
+ * do passo `execucoes_periodo` do roteiro de cálculo.
+ */
+enum FrequenciaExecucao {
+  unica
+  mensal
+  bimestral
+  trimestral
+  quadrimestral
+  semestral
+  anual
+}
+
 enum PeriodicidadeContrato {
   mensal
   anual
   meses_12
   meses_18
   meses_24
+  meses_30
   meses_36
   meses_48
   meses_60

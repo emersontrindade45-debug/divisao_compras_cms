@@ -10,7 +10,7 @@ import {
   mapTipoCandidatoParaFonte,
   podePromoverCandidato,
 } from "@/lib/domain/tipoFonteSimilaridade";
-import { valorUnitarioEfetivo } from "@/lib/domain/ajusteValorCandidato";
+import { valorUnitarioEfetivo } from "@/lib/domain/roteiroCalculo";
 import type { ActionResult } from "./processos";
 
 const promoverSchema = z.object({
@@ -81,10 +81,10 @@ export async function promoverResultadoSimilaridade(
   const tipoFonte = mapTipoCandidatoParaFonte(resultado.tipoCandidato);
   const scoreFinal = Number(resultado.scoreFinal);
 
-  // O preço que entra na estimativa é o ajustado pelo analista quando existe —
-  // a fonte pública muitas vezes publica o valor cheio do contrato no lugar do
-  // preço por unidade (ver domain/ajusteValorCandidato.ts). Promover o valor
-  // cru nesse caso inflaria a série.
+  // O preço que entra na estimativa é o resultado do roteiro de cálculo quando
+  // existe (ver domain/roteiroCalculo.ts) — a fonte pública muitas vezes
+  // publica o valor cheio do contrato no lugar do preço por unidade. Promover
+  // o valor cru nesse caso inflaria a série.
   const valorAjustado =
     resultado.valorConsiderado == null ? null : Number(resultado.valorConsiderado);
   const valorUnitario = valorUnitarioEfetivo({

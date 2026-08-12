@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseNumeroBR } from "../AjusteValorCandidatoForm";
+import { parseNumeroBR } from "../parseNumeroBR";
 
 describe("parseNumeroBR", () => {
   it("lê inteiro simples", () => {

@@ -130,6 +130,10 @@ export async function obterFontesSimilaridade(processoId: string) {
       unidade: true,
       quantidade: true,
       natureza: true,
+      trMedida: true,
+      trMedidaUnidade: true,
+      trFrequencia: true,
+      trVigenciaMeses: true,
       resultadosSimilaridade: {
         where: { descartado: false },
         orderBy: { scoreFinal: "desc" },
@@ -159,6 +163,7 @@ export async function obterFontesSimilaridade(processoId: string) {
           valorUnitarioAjustado: true,
           ajusteBaseSerie: true,
           valorConsiderado: true,
+          roteiroCalculo: true,
         },
       },
     },
