@@ -1319,3 +1319,17 @@ Verificação: typecheck limpo, ESLint 0 erros (1 warning pré-existente em `Dat
 **875 testes / 96 arquivos**, `next build` compilado. Duas mutações confirmaram que os testes
 protegem o que dizem proteger: promover o valor cru derruba "promove o valor ajustado"; propagar
 sem checar `promovidoParaFonte` derruba "não toca em Fonte nem na série".
+
+**Adendo do mesmo dia — a base do valor virou escolha do analista.** Uso real mostrou que fixar o
+unitário como o que entra na mediana estava errado para contrato publicado por preço de
+sub-unidade: `R$ 6,95 × 4500 m² = R$ 31.275,00` é o custo do escopo do contrato, e o comparável
+para a Câmara é isso × a quantidade do TR. Agora o painel mostra os dois números lado a lado, como
+cartões selecionáveis, e a escolha fica em `ajusteBaseSerie`; `valorConsiderado` guarda o número
+que vale na série, separado de `valorUnitarioAjustado` (resultado do cálculo) para a memória de
+cálculo exibir os dois. Como misturar bases no mesmo item produz mediana entre grandezas
+diferentes, o card avisa (`basesDivergentes`) sem bloquear. Migration
+`20260812140000_m20_base_valor_serie`, com backfill marcando os ajustes existentes como
+`unitario` — sem backfill eles voltariam silenciosamente a valer pelo valor cru da fonte.
+Aplicada em local e em produção; os 2 ajustes que já existiam mantiveram o mesmo valor.
+Verificação: 888 testes, build compilado, e a mutação "ignorar a base escolhida" derruba o teste
+do caso relatado.
