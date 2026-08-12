@@ -101,6 +101,10 @@ export function redigirMemoriaCalculo(
     }.`,
   );
 
+  if (roteiro.justificativaComplementar?.trim()) {
+    partes.push(roteiro.justificativaComplementar.trim());
+  }
+
   return partes.join(" ");
 }
 

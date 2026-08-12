@@ -258,6 +258,37 @@ describe("executarRoteiro", () => {
     expect(res.linhas[0]!.descricao).toContain("940");
     expect(res.linhas[1]!.descricao).toContain("execuções no período");
   });
+
+  // Unidade ao lado do número: "por 4.500 m²" em vez de só "por 4.500" — é o
+  // que o usuário pediu para deixar o texto claro sem precisar adivinhar.
+  it("inclui a unidade do passo na descrição, quando informada", () => {
+    const res = executarRoteiro(
+      {
+        valorInicial: 75000,
+        passos: [
+          { operacao: "divisao", origem: "quantidade_contrato", valor: 4500, unidade: "m²" },
+          { operacao: "soma", origem: "livre", valor: 150, rotulo: "frete", unidade: "km" },
+        ],
+      },
+      TR,
+    );
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.linhas[0]!.descricao).toContain("4.500 m²");
+    expect(res.linhas[1]!.descricao).toContain("frete (150 km)");
+  });
+
+  it("não força unidade quando o passo não a informa", () => {
+    const res = executarRoteiro(
+      { valorInicial: 100, passos: [{ operacao: "divisao", origem: "livre", valor: 4 }] },
+      TR,
+    );
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.linhas[0]!.descricao).toBe("por 4");
+  });
 });
 
 describe("classificarGrandeza", () => {

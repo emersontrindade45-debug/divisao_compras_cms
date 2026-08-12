@@ -51,6 +51,11 @@ export interface PassoCalculo {
   valor?: number | null;
   /** Descrição livre do operando, usada na memória de cálculo. */
   rotulo?: string | null;
+  /**
+   * Unidade de medida do número digitado neste passo (m², hora, posto...).
+   * Só se aplica às origens de `ORIGENS_COM_VALOR`; percentual não tem unidade.
+   */
+  unidade?: string | null;
 }
 
 export interface RoteiroCalculo {
@@ -60,6 +65,12 @@ export interface RoteiroCalculo {
   /** Unidade de medida a que o valor inicial se refere (m², hora, posto...). */
   unidadeInicial?: string | null;
   passos: PassoCalculo[];
+  /**
+   * Texto livre do analista para complementar a memória de cálculo gerada
+   * automaticamente — ex.: uma ressalva que os passos padronizados não cobrem.
+   * Entra como parágrafo final do texto, depois do valor considerado.
+   */
+  justificativaComplementar?: string | null;
 }
 
 /**
@@ -234,14 +245,16 @@ function resolverOperando(
       if (valor === null || valor === undefined || !Number.isFinite(valor)) {
         return { ok: false, erro: "Informe o número deste passo." };
       }
+      const unidade = passo.unidade?.trim();
+      const numero = unidade ? `${formatarNumero(valor)} ${unidade}` : formatarNumero(valor);
       const padrao =
         passo.origem === "quantidade_contrato"
-          ? `pela quantidade contratada (${formatarNumero(valor)})`
-          : `por ${formatarNumero(valor)}`;
+          ? `pela quantidade contratada (${numero})`
+          : `por ${numero}`;
       return {
         ok: true,
         valor,
-        descricao: passo.rotulo ? `${passo.rotulo} (${formatarNumero(valor)})` : padrao,
+        descricao: passo.rotulo ? `${passo.rotulo} (${numero})` : padrao,
       };
     }
     case "medida_tr": {

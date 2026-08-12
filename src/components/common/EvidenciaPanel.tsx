@@ -36,7 +36,7 @@ export function EvidenciaPanel({
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs text-primary underline-offset-4 hover:underline block truncate"
+            className="text-xs text-primary underline-offset-4 hover:underline block break-all"
           >
             {url}
           </a>

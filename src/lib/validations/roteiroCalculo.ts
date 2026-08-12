@@ -19,6 +19,7 @@ const passoSchema = z
     origem: z.enum(ORIGENS_OPERANDO),
     valor: z.number().finite().nullable().optional(),
     rotulo: z.string().trim().max(80).nullable().optional(),
+    unidade: z.string().trim().max(40).nullable().optional(),
   })
   .refine(
     (p) =>
@@ -41,6 +42,7 @@ export const roteiroCalculoSchema = z.object({
   // Teto de passos: uma cadeia mais longa que isso é sinal de conta que
   // ninguém vai conseguir justificar numa cota, não de flexibilidade.
   passos: z.array(passoSchema).max(8),
+  justificativaComplementar: z.string().trim().max(2000).nullable().optional(),
 });
 
 /**
@@ -61,6 +63,8 @@ export function lerRoteiro(bruto: unknown): RoteiroCalculo | null {
       origem: p.origem,
       valor: p.valor ?? null,
       rotulo: p.rotulo ?? null,
+      unidade: p.unidade ?? null,
     })),
+    justificativaComplementar: parsed.data.justificativaComplementar ?? null,
   };
 }

@@ -6,6 +6,7 @@ import { Copy, Eraser, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -109,6 +110,7 @@ interface PassoEditavel {
   origem: OrigemOperando;
   valor: string;
   rotulo: string;
+  unidade: string;
 }
 
 function paraEditavel(passo: PassoCalculo): PassoEditavel {
@@ -117,6 +119,7 @@ function paraEditavel(passo: PassoCalculo): PassoEditavel {
     origem: passo.origem,
     valor: paraCampo(passo.valor),
     rotulo: passo.rotulo ?? "",
+    unidade: passo.unidade ?? "",
   };
 }
 
@@ -126,6 +129,15 @@ function pedeNumero(passo: { operacao: OperacaoPasso; origem: OrigemOperando }):
     ORIGENS_COM_VALOR.includes(passo.origem) ||
     passo.operacao === "acrescimo_percentual" ||
     passo.operacao === "desconto_percentual"
+  );
+}
+
+/** Unidade só faz sentido para um número digitado que representa uma medida — percentual não tem. */
+function pedeUnidade(passo: { operacao: OperacaoPasso; origem: OrigemOperando }): boolean {
+  return (
+    ORIGENS_COM_VALOR.includes(passo.origem) &&
+    passo.operacao !== "acrescimo_percentual" &&
+    passo.operacao !== "desconto_percentual"
   );
 }
 
@@ -168,6 +180,9 @@ export function RoteiroCalculoEditor({
   const [periodicidade, setPeriodicidade] = useState<PeriodicidadeContrato | null>(
     periodicidadeSalva,
   );
+  const [justificativaComplementar, setJustificativaComplementar] = useState(
+    roteiroSalvo?.justificativaComplementar ?? "",
+  );
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -180,7 +195,9 @@ export function RoteiroCalculoEditor({
       origem: p.origem,
       valor: pedeNumero(p) ? parseNumeroBR(p.valor) : null,
       rotulo: p.rotulo.trim() || null,
+      unidade: pedeUnidade(p) ? p.unidade.trim() || null : null,
     })),
+    justificativaComplementar: justificativaComplementar.trim() || null,
   };
 
   const previa = executarRoteiro(roteiro, tr);
@@ -403,6 +420,16 @@ export function RoteiroCalculoEditor({
                 />
               )}
 
+              {pedeUnidade(passo) && (
+                <Input
+                  value={passo.unidade}
+                  onChange={(e) => atualizarPasso(indice, { unidade: e.target.value })}
+                  placeholder="m², hora…"
+                  aria-label={`Unidade do número do passo ${indice + 1}`}
+                  className="w-24"
+                />
+              )}
+
               {passo.origem === "livre" && (
                 <Input
                   value={passo.rotulo}
@@ -433,7 +460,13 @@ export function RoteiroCalculoEditor({
           onClick={() =>
             setPassos((atual) => [
               ...atual,
-              { operacao: "multiplicacao", origem: "quantidade_tr", valor: "", rotulo: "" },
+              {
+                operacao: "multiplicacao",
+                origem: "quantidade_tr",
+                valor: "",
+                rotulo: "",
+                unidade: "",
+              },
             ])
           }
         >
@@ -442,12 +475,29 @@ export function RoteiroCalculoEditor({
         </Button>
       </div>
 
+      <label className="flex flex-col gap-1 border-t border-border pt-3">
+        <span className="text-xs font-medium text-muted-foreground">
+          Justificativa complementar (opcional) — some ao final da memória de cálculo
+        </span>
+        <Textarea
+          value={justificativaComplementar}
+          onChange={(e) => setJustificativaComplementar(e.target.value)}
+          placeholder="Alguma ressalva ou explicação que os passos acima não cobrem."
+          aria-label="Justificativa complementar"
+          rows={2}
+          className="text-sm"
+        />
+      </label>
+
       <div className="space-y-1 border-t border-border pt-3">
         <p className="text-xs font-medium text-muted-foreground">Prévia do cálculo</p>
         {previa.ok ? (
           <>
             <p className="font-mono text-sm tabular-nums">
               {formatarMoeda(roteiro.valorInicial)}
+              {roteiro.unidadeInicial && (
+                <span className="text-muted-foreground"> / {roteiro.unidadeInicial}</span>
+              )}
               {roteiro.rotuloInicial && (
                 <span className="font-sans text-xs text-muted-foreground">
                   {" "}
