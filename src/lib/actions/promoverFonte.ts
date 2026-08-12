@@ -58,7 +58,7 @@ export async function promoverResultadoSimilaridade(
       fonteOrgaoOuId: true,
       fonteUrl: true,
       valorUnitario: true,
-      valorUnitarioAjustado: true,
+      valorConsiderado: true,
       ajusteUnidadeMedida: true,
       dataReferencia: true,
       scoreFinal: true,
@@ -86,10 +86,10 @@ export async function promoverResultadoSimilaridade(
   // preço por unidade (ver domain/ajusteValorCandidato.ts). Promover o valor
   // cru nesse caso inflaria a série.
   const valorAjustado =
-    resultado.valorUnitarioAjustado == null ? null : Number(resultado.valorUnitarioAjustado);
+    resultado.valorConsiderado == null ? null : Number(resultado.valorConsiderado);
   const valorUnitario = valorUnitarioEfetivo({
     valorUnitario: Number(resultado.valorUnitario),
-    valorUnitarioAjustado: valorAjustado,
+    valorConsiderado: valorAjustado,
   });
   const houveAjuste = valorAjustado !== null;
 

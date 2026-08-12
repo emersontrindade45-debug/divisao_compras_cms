@@ -13,6 +13,7 @@ import {
   PERIODICIDADE_LABEL,
 } from "@/components/processos/AjusteValorCandidatoForm";
 import type {
+  BaseValorSerie,
   OperacaoAjusteValor,
   PeriodicidadeContrato,
 } from "@/lib/domain/ajusteValorCandidato";
@@ -41,7 +42,10 @@ export interface CandidatoSimilaridadeView {
   ajusteUnidadeMedida: string | null;
   ajusteQuantidadeTR: number | null;
   ajustePeriodicidade: PeriodicidadeContrato | null;
+  ajusteBaseSerie: BaseValorSerie | null;
   valorUnitarioAjustado: number | null;
+  /** Valor que vale como preço deste candidato na série (null = sem ajuste). */
+  valorConsiderado: number | null;
 }
 
 function formatarMoeda(valor: number): string {
@@ -65,8 +69,8 @@ export function LinhaCandidatoSimilaridade({
 }) {
   const [editando, setEditando] = useState(false);
 
-  const temAjuste = candidato.valorUnitarioAjustado !== null;
-  const valorExibido = candidato.valorUnitarioAjustado ?? candidato.valorUnitario;
+  const temAjuste = candidato.valorConsiderado !== null;
+  const valorExibido = candidato.valorConsiderado ?? candidato.valorUnitario;
 
   return (
     <>
@@ -88,6 +92,14 @@ export function LinhaCandidatoSimilaridade({
               title="Valor publicado pela fonte, corrigido pelo analista"
             >
               {formatarMoeda(candidato.valorUnitario)}
+            </span>
+          )}
+          {candidato.ajusteBaseSerie === "projetado_tr" && (
+            <span
+              className="block font-sans text-xs font-normal text-muted-foreground"
+              title="Valor unitário multiplicado pela quantidade do TR, por escolha do analista"
+            >
+              projetado p/ o TR
             </span>
           )}
           {candidato.ajustePeriodicidade && (
@@ -159,6 +171,7 @@ export function LinhaCandidatoSimilaridade({
               ajusteUnidadeMedida={candidato.ajusteUnidadeMedida}
               ajusteQuantidadeTR={candidato.ajusteQuantidadeTR}
               ajustePeriodicidade={candidato.ajustePeriodicidade}
+              ajusteBaseSerie={candidato.ajusteBaseSerie}
               temAjuste={temAjuste}
               quantidadeItemTR={quantidadeItemTR}
               unidadeItemTR={unidadeItemTR}

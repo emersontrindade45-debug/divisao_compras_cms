@@ -46,6 +46,7 @@ const ENTRADA_VALIDA = {
   unidadeMedida: "m²",
   quantidadeTR: 940,
   periodicidade: "meses_12" as const,
+  baseSerie: "unitario" as const,
 };
 
 describe("ajustarValorCandidato", () => {
@@ -64,7 +65,7 @@ describe("ajustarValorCandidato", () => {
   it("grava o valor unitário calculado junto com os operandos da conta", async () => {
     const res = await ajustarValorCandidato(ENTRADA_VALIDA);
 
-    expect(res.data).toEqual({ valorUnitarioAjustado: 100 });
+    expect(res.data).toEqual({ valorConsiderado: 100 });
     expect(mocks.tx.resultadoSimilaridade.update).toHaveBeenCalledWith({
       where: { id: RESULTADO_ID },
       data: {
@@ -75,6 +76,8 @@ describe("ajustarValorCandidato", () => {
         ajusteQuantidadeTR: 940,
         ajustePeriodicidade: "meses_12",
         valorUnitarioAjustado: 100,
+        ajusteBaseSerie: "unitario",
+        valorConsiderado: 100,
       },
     });
   });
@@ -154,6 +157,56 @@ describe("ajustarValorCandidato", () => {
     expect(mocks.db.$transaction).not.toHaveBeenCalled();
   });
 
+  // Relatado em 2026-08-12: R$ 6,95 x 4500 m² = R$ 31.275,00, e o valor que o
+  // analista quer na mediana é esse x 6 (quantidade do TR) = R$ 187.650,00.
+  describe("com a projeção do TR escolhida como base", () => {
+    const PROJETADO = {
+      ...ENTRADA_VALIDA,
+      valorBase: 6.95,
+      operacao: "multiplicacao" as const,
+      quantidade: 4500,
+      quantidadeTR: 6,
+      baseSerie: "projetado_tr" as const,
+    };
+
+    it("grava o valor projetado como o considerado, mantendo o unitário à vista", async () => {
+      const res = await ajustarValorCandidato(PROJETADO);
+
+      expect(res.data).toEqual({ valorConsiderado: 187650 });
+      expect(mocks.tx.resultadoSimilaridade.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            valorUnitarioAjustado: 31275,
+            valorConsiderado: 187650,
+            ajusteBaseSerie: "projetado_tr",
+          }),
+        }),
+      );
+    });
+
+    it("propaga o valor projetado — não o unitário — para a série", async () => {
+      mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(
+        resultadoBase({ promovidoParaFonte: true }),
+      );
+
+      await ajustarValorCandidato(PROJETADO);
+
+      expect(mocks.tx.precoConsolidado.updateMany).toHaveBeenCalledWith({
+        where: { resultadoSimilaridadeId: RESULTADO_ID },
+        data: { valorUnitario: 187650 },
+      });
+    });
+
+    // Gravar o unitário no lugar da projeção seria mandar para a série um
+    // número que o analista não escolheu.
+    it("recusa a projeção sem quantidade de TR, sem escrever nada", async () => {
+      const res = await ajustarValorCandidato({ ...PROJETADO, quantidadeTR: null });
+
+      expect(res.error).toBeDefined();
+      expect(mocks.db.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
   // §9.46: `select` explícito mantém a action compatível com o banco antes e
   // depois da migration; `include` pediria todas as colunas escalares.
   it("consulta com select explícito, sem as colunas de ajuste", async () => {
@@ -220,6 +273,8 @@ describe("limparAjusteValorCandidato", () => {
         ajusteQuantidadeTR: null,
         ajustePeriodicidade: null,
         valorUnitarioAjustado: null,
+        ajusteBaseSerie: null,
+        valorConsiderado: null,
       },
     });
   });

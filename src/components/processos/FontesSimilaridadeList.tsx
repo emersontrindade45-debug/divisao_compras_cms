@@ -8,9 +8,11 @@ import {
   type CandidatoSimilaridadeView,
 } from "@/components/processos/LinhaCandidatoSimilaridade";
 import { obterFontesSimilaridade } from "@/lib/actions/listar";
-import type {
-  OperacaoAjusteValor,
-  PeriodicidadeContrato,
+import {
+  basesDivergentes,
+  type BaseValorSerie,
+  type OperacaoAjusteValor,
+  type PeriodicidadeContrato,
 } from "@/lib/domain/ajusteValorCandidato";
 
 function formatarData(data: Date): string {
@@ -47,7 +49,9 @@ function paraView(fonte: ResultadoDoBanco): CandidatoSimilaridadeView {
     ajusteUnidadeMedida: fonte.ajusteUnidadeMedida ?? null,
     ajusteQuantidadeTR: paraNumero(fonte.ajusteQuantidadeTR),
     ajustePeriodicidade: (fonte.ajustePeriodicidade as PeriodicidadeContrato | null) ?? null,
+    ajusteBaseSerie: (fonte.ajusteBaseSerie as BaseValorSerie | null) ?? null,
     valorUnitarioAjustado: paraNumero(fonte.valorUnitarioAjustado),
+    valorConsiderado: paraNumero(fonte.valorConsiderado),
   };
 }
 
@@ -72,7 +76,9 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
         sem candidato suficientemente similar (score abaixo de 70) não aparecem aqui — exigem
         pesquisa direta com fornecedores.
       </p>
-      {itensComFontes.map((item) => (
+      {itensComFontes.map((item) => {
+        const candidatos = item.resultadosSimilaridade.map(paraView);
+        return (
         <Card key={item.id} size="sm">
           <CardHeader className="flex flex-row items-start justify-between gap-3">
             <div>
@@ -84,6 +90,13 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
             <SeletorNaturezaItem itemId={item.id} natureza={item.natureza} />
           </CardHeader>
           <CardContent>
+            {basesDivergentes(candidatos) && (
+              <p className="mb-2 rounded-md bg-warning/10 px-2 py-1.5 text-xs text-warning-foreground ring-1 ring-warning/30">
+                Os candidatos deste item entram na série por bases diferentes (uns pelo valor
+                unitário, outros pelo valor projetado para o TR). A mediana só faz sentido
+                comparando a mesma grandeza — reveja os ajustes antes de consolidar.
+              </p>
+            )}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -98,10 +111,10 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {item.resultadosSimilaridade.map((fonte) => (
+                {candidatos.map((candidato) => (
                   <LinhaCandidatoSimilaridade
-                    key={fonte.id}
-                    candidato={paraView(fonte)}
+                    key={candidato.id}
+                    candidato={candidato}
                     quantidadeItemTR={item.quantidade}
                     unidadeItemTR={item.unidade}
                   />
@@ -110,7 +123,8 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
             </Table>
           </CardContent>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -157,6 +157,8 @@ export async function obterFontesSimilaridade(processoId: string) {
           ajusteQuantidadeTR: true,
           ajustePeriodicidade: true,
           valorUnitarioAjustado: true,
+          ajusteBaseSerie: true,
+          valorConsiderado: true,
         },
       },
     },

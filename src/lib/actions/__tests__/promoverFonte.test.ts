@@ -290,7 +290,7 @@ describe("promoverResultadoSimilaridade", () => {
   // colocaria o valor errado na série — que é justamente o erro que o ajuste
   // existe para evitar.
   describe("com valor ajustado pelo analista", () => {
-    const AJUSTADO = { valorUnitarioAjustado: 100, ajusteUnidadeMedida: "m²" };
+    const AJUSTADO = { valorConsiderado: 100, ajusteUnidadeMedida: "m²" };
 
     it("promove o valor ajustado, não o publicado pela fonte", async () => {
       mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(

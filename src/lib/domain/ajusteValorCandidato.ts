@@ -94,10 +94,8 @@ export function calcularValorUnitarioAjustado({
 }
 
 /**
- * Projeção do custo do objeto da Câmara: preço unitário ajustado x quantidade
- * do TR. É demonstrativo — NÃO entra na série nem na mediana, que trabalham
- * sempre com valores unitários (dois contratos de tamanhos diferentes só são
- * comparáveis por unidade).
+ * Projeção do custo do objeto da Câmara: resultado do cálculo x quantidade do
+ * TR.
  */
 export function calcularValorProjetadoTR(
   valorUnitario: number,
@@ -110,13 +108,68 @@ export function calcularValorProjetadoTR(
 }
 
 /**
- * Preço que vale para o candidato: o ajustado quando existe, senão o original
- * da fonte. Único ponto de decisão — promoção a Fonte, série de preços e tela
- * chamam esta função para não divergirem entre si.
+ * Qual dos dois números o analista escolheu levar para a série de preços:
+ * o resultado direto do cálculo (`unitario`) ou ele já multiplicado pela
+ * quantidade do TR (`projetado_tr`).
+ *
+ * A escolha existe porque a forma como o contrato de referência é publicado
+ * varia: às vezes o comparável é o preço por unidade, às vezes é o custo do
+ * escopo inteiro. Quem lê o contrato é quem sabe — ver a advertência de
+ * `basesDivergentes` sobre misturar os dois no mesmo item.
+ */
+export const BASES_VALOR_SERIE = ["unitario", "projetado_tr"] as const;
+export type BaseValorSerie = (typeof BASES_VALOR_SERIE)[number];
+
+export type ResultadoValorConsiderado =
+  | { ok: true; valor: number }
+  | { ok: false; erro: string };
+
+/** Aplica a escolha da base e devolve o valor que vai para a série. */
+export function calcularValorConsiderado({
+  valorUnitario,
+  base,
+  quantidadeTR,
+}: {
+  valorUnitario: number;
+  base: BaseValorSerie;
+  quantidadeTR: number | null;
+}): ResultadoValorConsiderado {
+  if (base === "unitario") return { ok: true, valor: valorUnitario };
+
+  const projetado = calcularValorProjetadoTR(valorUnitario, quantidadeTR);
+  if (projetado === null) {
+    return {
+      ok: false,
+      erro: "Informe a quantidade do TR para usar o valor projetado na mediana.",
+    };
+  }
+  if (projetado >= 10_000_000_000) {
+    return { ok: false, erro: "O valor projetado passa do limite gravável." };
+  }
+  return { ok: true, valor: projetado };
+}
+
+/**
+ * Preço que vale para o candidato: o valor considerado quando há ajuste, senão
+ * o original da fonte. Único ponto de decisão — promoção a Fonte, série de
+ * preços e tela chamam esta função para não divergirem entre si.
  */
 export function valorUnitarioEfetivo(candidato: {
   valorUnitario: number;
-  valorUnitarioAjustado: number | null;
+  valorConsiderado: number | null;
 }): number {
-  return candidato.valorUnitarioAjustado ?? candidato.valorUnitario;
+  return candidato.valorConsiderado ?? candidato.valorUnitario;
+}
+
+/**
+ * Um item cujos candidatos entram na série com bases diferentes tem mediana sem
+ * significado: R$ 100,00/m² e R$ 187.650,00 pelo escopo inteiro não são a mesma
+ * grandeza. Não é bloqueio — a escolha é do analista, e há casos legítimos de
+ * item com um só candidato ajustado — mas a tela precisa dizer em voz alta.
+ */
+export function basesDivergentes(
+  candidatos: Array<{ ajusteBaseSerie: BaseValorSerie | null }>,
+): boolean {
+  const bases = new Set(candidatos.map((c) => c.ajusteBaseSerie ?? "unitario"));
+  return bases.size > 1;
 }

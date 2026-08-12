@@ -29,6 +29,7 @@ const PROPS = {
   ajusteUnidadeMedida: null,
   ajusteQuantidadeTR: null,
   ajustePeriodicidade: null,
+  ajusteBaseSerie: null,
   temAjuste: false,
   quantidadeItemTR: 940,
   unidadeItemTR: "m²",
@@ -116,6 +117,70 @@ describe("AjusteValorCandidatoForm", () => {
 
     rerender(<AjusteValorCandidatoForm {...PROPS} temAjuste ajusteQuantidade={150} />);
     expect(screen.getByRole("button", { name: /Limpar ajuste/ })).toBeInTheDocument();
+  });
+
+  // O caso relatado em 2026-08-12: com x, o resultado (R$ 31.275,00) é o custo
+  // do escopo do contrato; o que o analista quer na mediana é ele x 6 do TR.
+  it("manda o valor projetado quando o analista escolhe essa base", async () => {
+    // Operação já em multiplicação: o Select do Base UI não é dirigível no
+    // jsdom, e o que este teste prova é a escolha da base, não o select.
+    render(
+      <AjusteValorCandidatoForm
+        {...PROPS}
+        valorUnitarioOriginal={6.95}
+        quantidadeItemTR={6}
+        ajusteOperacao="multiplicacao"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Quantidade do contrato"), {
+      target: { value: "4500" },
+    });
+    fireEvent.click(screen.getByRole("radio", { name: /valor projetado para o TR/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Salvar ajuste/ }));
+
+    await waitFor(() => expect(mocks.ajustarValorCandidato).toHaveBeenCalled());
+    expect(mocks.ajustarValorCandidato).toHaveBeenCalledWith(
+      expect.objectContaining({ baseSerie: "projetado_tr", quantidadeTR: 6 }),
+    );
+  });
+
+  it("mostra os dois valores e marca qual está selecionado", () => {
+    // Operação já em multiplicação: o Select do Base UI não é dirigível no
+    // jsdom, e o que este teste prova é a escolha da base, não o select.
+    render(
+      <AjusteValorCandidatoForm
+        {...PROPS}
+        valorUnitarioOriginal={6.95}
+        quantidadeItemTR={6}
+        ajusteOperacao="multiplicacao"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Quantidade do contrato"), {
+      target: { value: "4500" },
+    });
+
+    const unitario = screen.getByRole("radio", { name: /valor unitário/i });
+    const projetado = screen.getByRole("radio", { name: /valor projetado para o TR/i });
+
+    expect(unitario).toHaveTextContent(/31\.275,00/);
+    expect(projetado).toHaveTextContent(/187\.650,00/);
+    expect(unitario).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(projetado);
+    expect(projetado).toHaveAttribute("aria-checked", "true");
+    expect(unitario).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("bloqueia o salvamento se a projeção for escolhida sem quantidade de TR", () => {
+    render(<AjusteValorCandidatoForm {...PROPS} />);
+
+    fireEvent.change(screen.getByLabelText("Quantidade do contrato"), { target: { value: "150" } });
+    fireEvent.change(screen.getByLabelText("Quantidade do TR da Câmara"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("radio", { name: /valor projetado para o TR/i }));
+
+    expect(screen.getByRole("button", { name: /Salvar ajuste/ })).toBeDisabled();
   });
 
   it("repopula os campos com o ajuste já gravado", () => {

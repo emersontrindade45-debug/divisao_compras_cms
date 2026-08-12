@@ -6,8 +6,10 @@ import { db } from "@/lib/db";
 import { requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import {
+  BASES_VALOR_SERIE,
   OPERACOES_AJUSTE,
   PERIODICIDADES_CONTRATO,
+  calcularValorConsiderado,
   calcularValorUnitarioAjustado,
 } from "@/lib/domain/ajusteValorCandidato";
 import type { ActionResult } from "./processos";
@@ -21,6 +23,9 @@ const ajustarSchema = z.object({
   unidadeMedida: z.string().trim().max(40).nullable(),
   quantidadeTR: z.number().finite().positive().nullable(),
   periodicidade: z.enum(PERIODICIDADES_CONTRATO).nullable(),
+  // Qual dos dois números vai para a série: o resultado do cálculo ou ele
+  // multiplicado pela quantidade do TR.
+  baseSerie: z.enum(BASES_VALOR_SERIE),
 });
 
 export type EntradaAjusteCandidato = z.input<typeof ajustarSchema>;
@@ -38,7 +43,7 @@ export type EntradaAjusteCandidato = z.input<typeof ajustarSchema>;
  */
 export async function ajustarValorCandidato(
   input: EntradaAjusteCandidato,
-): Promise<ActionResult<{ valorUnitarioAjustado: number }>> {
+): Promise<ActionResult<{ valorConsiderado: number }>> {
   const user = await requireRole("pesquisa");
 
   const parsed = ajustarSchema.safeParse(input);
@@ -48,6 +53,13 @@ export async function ajustarValorCandidato(
 
   const calculo = calcularValorUnitarioAjustado({ valorBase, operacao, quantidade });
   if (!calculo.ok) return { error: calculo.erro };
+
+  const considerado = calcularValorConsiderado({
+    valorUnitario: calculo.valorUnitario,
+    base: parsed.data.baseSerie,
+    quantidadeTR: parsed.data.quantidadeTR,
+  });
+  if (!considerado.ok) return { error: considerado.erro };
 
   // `select` explícito e enxuto (CLAUDE.md §9.46): entre o deploy do código e a
   // aplicação da migration, um SELECT que peça as colunas novas quebraria.
@@ -75,17 +87,19 @@ export async function ajustarValorCandidato(
         ajusteQuantidadeTR: parsed.data.quantidadeTR,
         ajustePeriodicidade: parsed.data.periodicidade,
         valorUnitarioAjustado: calculo.valorUnitario,
+        ajusteBaseSerie: parsed.data.baseSerie,
+        valorConsiderado: considerado.valor,
       },
     });
 
     if (resultado.promovidoParaFonte) {
       await tx.fonte.updateMany({
         where: { resultadoSimilaridadeId: resultado.id },
-        data: { valorUnitario: calculo.valorUnitario },
+        data: { valorUnitario: considerado.valor },
       });
       await tx.precoConsolidado.updateMany({
         where: { resultadoSimilaridadeId: resultado.id },
-        data: { valorUnitario: calculo.valorUnitario },
+        data: { valorUnitario: considerado.valor },
       });
     }
   });
@@ -105,13 +119,15 @@ export async function ajustarValorCandidato(
       quantidadeTR: parsed.data.quantidadeTR,
       periodicidade: parsed.data.periodicidade,
       valorUnitarioAjustado: calculo.valorUnitario,
+      baseSerie: parsed.data.baseSerie,
+      valorConsiderado: considerado.valor,
       propagadoParaSerie: resultado.promovidoParaFonte,
     },
   });
 
   revalidatePath(`/processos/${resultado.item.processoId}`);
 
-  return { data: { valorUnitarioAjustado: calculo.valorUnitario } };
+  return { data: { valorConsiderado: considerado.valor } };
 }
 
 /**
@@ -152,6 +168,8 @@ export async function limparAjusteValorCandidato(
         ajusteQuantidadeTR: null,
         ajustePeriodicidade: null,
         valorUnitarioAjustado: null,
+        ajusteBaseSerie: null,
+        valorConsiderado: null,
       },
     });
 
