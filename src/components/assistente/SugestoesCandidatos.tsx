@@ -12,7 +12,7 @@ import {
   listarOutrosItensDaContratacao,
   type ItemIrmaoDaContratacao,
 } from "@/lib/actions/assistente";
-import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
+import { identidadeDaContratacao, type CandidatoSugerido } from "@/lib/assistente/sugestoes";
 
 // Cartões dos candidatos que a busca do assistente encontrou.
 //
@@ -287,7 +287,7 @@ export function SugestoesCandidatos({
                   <ExternalLink className="size-3" aria-hidden />
                 </a>
               )}
-              {sugestao.identidadeContratacao && mensagemId && (
+              {identidadeDaContratacao(sugestao) && mensagemId && (
                 <button
                   type="button"
                   onClick={() => void alternarOutrosItens(sugestao)}

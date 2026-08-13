@@ -6,7 +6,12 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
-import { acharSugestao, paraCandidato, listaSugestoesSchema } from "@/lib/assistente/sugestoes";
+import {
+  acharSugestao,
+  identidadeDaContratacao,
+  paraCandidato,
+  listaSugestoesSchema,
+} from "@/lib/assistente/sugestoes";
 import { getProvedorIA } from "@/lib/ia";
 import { candidatoEstaNoTempo } from "@/lib/similaridade/filtroRecencia";
 import { calcularScoreFinal } from "@/lib/similaridade/scoreFinal";
@@ -500,7 +505,8 @@ export async function listarOutrosItensDaContratacao(
       truncado: false,
     };
   }
-  if (!sugestao.identidadeContratacao) {
+  const identidade = identidadeDaContratacao(sugestao);
+  if (!identidade) {
     return {
       ok: false,
       mensagem: "Este candidato não tem identidade PNCP estruturada — não é possível listar outros itens dele.",
@@ -509,13 +515,14 @@ export async function listarOutrosItensDaContratacao(
     };
   }
 
-  const { candidatos, completo } = await listarItensDaCompraPNCP(
-    sugestao.identidadeContratacao,
-    sugestao.fonteOrgaoOuId,
-  );
+  const { candidatos, completo } = await listarItensDaCompraPNCP(identidade, sugestao.fonteOrgaoOuId);
 
-  // O item que já é o card não entra na lista de "outros".
-  const numeroItemOriginal = sugestao.identidadeContratacao.numeroItem;
+  // O item que já é o card não entra na lista de "outros" — só dá para saber
+  // qual é quando a sugestão tem `identidadeContratacao` estruturada (busca
+  // feita depois deste campo existir). Sem ela (candidato antigo, identidade
+  // só derivada do fonteUrl), o próprio item pode aparecer duplicado na
+  // lista — inofensivo, o pior caso é o analista ver a mesma opção duas vezes.
+  const numeroItemOriginal = sugestao.identidadeContratacao?.numeroItem;
   const itens = candidatos
     .filter((c) => c.identidadeContratacao?.numeroItem !== numeroItemOriginal)
     .map((c) => ({
@@ -564,7 +571,8 @@ export async function adicionarItemDaContratacao(
   if (!sugestao) {
     return { ok: false, mensagem: "Este candidato não está mais disponível nesta busca." };
   }
-  if (!sugestao.identidadeContratacao) {
+  const identidade = identidadeDaContratacao(sugestao);
+  if (!identidade) {
     return {
       ok: false,
       mensagem: "Este candidato não tem identidade PNCP estruturada — não é possível buscar outros itens dele.",
@@ -574,10 +582,7 @@ export async function adicionarItemDaContratacao(
   const cargaItem = await carregarItemParaCandidato(itemId, mensagem.conversa.processoId);
   if (!cargaItem.ok) return { ok: false, mensagem: cargaItem.mensagem };
 
-  const { candidatos } = await listarItensDaCompraPNCP(
-    sugestao.identidadeContratacao,
-    sugestao.fonteOrgaoOuId,
-  );
+  const { candidatos } = await listarItensDaCompraPNCP(identidade, sugestao.fonteOrgaoOuId);
   const candidato = candidatos.find((c) => c.identidadeContratacao?.numeroItem === numeroItem);
   if (!candidato) {
     return {

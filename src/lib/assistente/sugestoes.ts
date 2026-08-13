@@ -61,6 +61,35 @@ export type CandidatoSugerido = z.infer<typeof candidatoSugeridoSchema>;
 
 export const listaSugestoesSchema = z.array(candidatoSugeridoSchema);
 
+/**
+ * Mesmo formato produzido por `montarUrlEdital` em `lib/integracoes/pncp.ts`
+ * (`/app/editais/{cnpj}/{ano}/{sequencial}`) — duplicado aqui porque aquele
+ * módulo é `server-only` e não pode ser importado por este (usado também no
+ * cliente). Se o formato da URL mudar lá, mudar aqui também.
+ */
+const REGEX_URL_EDITAL_PNCP = /^https:\/\/pncp\.gov\.br\/app\/editais\/([^/]+)\/([^/]+)\/([^/]+)$/;
+
+/**
+ * Identidade (cnpj/ano/sequencial) da contratação de origem de uma sugestão —
+ * preferindo `identidadeContratacao` quando presente e caindo para o parse do
+ * `fonteUrl` quando ausente. A segunda via existe para candidatos gravados
+ * ANTES de `identidadeContratacao` existir no schema (mensagens antigas): sem
+ * ela, o picker de "outros itens desta licitação" nunca apareceria nesses
+ * cards, mesmo eles tendo o link do PNCP com tudo que é preciso.
+ *
+ * `numeroItem` só vem pela primeira via — quem usa o resultado para excluir o
+ * item que já é o próprio card precisa tratar a ausência dele.
+ */
+export function identidadeDaContratacao(
+  sugestao: Pick<CandidatoSugerido, "identidadeContratacao" | "fonteUrl">,
+): { cnpjOrgao: string; ano: string; numeroSequencial: string } | null {
+  if (sugestao.identidadeContratacao) return sugestao.identidadeContratacao;
+  const match = sugestao.fonteUrl?.match(REGEX_URL_EDITAL_PNCP);
+  if (!match) return null;
+  const [, cnpjOrgao, ano, numeroSequencial] = match;
+  return { cnpjOrgao: cnpjOrgao!, ano: ano!, numeroSequencial: numeroSequencial! };
+}
+
 /** Converte o candidato da busca no formato serializável que fica na mensagem. */
 export function paraSugestao(
   id: string,

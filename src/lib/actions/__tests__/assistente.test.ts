@@ -358,6 +358,20 @@ const MENSAGEM_COM_IDENTIDADE = {
   ],
 };
 
+/** Mensagem cujo candidato não tem `identidadeContratacao` NEM `fonteUrl` do PNCP — nada a derivar. */
+const MENSAGEM_SEM_IDENTIDADE_NEM_URL = {
+  ...MENSAGEM,
+  ferramentasUsadas: [
+    {
+      ferramenta: "buscar_pncp",
+      argumentos: "{}",
+      resumo: "…",
+      duracaoMs: 10,
+      sugestoes: [{ ...SUGESTAO, fonteUrl: null }],
+    },
+  ],
+};
+
 /** Item irmão (numeroItem 2) que `listarItensDaCompraPNCP` devolveria da mesma contratação. */
 const CANDIDATO_IRMAO = {
   tipoCandidato: "contratacao_publica" as const,
@@ -396,14 +410,30 @@ describe("listarOutrosItensDaContratacao", () => {
     expect(r.itens[0]!.numeroItem).toBe(2);
   });
 
-  it("recusa candidato sem identidade PNCP estruturada", async () => {
-    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM);
+  it("recusa candidato sem identidade PNCP estruturada nem fonteUrl para derivar", async () => {
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM_SEM_IDENTIDADE_NEM_URL);
 
     const r = await listarOutrosItensDaContratacao(PEDIDO_LISTAGEM);
 
     expect(r.ok).toBe(false);
     expect(r.itens).toEqual([]);
     expect(mocks.listarItensDaCompraPNCP).not.toHaveBeenCalled();
+  });
+
+  // Candidato gravado ANTES de `identidadeContratacao` existir no schema —
+  // precisa continuar funcionando, senão todo card antigo perde o botão.
+  it("deriva a identidade do fonteUrl para candidato antigo sem identidadeContratacao", async () => {
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM);
+
+    const r = await listarOutrosItensDaContratacao(PEDIDO_LISTAGEM);
+
+    expect(r.ok).toBe(true);
+    expect(mocks.listarItensDaCompraPNCP).toHaveBeenCalledWith(
+      { cnpjOrgao: "123", ano: "2026", numeroSequencial: "4" },
+      "Prefeitura de Exemplo",
+    );
+    // Sem numeroItem original para comparar, nada é excluído da lista.
+    expect(r.itens).toHaveLength(2);
   });
 
   it("recusa mensagem de outro usuário", async () => {
@@ -478,13 +508,25 @@ describe("adicionarItemDaContratacao", () => {
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
   });
 
-  it("recusa candidato sem identidade PNCP estruturada", async () => {
-    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM);
+  it("recusa candidato sem identidade PNCP estruturada nem fonteUrl para derivar", async () => {
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM_SEM_IDENTIDADE_NEM_URL);
 
     const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
 
     expect(r.ok).toBe(false);
     expect(mocks.listarItensDaCompraPNCP).not.toHaveBeenCalled();
+  });
+
+  it("deriva a identidade do fonteUrl para candidato antigo sem identidadeContratacao", async () => {
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM);
+
+    const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(r.ok).toBe(true);
+    expect(mocks.listarItensDaCompraPNCP).toHaveBeenCalledWith(
+      { cnpjOrgao: "123", ano: "2026", numeroSequencial: "4" },
+      "Prefeitura de Exemplo",
+    );
   });
 
   it("recusa item de outro processo", async () => {
