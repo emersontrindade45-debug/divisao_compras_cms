@@ -25,6 +25,12 @@ const promoverSchema = z.object({
 class ResultadoJaPromovidoError extends Error {}
 
 /**
+ * Mesmo papel da `ResultadoJaPromovidoError` acima, para o sentido inverso:
+ * sinaliza dentro da transação que outra requisição já desfez a promoção.
+ */
+class ResultadoNaoPromovidoError extends Error {}
+
+/**
  * Promove um candidato de contratação pública similar
  * (`ResultadoSimilaridade`) para uma Fonte oficial da estimativa.
  *
@@ -213,4 +219,95 @@ export async function promoverResultadoSimilaridade(
   revalidatePath(`/processos/${resultado.item.processoId}`);
 
   return { data: { fonteId } };
+}
+
+/**
+ * Desfaz a promoção de um candidato: apaga a `Fonte` (a `Evidencia` cascateia
+ * junto, `Evidencia.fonte` é `onDelete: Cascade`) e o `PrecoConsolidado`
+ * criados por `promoverResultadoSimilaridade`, e volta
+ * `ResultadoSimilaridade.promovidoParaFonte` para `false`. O candidato passa a
+ * poder ser promovido de novo ou descartado.
+ *
+ * É uma exclusão de dados persistidos (Fonte/Evidencia) — CLAUDE.md §8 pede
+ * mais cautela aqui, por isso a role mínima é "revisao" (mesmo padrão de
+ * `excluirFonte` em fontes.ts), mais restrita que a de promover ("pesquisa").
+ *
+ * Não recalcula as estatísticas da `SeriePreco`: nenhuma outra escrita em
+ * `PrecoConsolidado` faz isso (nem `adicionarPreco` em precos.ts) — é
+ * responsabilidade do passo explícito `consolidarSeriePreco`.
+ */
+export async function despromoverResultadoSimilaridade(
+  resultadoId: string,
+): Promise<ActionResult<{ resultadoId: string }>> {
+  const user = await requireRole("revisao");
+
+  const parsed = promoverSchema.safeParse({ resultadoId });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
+
+  const resultado = await db.resultadoSimilaridade.findUnique({
+    where: { id: parsed.data.resultadoId },
+    select: {
+      id: true,
+      promovidoParaFonte: true,
+      item: { select: { id: true, processoId: true } },
+    },
+  });
+
+  if (!resultado) return { error: "Candidato não encontrado" };
+  if (!resultado.promovidoParaFonte) return { error: "Este candidato não está promovido" };
+
+  const fonte = await db.fonte.findUnique({
+    where: { resultadoSimilaridadeId: resultado.id },
+    select: { id: true },
+  });
+
+  let precoConsolidadoId: string | null;
+  try {
+    precoConsolidadoId = await db.$transaction(async (tx) => {
+      const preco = await tx.precoConsolidado.findFirst({
+        where: { resultadoSimilaridadeId: resultado.id },
+        select: { id: true },
+      });
+      if (preco) {
+        await tx.precoConsolidado.delete({ where: { id: preco.id } });
+      }
+
+      if (fonte) {
+        await tx.fonte.delete({ where: { id: fonte.id } });
+      }
+
+      // Guarda atômica simétrica à de promoverResultadoSimilaridade: só
+      // desmarca se ainda estava promovido no momento do update.
+      const marcado = await tx.resultadoSimilaridade.updateMany({
+        where: { id: resultado.id, promovidoParaFonte: true },
+        data: { promovidoParaFonte: false },
+      });
+      if (marcado.count === 0) {
+        throw new ResultadoNaoPromovidoError();
+      }
+
+      return preco?.id ?? null;
+    });
+  } catch (erro) {
+    if (erro instanceof ResultadoNaoPromovidoError) {
+      return { error: "Este candidato não está mais promovido" };
+    }
+    throw erro;
+  }
+
+  await registrarAuditoria({
+    userId: user.id,
+    processoId: resultado.item.processoId,
+    acao: "despromover_resultado_similaridade",
+    detalhes: {
+      resultadoId: resultado.id,
+      itemId: resultado.item.id,
+      fonteId: fonte?.id ?? null,
+      precoConsolidadoId,
+    },
+  });
+
+  revalidatePath(`/processos/${resultado.item.processoId}`);
+
+  return { data: { resultadoId: resultado.id } };
 }

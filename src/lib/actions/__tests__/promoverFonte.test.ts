@@ -3,14 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mocks hoisted para poderem ser referenciados dentro das factories de vi.mock.
 const mocks = vi.hoisted(() => {
   const tx = {
-    fonte: { create: vi.fn() },
+    fonte: { create: vi.fn(), delete: vi.fn() },
     evidencia: { create: vi.fn() },
     seriePreco: { findFirst: vi.fn(), create: vi.fn() },
-    precoConsolidado: { create: vi.fn() },
+    precoConsolidado: { create: vi.fn(), findFirst: vi.fn(), delete: vi.fn() },
     resultadoSimilaridade: { updateMany: vi.fn() },
   };
   const db = {
     resultadoSimilaridade: { findUnique: vi.fn() },
+    fonte: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   };
   return {
@@ -28,7 +29,7 @@ vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditori
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 
 import { Prisma } from "@prisma/client";
-import { promoverResultadoSimilaridade } from "../promoverFonte";
+import { despromoverResultadoSimilaridade, promoverResultadoSimilaridade } from "../promoverFonte";
 
 const RESULTADO_ID = "ckqut11d0000abcdefghijklm";
 
@@ -342,5 +343,111 @@ describe("promoverResultadoSimilaridade", () => {
         data: expect.objectContaining({ resultadoSimilaridadeId: RESULTADO_ID }),
       });
     });
+  });
+});
+
+describe("despromoverResultadoSimilaridade", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireRole.mockResolvedValue({
+      id: "user-1",
+      role: "revisao",
+      email: "u@e.com",
+      name: "Usuário",
+    });
+    mocks.db.$transaction.mockImplementation(async (fn: (t: typeof mocks.tx) => unknown) =>
+      fn(mocks.tx),
+    );
+    mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(
+      resultadoBase({ promovidoParaFonte: true }),
+    );
+    mocks.db.fonte.findUnique.mockResolvedValue({ id: "fonte-1" });
+    mocks.tx.precoConsolidado.findFirst.mockResolvedValue({ id: "preco-1" });
+    mocks.tx.precoConsolidado.delete.mockResolvedValue({ id: "preco-1" });
+    mocks.tx.fonte.delete.mockResolvedValue({ id: "fonte-1" });
+    mocks.tx.resultadoSimilaridade.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("apaga o PrecoConsolidado e a Fonte (Evidencia cascateia) atomicamente", async () => {
+    const res = await despromoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.data).toEqual({ resultadoId: RESULTADO_ID });
+    expect(mocks.db.$transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.tx.precoConsolidado.findFirst).toHaveBeenCalledWith({
+      where: { resultadoSimilaridadeId: RESULTADO_ID },
+      select: { id: true },
+    });
+    expect(mocks.tx.precoConsolidado.delete).toHaveBeenCalledWith({ where: { id: "preco-1" } });
+    expect(mocks.tx.fonte.delete).toHaveBeenCalledWith({ where: { id: "fonte-1" } });
+  });
+
+  it("desmarca promovidoParaFonte com guarda atômica (updateMany condicional)", async () => {
+    await despromoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(mocks.tx.resultadoSimilaridade.updateMany).toHaveBeenCalledWith({
+      where: { id: RESULTADO_ID, promovidoParaFonte: true },
+      data: { promovidoParaFonte: false },
+    });
+  });
+
+  it("não tenta apagar Fonte/PrecoConsolidado inexistentes", async () => {
+    mocks.db.fonte.findUnique.mockResolvedValue(null);
+    mocks.tx.precoConsolidado.findFirst.mockResolvedValue(null);
+
+    const res = await despromoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.data).toEqual({ resultadoId: RESULTADO_ID });
+    expect(mocks.tx.precoConsolidado.delete).not.toHaveBeenCalled();
+    expect(mocks.tx.fonte.delete).not.toHaveBeenCalled();
+  });
+
+  it("aborta e não audita quando outra transação já desfez a promoção (count === 0)", async () => {
+    mocks.tx.resultadoSimilaridade.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await despromoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.error).toBe("Este candidato não está mais promovido");
+    expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("registra auditoria com os ids removidos", async () => {
+    await despromoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        processoId: "proc-1",
+        acao: "despromover_resultado_similaridade",
+        detalhes: expect.objectContaining({
+          resultadoId: RESULTADO_ID,
+          itemId: "item-1",
+          fonteId: "fonte-1",
+          precoConsolidadoId: "preco-1",
+        }),
+      }),
+    );
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/processos/proc-1");
+  });
+
+  it("retorna erro e não abre transação quando o candidato não está promovido", async () => {
+    mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(
+      resultadoBase({ promovidoParaFonte: false }),
+    );
+
+    const res = await despromoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.error).toBe("Este candidato não está promovido");
+    expect(mocks.db.$transaction).not.toHaveBeenCalled();
+    expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
+  });
+
+  it("retorna erro quando o candidato não existe", async () => {
+    mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(null);
+
+    const res = await despromoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.error).toBe("Candidato não encontrado");
+    expect(mocks.db.$transaction).not.toHaveBeenCalled();
   });
 });

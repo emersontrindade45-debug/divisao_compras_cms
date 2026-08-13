@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { promoverResultadoSimilaridade } from "@/lib/actions/promoverFonte";
+import { DespromoverFonteDialog } from "./DespromoverFonteDialog";
 
 export function PromoverFonteButton({
   resultadoId,
@@ -20,10 +21,13 @@ export function PromoverFonteButton({
 
   if (jaPromovido) {
     return (
-      <Badge variant="secondary" className="gap-1">
-        <Check className="size-3" aria-hidden />
-        Promovido
-      </Badge>
+      <>
+        <Badge variant="secondary" className="gap-1">
+          <Check className="size-3" aria-hidden />
+          Promovido
+        </Badge>
+        <DespromoverFonteDialog resultadoId={resultadoId} />
+      </>
     );
   }
 

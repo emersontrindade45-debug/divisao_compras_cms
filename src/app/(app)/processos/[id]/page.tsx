@@ -5,7 +5,6 @@ import { ProcessoHeader } from "@/components/processos/ProcessoHeader";
 import {
   ProcessoTabs,
   type CotacaoResumo,
-  type EvidenciaResumo,
   type FonteResumo,
 } from "@/components/processos/ProcessoTabs";
 import { AssistenteToggle } from "@/components/assistente/AssistenteDock";
@@ -88,32 +87,6 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
       motivoExclusao: f.motivoExclusao ?? undefined,
       totalEvidencias: f.evidencias.length,
     })),
-  );
-
-  const evidenciasDeFontes: EvidenciaResumo[] = processo.itens.flatMap((item) =>
-    item.fontes.flatMap((f) =>
-      f.evidencias.map((e) => ({
-        id: e.id,
-        nomeArquivo: e.arquivo ?? e.url ?? "Evidência sem arquivo",
-        dataHoraAcesso: e.dataHoraAcesso.toISOString(),
-        url: e.url ?? undefined,
-        observacoes: e.descricao ?? `Fonte: ${f.descricao}`,
-      })),
-    ),
-  );
-
-  const evidenciasDeCapturas: EvidenciaResumo[] = processo.capturas.map((c) => ({
-    id: c.id,
-    nomeArquivo: c.evidencia ?? c.produto,
-    dataHoraAcesso: c.dataHoraAcesso.toISOString(),
-    url: c.url,
-    observacoes: `Captura de site (${c.site.nome}): ${c.produto} — ${Number(
-      c.valorUnitario,
-    ).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`,
-  }));
-
-  const evidencias = [...evidenciasDeFontes, ...evidenciasDeCapturas].sort((a, b) =>
-    b.dataHoraAcesso.localeCompare(a.dataHoraAcesso),
   );
 
   const serieDb = processo.itens
@@ -202,7 +175,6 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
           processo={processoMapeado}
           conformidade={conformidade}
           fontes={fontes}
-          evidencias={evidencias}
           cotacoes={cotacoes}
           serie={serie}
           fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}

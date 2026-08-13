@@ -13,10 +13,10 @@ import type { ConformidadeProcesso, EtapaId } from "@/lib/domain/conformidade";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import type { SeriePrecoFixture } from "@/lib/fixtures/seriePrecos";
 
-export type { FonteResumo, EvidenciaResumo } from "./EtapaPesquisa";
+export type { FonteResumo } from "./EtapaPesquisa";
 export type { CotacaoResumo } from "./EtapaValidacao";
 
-import type { EvidenciaResumo, FonteResumo } from "./EtapaPesquisa";
+import type { FonteResumo } from "./EtapaPesquisa";
 
 const ETAPAS_VALIDAS: readonly EtapaId[] = [
   "estrategia",
@@ -40,7 +40,6 @@ export function ProcessoTabs({
   processo,
   conformidade,
   fontes = [],
-  evidencias = [],
   cotacoes = [],
   serie,
   fontesSimilaridade,
@@ -48,7 +47,6 @@ export function ProcessoTabs({
   processo: ProcessoFixture;
   conformidade: ConformidadeProcesso;
   fontes?: FonteResumo[];
-  evidencias?: EvidenciaResumo[];
   cotacoes?: CotacaoResumo[];
   serie?: SeriePrecoFixture;
   fontesSimilaridade?: ReactNode;
@@ -122,7 +120,6 @@ export function ProcessoTabs({
         <EtapaPesquisa
           processoId={processo.id}
           fontes={fontes}
-          evidencias={evidencias}
           fontesSimilaridade={fontesSimilaridade}
         />
       </TabsContent>

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FileText, Globe } from "lucide-react";
+import { Globe } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -11,7 +11,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmptyState } from "@/components/common/EmptyState";
-import { EvidenciaPanel } from "@/components/common/EvidenciaPanel";
 import { PesquisaSimilaridadeUploadForm } from "./PesquisaSimilaridadeUploadForm";
 import { PreencherCotacaoForm } from "./PreencherCotacaoForm";
 import { formatBRL, formatDate } from "@/lib/formatters";
@@ -28,14 +27,6 @@ export interface FonteResumo {
   status: "incluido" | "excluido";
   motivoExclusao?: string;
   totalEvidencias: number;
-}
-
-export interface EvidenciaResumo {
-  id: string;
-  nomeArquivo: string;
-  dataHoraAcesso: string;
-  url?: string;
-  observacoes?: string;
 }
 
 const TIPO_FONTE_LABEL: Record<FonteResumo["tipo"], string> = {
@@ -70,12 +61,10 @@ function SecaoTitulo({ titulo, descricao }: { titulo: string; descricao: string 
 export function EtapaPesquisa({
   processoId,
   fontes,
-  evidencias,
   fontesSimilaridade,
 }: {
   processoId: string;
   fontes: FonteResumo[];
-  evidencias: EvidenciaResumo[];
   fontesSimilaridade?: ReactNode;
 }) {
   return (
@@ -172,32 +161,6 @@ export function EtapaPesquisa({
               </Table>
             </CardContent>
           </Card>
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <SecaoTitulo
-          titulo={`Evidências (${evidencias.length})`}
-          descricao="Arquivos e capturas com data/hora de acesso que sustentam cada preço."
-        />
-        {evidencias.length === 0 ? (
-          <EmptyState
-            icon={FileText}
-            title="Nenhuma evidência registrada ainda"
-            description="Evidências com data/hora de acesso são anexadas às fontes e às capturas de sites deste processo."
-          />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {evidencias.map((e) => (
-              <EvidenciaPanel
-                key={e.id}
-                nomeArquivo={e.nomeArquivo}
-                dataHoraAcesso={e.dataHoraAcesso}
-                url={e.url}
-                observacoes={e.observacoes}
-              />
-            ))}
-          </div>
         )}
       </section>
     </div>
