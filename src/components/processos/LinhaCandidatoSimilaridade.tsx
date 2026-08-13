@@ -161,21 +161,28 @@ export function LinhaCandidatoSimilaridade({
       {editando && (
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={8} className="p-2">
-            <RoteiroCalculoEditor
-              resultadoId={candidato.id}
-              valorPublicado={candidato.valorUnitario}
-              roteiroSalvo={candidato.roteiro}
-              tr={tr}
-              jaPromovido={candidato.promovidoParaFonte}
-              candidato={{
-                orgao: candidato.fonteOrgaoOuId,
-                descricao: candidato.fonteDescricao,
-                url: candidato.fonteUrl,
-                dataReferenciaISO: candidato.dataReferenciaISO,
-              }}
-              periodicidadeSalva={candidato.ajustePeriodicidade}
-              onFechar={() => setEditando(false)}
-            />
+            {/* `grid grid-cols-1` (Tailwind: track = minmax(0,1fr)) impede que o
+                texto sem quebra da memória de cálculo dite a largura da célula —
+                numa tabela de layout automático, um filho de bloco comum faria
+                a linha (e a tabela inteira) crescer até caber o texto numa
+                única linha, em vez de quebrar dentro do espaço disponível. */}
+            <div className="grid grid-cols-1">
+              <RoteiroCalculoEditor
+                resultadoId={candidato.id}
+                valorPublicado={candidato.valorUnitario}
+                roteiroSalvo={candidato.roteiro}
+                tr={tr}
+                jaPromovido={candidato.promovidoParaFonte}
+                candidato={{
+                  orgao: candidato.fonteOrgaoOuId,
+                  descricao: candidato.fonteDescricao,
+                  url: candidato.fonteUrl,
+                  dataReferenciaISO: candidato.dataReferenciaISO,
+                }}
+                periodicidadeSalva={candidato.ajustePeriodicidade}
+                onFechar={() => setEditando(false)}
+              />
+            </div>
           </TableCell>
         </TableRow>
       )}

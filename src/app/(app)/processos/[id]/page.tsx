@@ -160,7 +160,7 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
   });
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-7xl space-y-6">
       <ProcessoHeader
         processo={processoMapeado}
         acoes={

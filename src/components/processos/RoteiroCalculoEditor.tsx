@@ -538,7 +538,7 @@ export function RoteiroCalculoEditor({
               Copiar
             </Button>
           </div>
-          <p className="rounded-md bg-background p-2 text-xs leading-relaxed ring-1 ring-border">
+          <p className="rounded-md bg-background p-2 text-xs leading-relaxed break-words ring-1 ring-border">
             {memoria}
           </p>
         </div>
