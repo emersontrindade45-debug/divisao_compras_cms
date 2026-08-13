@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { buscarContratosPNCP } from "../pncp";
+import { buscarContratosPNCP, listarItensDaCompraPNCP } from "../pncp";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -1064,5 +1064,100 @@ describe("validação da data de referência", () => {
     const resultado = await buscarContratosPNCP("cadeira");
 
     expect(resultado[0]!.dataReferencia.toISOString()).toBe("2026-02-20T00:00:00.000Z");
+  });
+});
+
+/**
+ * Roteia `/itens` e `/itens/{n}/resultados` para `listarItensDaCompraPNCP` —
+ * diferente de `mockPncp`, não há fase de busca textual (a contratação já
+ * chega identificada por cnpj/ano/sequencial).
+ */
+function mockItensDaCompra(opcoes: {
+  itens?: unknown[];
+  resultados?: (numeroItem: number) => unknown[];
+}) {
+  const { itens = [itemDe()], resultados = () => [resultadoDe()] } = opcoes;
+
+  return vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes("/resultados")) {
+      const numeroItem = Number(url.match(/\/itens\/(\d+)\/resultados/)?.[1] ?? 0);
+      return mockJson(resultados(numeroItem));
+    }
+    if (url.includes("/itens")) {
+      const pagina = Number(new URL(url).searchParams.get("pagina") ?? 1);
+      return mockJson(pagina === 1 ? itens : []);
+    }
+    throw new Error(`URL inesperada: ${url}`);
+  });
+}
+
+const identidadePadrao = { cnpjOrgao: "00000000000100", ano: "2026", numeroSequencial: "1" };
+
+describe("listarItensDaCompraPNCP", () => {
+  it("lista os itens homologados de uma contratação já identificada", async () => {
+    mockItensDaCompra({});
+
+    const { candidatos, completo } = await listarItensDaCompraPNCP(identidadePadrao, "Prefeitura Teste");
+
+    expect(completo).toBe(true);
+    expect(candidatos).toHaveLength(1);
+    expect(candidatos[0]).toMatchObject({
+      tipoCandidato: "contratacao_publica",
+      fonteDescricao: "Cadeira de escritório",
+      fonteOrgaoOuId: "Prefeitura Teste",
+      valorUnitario: 100,
+    });
+  });
+
+  // O nome do órgão não vem do endpoint de itens — só cnpj. Sem isto o
+  // candidato entraria na estimativa com o órgão em branco.
+  it("usa o orgaoNome recebido, não um valor derivado do CNPJ", async () => {
+    mockItensDaCompra({});
+
+    const { candidatos } = await listarItensDaCompraPNCP(identidadePadrao, "Órgão Informado");
+
+    expect(candidatos[0]!.fonteOrgaoOuId).toBe("Órgão Informado");
+  });
+
+  it("preenche identidadeContratacao com o numeroItem de cada item", async () => {
+    mockItensDaCompra({
+      itens: [itemDe({ numeroItem: 1 }), itemDe({ numeroItem: 2 })],
+      resultados: (numeroItem) => [resultadoDe({ numeroItem })],
+    });
+
+    const { candidatos } = await listarItensDaCompraPNCP(identidadePadrao, "Prefeitura Teste");
+
+    expect(candidatos.map((c) => c.identidadeContratacao?.numeroItem).sort()).toEqual([1, 2]);
+  });
+
+  // Mesma regra de preço das demais buscas do PNCP: nunca o valor estimado.
+  it("descarta item sem valor homologado", async () => {
+    mockItensDaCompra({ resultados: () => [resultadoDe({ valorUnitarioHomologado: null })] });
+
+    const { candidatos } = await listarItensDaCompraPNCP(identidadePadrao, "Prefeitura Teste");
+
+    expect(candidatos).toEqual([]);
+  });
+
+  it("devolve completo:false quando a paginação de /itens não termina antes do prazo", async () => {
+    let relogio = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => relogio);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Página cheia (500) mantém a paginação andando; cada página custa 7s, então
+    // o prazo (12s) vence com a lista de itens ainda incompleta.
+    const paginaCheia = Array.from({ length: 500 }, (_, i) => itemDe({ numeroItem: i + 1 }));
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      relogio += url.includes("/resultados") ? 1_000 : 7_000;
+      if (url.includes("/itens")) return mockJson(paginaCheia);
+      throw new Error(`URL inesperada: ${url}`);
+    });
+
+    const { candidatos, completo } = await listarItensDaCompraPNCP(identidadePadrao, "Prefeitura Teste");
+
+    expect(completo).toBe(false);
+    expect(candidatos).toEqual([]);
   });
 });

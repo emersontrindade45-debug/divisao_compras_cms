@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   rankearSimilaridade: vi.fn(),
   getProvedorIA: vi.fn(),
   revalidatePath: vi.fn(),
+  listarItensDaCompraPNCP: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
@@ -44,8 +45,16 @@ vi.mock("@/lib/similaridade/filtroRecencia", () => ({
 }));
 vi.mock("@/lib/ia", () => ({ getProvedorIA: mocks.getProvedorIA }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("@/lib/integracoes/pncp", () => ({
+  listarItensDaCompraPNCP: mocks.listarItensDaCompraPNCP,
+}));
 
-import { adicionarCandidatoSugerido, obterConversaAtiva } from "../assistente";
+import {
+  adicionarCandidatoSugerido,
+  adicionarItemDaContratacao,
+  listarOutrosItensDaContratacao,
+  obterConversaAtiva,
+} from "../assistente";
 
 const USER = { id: "user-1", role: "pesquisa", email: "u@e.com" };
 
@@ -325,6 +334,189 @@ describe("adicionarCandidatoSugerido", () => {
       }
     }
     expect(violacoes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Outros itens da mesma contratação (picker de itens-irmãos)
+// ---------------------------------------------------------------------------
+
+const IDENTIDADE = { cnpjOrgao: "123", ano: "2026", numeroSequencial: "4", numeroItem: 1 };
+
+const SUGESTAO_COM_IDENTIDADE = { ...SUGESTAO, identidadeContratacao: IDENTIDADE };
+
+const MENSAGEM_COM_IDENTIDADE = {
+  ...MENSAGEM,
+  ferramentasUsadas: [
+    {
+      ferramenta: "buscar_pncp",
+      argumentos: "{}",
+      resumo: "…",
+      duracaoMs: 10,
+      sugestoes: [SUGESTAO_COM_IDENTIDADE],
+    },
+  ],
+};
+
+/** Item irmão (numeroItem 2) que `listarItensDaCompraPNCP` devolveria da mesma contratação. */
+const CANDIDATO_IRMAO = {
+  tipoCandidato: "contratacao_publica" as const,
+  fonteDescricao: "Cadeira giratória sem apoio lombar",
+  fonteOrgaoOuId: "Prefeitura de Exemplo",
+  fonteUrl: "https://pncp.gov.br/app/editais/123/2026/4",
+  valorUnitario: 700,
+  dataReferencia: new Date("2026-05-10"),
+  unidade: "unidade",
+  quantidade: 30,
+  identidadeContratacao: { ...IDENTIDADE, numeroItem: 2 },
+};
+
+describe("listarOutrosItensDaContratacao", () => {
+  const PEDIDO_LISTAGEM = { mensagemId: "msg-1", candidatoId: "c1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireRole.mockResolvedValue(USER);
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM_COM_IDENTIDADE);
+    mocks.listarItensDaCompraPNCP.mockResolvedValue({
+      candidatos: [
+        // O próprio item do card volta na listagem crua — precisa ser filtrado.
+        { ...CANDIDATO_IRMAO, identidadeContratacao: IDENTIDADE, fonteDescricao: "Cadeira giratória ergonômica" },
+        CANDIDATO_IRMAO,
+      ],
+      completo: true,
+    });
+  });
+
+  it("exclui da lista o item que já é o próprio card", async () => {
+    const r = await listarOutrosItensDaContratacao(PEDIDO_LISTAGEM);
+
+    expect(r.ok).toBe(true);
+    expect(r.itens).toHaveLength(1);
+    expect(r.itens[0]!.numeroItem).toBe(2);
+  });
+
+  it("recusa candidato sem identidade PNCP estruturada", async () => {
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM);
+
+    const r = await listarOutrosItensDaContratacao(PEDIDO_LISTAGEM);
+
+    expect(r.ok).toBe(false);
+    expect(r.itens).toEqual([]);
+    expect(mocks.listarItensDaCompraPNCP).not.toHaveBeenCalled();
+  });
+
+  it("recusa mensagem de outro usuário", async () => {
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue({
+      ...MENSAGEM_COM_IDENTIDADE,
+      conversa: { ...MENSAGEM_COM_IDENTIDADE.conversa, userId: "outro-usuario" },
+    });
+
+    const r = await listarOutrosItensDaContratacao(PEDIDO_LISTAGEM);
+
+    expect(r.ok).toBe(false);
+    expect(mocks.listarItensDaCompraPNCP).not.toHaveBeenCalled();
+  });
+
+  it("marca truncado quando a busca não pôde consultar a contratação inteira", async () => {
+    mocks.listarItensDaCompraPNCP.mockResolvedValue({ candidatos: [], completo: false });
+
+    const r = await listarOutrosItensDaContratacao(PEDIDO_LISTAGEM);
+
+    expect(r.ok).toBe(true);
+    expect(r.truncado).toBe(true);
+  });
+
+  it("busca a contratação pelo cnpj/ano/sequencial e órgão do candidato original", async () => {
+    await listarOutrosItensDaContratacao(PEDIDO_LISTAGEM);
+
+    expect(mocks.listarItensDaCompraPNCP).toHaveBeenCalledWith(IDENTIDADE, "Prefeitura de Exemplo");
+  });
+
+  it("exige o papel de pesquisa", async () => {
+    await listarOutrosItensDaContratacao(PEDIDO_LISTAGEM);
+
+    expect(mocks.requireRole).toHaveBeenCalledWith("pesquisa");
+  });
+});
+
+describe("adicionarItemDaContratacao", () => {
+  const PEDIDO_IRMAO = { mensagemId: "msg-1", candidatoId: "c1", numeroItem: 2, itemId: "item-1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireRole.mockResolvedValue(USER);
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM_COM_IDENTIDADE);
+    mocks.db.item.findUnique.mockResolvedValue(ITEM);
+    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue(null);
+    mocks.db.resultadoSimilaridade.create.mockResolvedValue({ id: "res-1" });
+    mocks.candidatoEstaNoTempo.mockReturnValue(true);
+    mocks.rankearSimilaridade.mockResolvedValue([
+      { ...AVALIACAO, candidato: { ...AVALIACAO.candidato, valorUnitario: 700 } },
+    ]);
+    mocks.getProvedorIA.mockReturnValue({ rankearSimilaridade: mocks.rankearSimilaridade });
+    mocks.listarItensDaCompraPNCP.mockResolvedValue({ candidatos: [CANDIDATO_IRMAO], completo: true });
+  });
+
+  // A garantia central deste caminho: `numeroItem` é só uma chave de busca — o
+  // preço vem de uma nova consulta ao PNCP no servidor, nunca de algo que o
+  // navegador tenha mandado (não há sequer campo de valor no payload).
+  it("busca o preço do item irmão no servidor, a partir só do número do item", async () => {
+    await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(mocks.listarItensDaCompraPNCP).toHaveBeenCalledWith(IDENTIDADE, "Prefeitura de Exemplo");
+    const candidatosEnviados = mocks.rankearSimilaridade.mock.calls[0]![1] as Array<{ valorUnitario: number }>;
+    expect(candidatosEnviados[0]!.valorUnitario).toBe(700);
+  });
+
+  it("recusa quando o item irmão não tem preço homologado disponível agora", async () => {
+    mocks.listarItensDaCompraPNCP.mockResolvedValue({ candidatos: [], completo: true });
+
+    const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(r.ok).toBe(false);
+    expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+  });
+
+  it("recusa candidato sem identidade PNCP estruturada", async () => {
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM);
+
+    const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(r.ok).toBe(false);
+    expect(mocks.listarItensDaCompraPNCP).not.toHaveBeenCalled();
+  });
+
+  it("recusa item de outro processo", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({ ...ITEM, processoId: "proc-INVASOR" });
+
+    const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(r.ok).toBe(false);
+    expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+  });
+
+  it("respeita a mesma dedup por item+fonteUrl da adição normal", async () => {
+    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue({ id: "res-existente", descartado: false });
+
+    const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(r.ok).toBe(false);
+    expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+  });
+
+  it("audita com o número do item irmão distinguível do candidato original", async () => {
+    await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({ detalhes: expect.objectContaining({ candidatoId: "c1:2" }) }),
+    );
+  });
+
+  it("exige o papel de pesquisa", async () => {
+    await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(mocks.requireRole).toHaveBeenCalledWith("pesquisa");
   });
 });
 

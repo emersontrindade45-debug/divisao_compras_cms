@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
@@ -10,7 +11,8 @@ import { getProvedorIA } from "@/lib/ia";
 import { candidatoEstaNoTempo } from "@/lib/similaridade/filtroRecencia";
 import { calcularScoreFinal } from "@/lib/similaridade/scoreFinal";
 import { janelaContratacaoPublica } from "@/lib/domain/in65Rules";
-import type { ItemExtraidoTR } from "@/lib/ia/types";
+import { listarItensDaCompraPNCP } from "@/lib/integracoes/pncp";
+import type { CandidatoSimilaridade, ItemExtraidoTR } from "@/lib/ia/types";
 
 // Leitura da conversa do assistente (M13).
 //
@@ -180,48 +182,23 @@ export interface ResultadoAprovacao {
 // objeto sem impedir escolhas informadas do analista.
 const SCORE_MINIMO_MANUAL = 40;
 
-/**
- * Adiciona à lista do processo um candidato que o assistente encontrou.
- *
- * É o único caminho de escrita do assistente, e ele começa num clique humano —
- * o modelo propõe, o servidor decide. Três garantias que não dependem do
- * navegador:
- *
- * - **o preço vem da mensagem gravada**, não do corpo da requisição;
- * - **o score é recalculado** pelo provedor de IA, com rastreabilidade igual
- *   ao pipeline automático;
- * - **a janela de recência** respeita a natureza cadastrada do item
- *   (`Item.natureza` — serviço contínuo 730 dias / bem de consumo 365 dias),
- *   não uma escolha feita no momento do clique.
- */
-export async function adicionarCandidatoSugerido(
-  entrada: z.input<typeof aprovarSchema>,
-): Promise<ResultadoAprovacao> {
-  // Mesma exigência de papel da promoção a fonte: adicionar candidato mexe na
-  // instrução do processo.
-  const user = await requireRole("pesquisa");
-  const { mensagemId, candidatoId, itemId } = aprovarSchema.parse(entrada);
+type ItemParaCandidato = Prisma.ItemGetPayload<{
+  select: {
+    id: true;
+    processoId: true;
+    descricao: true;
+    unidade: true;
+    quantidade: true;
+    caracteristicasTecnicas: true;
+    natureza: true;
+  };
+}>;
 
-  const mensagem = await db.mensagemAssistente.findUnique({
-    where: { id: mensagemId },
-    select: {
-      id: true,
-      ferramentasUsadas: true,
-      // O dono da conversa: sem isto, qualquer usuário autenticado aprovaria
-      // um candidato de uma conversa alheia só chutando o id da mensagem.
-      conversa: { select: { id: true, userId: true, processoId: true } },
-    },
-  });
-
-  if (!mensagem || mensagem.conversa.userId !== user.id) {
-    return { ok: false, mensagem: "Sugestão não encontrada nesta conversa." };
-  }
-
-  const sugestao = acharSugestao(mensagem.ferramentasUsadas, candidatoId);
-  if (!sugestao) {
-    return { ok: false, mensagem: "Este candidato não está mais disponível nesta busca." };
-  }
-
+/** Item de destino + checagem de que ele pertence ao processo da conversa. */
+async function carregarItemParaCandidato(
+  itemId: string,
+  processoIdEscopo: string | null,
+): Promise<{ ok: true; item: ItemParaCandidato } | { ok: false; mensagem: string }> {
   const item = await db.item.findUnique({
     where: { id: itemId },
     select: {
@@ -235,11 +212,65 @@ export async function adicionarCandidatoSugerido(
     },
   });
   if (!item) return { ok: false, mensagem: "Item não encontrado." };
-
   // Conversa presa a um processo não escreve em item de outro.
-  if (mensagem.conversa.processoId && item.processoId !== mensagem.conversa.processoId) {
+  if (processoIdEscopo && item.processoId !== processoIdEscopo) {
     return { ok: false, mensagem: "Este item pertence a outro processo." };
   }
+  return { ok: true, item };
+}
+
+type MensagemComConversa = Prisma.MensagemAssistenteGetPayload<{
+  select: {
+    id: true;
+    ferramentasUsadas: true;
+    conversa: { select: { id: true; userId: true; processoId: true } };
+  };
+}>;
+
+/**
+ * Carrega a mensagem onde uma busca do assistente foi gravada, checando que
+ * ela pertence ao usuário — sem isto, qualquer usuário autenticado agiria
+ * sobre um candidato de conversa alheia só chutando o id da mensagem.
+ */
+async function carregarMensagemDoUsuario(
+  mensagemId: string,
+  userId: string,
+): Promise<{ ok: true; mensagem: MensagemComConversa } | { ok: false; mensagem: string }> {
+  const registro = await db.mensagemAssistente.findUnique({
+    where: { id: mensagemId },
+    select: {
+      id: true,
+      ferramentasUsadas: true,
+      conversa: { select: { id: true, userId: true, processoId: true } },
+    },
+  });
+  if (!registro || registro.conversa.userId !== userId) {
+    return { ok: false, mensagem: "Sugestão não encontrada nesta conversa." };
+  }
+  return { ok: true, mensagem: registro };
+}
+
+/**
+ * Grava um candidato (já com preço, órgão e data resolvidos pelo servidor —
+ * nunca pelo navegador) como `ResultadoSimilaridade` de um item, com as
+ * mesmas três garantias em qualquer caminho de entrada: janela de recência da
+ * IN 65/2021 pela natureza do item, score recalculado pela IA e auditoria.
+ *
+ * Compartilhado por `adicionarCandidatoSugerido` (candidato já sugerido pela
+ * busca) e `adicionarItemDaContratacao` (item irmão, buscado sob demanda) —
+ * extraído para que as duas garantias de conformidade não corram o risco de
+ * divergir por terem sido escritas duas vezes.
+ */
+async function registrarCandidatoNoItem(params: {
+  candidato: CandidatoSimilaridade;
+  item: ItemParaCandidato;
+  userId: string;
+  conversaId: string;
+  mensagemId: string;
+  candidatoId: string;
+  termoBuscaUsado: string;
+}): Promise<ResultadoAprovacao> {
+  const { candidato, item, userId, conversaId, mensagemId, candidatoId, termoBuscaUsado } = params;
 
   // Duplicata: a mesma contratação já registrada no item não precisa entrar de
   // novo. A guarda forte contra duplicidade fica na promoção a Fonte, que tem
@@ -252,9 +283,9 @@ export async function adicionarCandidatoSugerido(
   // está na lista" e o contrato não aparecia em lugar nenhum. Neste caso a
   // lápide é revivida com os dados reais, preservando o id.
   let idParaReviver: string | null = null;
-  if (sugestao.fonteUrl) {
+  if (candidato.fonteUrl) {
     const jaExiste = await db.resultadoSimilaridade.findFirst({
-      where: { itemId: item.id, fonteUrl: sugestao.fonteUrl },
+      where: { itemId: item.id, fonteUrl: candidato.fonteUrl },
       select: { id: true, descartado: true },
     });
     if (jaExiste && !jaExiste.descartado) {
@@ -265,7 +296,6 @@ export async function adicionarCandidatoSugerido(
 
   // ── 1. Validar recência com a janela da natureza cadastrada do item ───────
   const janelaDias = janelaContratacaoPublica(item.natureza);
-  const candidato = paraCandidato(sugestao);
   if (!candidatoEstaNoTempo(candidato, item.natureza)) {
     return {
       ok: false,
@@ -328,8 +358,8 @@ export async function adicionarCandidatoSugerido(
     adaptado,
     justificativa: avaliacao.justificativa,
     origem: "assistente" as const,
-    conversaId: mensagem.conversa.id,
-    termoBuscaUsado: sugestao.termoBuscaUsado,
+    conversaId,
+    termoBuscaUsado,
   };
 
   if (idParaReviver) {
@@ -343,17 +373,17 @@ export async function adicionarCandidatoSugerido(
   }
 
   await registrarAuditoria({
-    userId: user.id,
+    userId,
     processoId: item.processoId,
     acao: "assistente_adicionar_candidato",
     detalhes: {
       itemId: item.id,
-      conversaId: mensagem.conversa.id,
-      mensagemId: mensagem.id,
+      conversaId,
+      mensagemId,
       candidatoId,
       naturezaObjeto: item.natureza,
       janelaDias,
-      termoBuscaUsado: sugestao.termoBuscaUsado,
+      termoBuscaUsado,
       scoreFinal,
       adaptado,
       revividoDeDescarte: idParaReviver !== null,
@@ -372,6 +402,200 @@ export async function adicionarCandidatoSugerido(
     ok: true,
     mensagem: `Adicionado à lista com score ${Math.round(scoreFinal)}${avisoAdaptado}. Promover a fonte da estimativa continua sendo um clique seu, na aba de similaridade.`,
   };
+}
+
+/**
+ * Adiciona à lista do processo um candidato que o assistente encontrou.
+ *
+ * É o único caminho de escrita do assistente, e ele começa num clique humano —
+ * o modelo propõe, o servidor decide. Três garantias que não dependem do
+ * navegador (ver `registrarCandidatoNoItem`): o preço vem da mensagem
+ * gravada, não do corpo da requisição; o score é recalculado pelo provedor de
+ * IA; e a janela de recência respeita a natureza cadastrada do item.
+ */
+export async function adicionarCandidatoSugerido(
+  entrada: z.input<typeof aprovarSchema>,
+): Promise<ResultadoAprovacao> {
+  // Mesma exigência de papel da promoção a fonte: adicionar candidato mexe na
+  // instrução do processo.
+  const user = await requireRole("pesquisa");
+  const { mensagemId, candidatoId, itemId } = aprovarSchema.parse(entrada);
+
+  const cargaMensagem = await carregarMensagemDoUsuario(mensagemId, user.id);
+  if (!cargaMensagem.ok) return { ok: false, mensagem: cargaMensagem.mensagem };
+  const { mensagem } = cargaMensagem;
+
+  const sugestao = acharSugestao(mensagem.ferramentasUsadas, candidatoId);
+  if (!sugestao) {
+    return { ok: false, mensagem: "Este candidato não está mais disponível nesta busca." };
+  }
+
+  const cargaItem = await carregarItemParaCandidato(itemId, mensagem.conversa.processoId);
+  if (!cargaItem.ok) return { ok: false, mensagem: cargaItem.mensagem };
+
+  return registrarCandidatoNoItem({
+    candidato: paraCandidato(sugestao),
+    item: cargaItem.item,
+    userId: user.id,
+    conversaId: mensagem.conversa.id,
+    mensagemId: mensagem.id,
+    candidatoId,
+    termoBuscaUsado: sugestao.termoBuscaUsado,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Outros itens da mesma contratação (picker de itens-irmãos no card)
+// ---------------------------------------------------------------------------
+
+const listarItensContratacaoSchema = z.object({
+  mensagemId: z.string().min(1),
+  candidatoId: z.string().min(1),
+});
+
+export interface ItemIrmaoDaContratacao {
+  numeroItem: number;
+  descricao: string;
+  valorUnitario: number;
+  /** ISO — `Json` não guarda `Date`. */
+  dataReferencia: string;
+  unidade: string;
+  quantidade: number;
+}
+
+export interface ResultadoListagemContratacao {
+  ok: boolean;
+  mensagem?: string;
+  itens: ItemIrmaoDaContratacao[];
+  /** `true` quando a contratação tem mais itens do que os listados. */
+  truncado: boolean;
+}
+
+/**
+ * Lista os demais itens da mesma contratação (edital) de um candidato do
+ * assistente — o ranqueamento por relevância em `buscarContratosPNCP`
+ * descarta, em silêncio, os itens da compra que não ficaram entre os mais
+ * aderentes ao termo buscado, mesmo quando um deles é o que o analista
+ * precisa para outro item do TR.
+ *
+ * Só existe para candidatos com `identidadeContratacao` (hoje, só PNCP) — o
+ * card não oferece o botão para os demais tipos.
+ */
+export async function listarOutrosItensDaContratacao(
+  entrada: z.input<typeof listarItensContratacaoSchema>,
+): Promise<ResultadoListagemContratacao> {
+  const user = await requireRole("pesquisa");
+  const { mensagemId, candidatoId } = listarItensContratacaoSchema.parse(entrada);
+
+  const cargaMensagem = await carregarMensagemDoUsuario(mensagemId, user.id);
+  if (!cargaMensagem.ok) return { ok: false, mensagem: cargaMensagem.mensagem, itens: [], truncado: false };
+  const { mensagem } = cargaMensagem;
+
+  const sugestao = acharSugestao(mensagem.ferramentasUsadas, candidatoId);
+  if (!sugestao) {
+    return {
+      ok: false,
+      mensagem: "Este candidato não está mais disponível nesta busca.",
+      itens: [],
+      truncado: false,
+    };
+  }
+  if (!sugestao.identidadeContratacao) {
+    return {
+      ok: false,
+      mensagem: "Este candidato não tem identidade PNCP estruturada — não é possível listar outros itens dele.",
+      itens: [],
+      truncado: false,
+    };
+  }
+
+  const { candidatos, completo } = await listarItensDaCompraPNCP(
+    sugestao.identidadeContratacao,
+    sugestao.fonteOrgaoOuId,
+  );
+
+  // O item que já é o card não entra na lista de "outros".
+  const numeroItemOriginal = sugestao.identidadeContratacao.numeroItem;
+  const itens = candidatos
+    .filter((c) => c.identidadeContratacao?.numeroItem !== numeroItemOriginal)
+    .map((c) => ({
+      numeroItem: c.identidadeContratacao!.numeroItem,
+      descricao: c.fonteDescricao,
+      valorUnitario: c.valorUnitario,
+      dataReferencia: c.dataReferencia.toISOString(),
+      unidade: c.unidade,
+      quantidade: c.quantidade,
+    }));
+
+  return { ok: true, itens, truncado: !completo };
+}
+
+const adicionarItemContratacaoSchema = z.object({
+  mensagemId: z.string().min(1),
+  /** Candidato original do card — é dele que vem cnpj/ano/sequencial da contratação. */
+  candidatoId: z.string().min(1),
+  /** Número do item irmão escolhido no picker; só uma chave de busca, nunca o preço. */
+  numeroItem: z.number().int().positive(),
+  itemId: z.string().min(1),
+});
+
+/**
+ * Adiciona à lista de um item do processo um item IRMÃO do candidato do card
+ * — outro item da mesma contratação, que o analista escolheu no picker de
+ * "outros itens desta licitação".
+ *
+ * `numeroItem` viaja do navegador só como chave de busca (qual item pedir ao
+ * PNCP), nunca como preço: o valor, a data e a descrição são buscados de novo
+ * no servidor a partir dele, igual a `adicionarCandidatoSugerido` — a
+ * invariante do M13 ("nem o modelo, nem o cliente, digitam um preço") vale
+ * também aqui.
+ */
+export async function adicionarItemDaContratacao(
+  entrada: z.input<typeof adicionarItemContratacaoSchema>,
+): Promise<ResultadoAprovacao> {
+  const user = await requireRole("pesquisa");
+  const { mensagemId, candidatoId, numeroItem, itemId } = adicionarItemContratacaoSchema.parse(entrada);
+
+  const cargaMensagem = await carregarMensagemDoUsuario(mensagemId, user.id);
+  if (!cargaMensagem.ok) return { ok: false, mensagem: cargaMensagem.mensagem };
+  const { mensagem } = cargaMensagem;
+
+  const sugestao = acharSugestao(mensagem.ferramentasUsadas, candidatoId);
+  if (!sugestao) {
+    return { ok: false, mensagem: "Este candidato não está mais disponível nesta busca." };
+  }
+  if (!sugestao.identidadeContratacao) {
+    return {
+      ok: false,
+      mensagem: "Este candidato não tem identidade PNCP estruturada — não é possível buscar outros itens dele.",
+    };
+  }
+
+  const cargaItem = await carregarItemParaCandidato(itemId, mensagem.conversa.processoId);
+  if (!cargaItem.ok) return { ok: false, mensagem: cargaItem.mensagem };
+
+  const { candidatos } = await listarItensDaCompraPNCP(
+    sugestao.identidadeContratacao,
+    sugestao.fonteOrgaoOuId,
+  );
+  const candidato = candidatos.find((c) => c.identidadeContratacao?.numeroItem === numeroItem);
+  if (!candidato) {
+    return {
+      ok: false,
+      mensagem:
+        "Não foi possível obter o preço homologado deste item no PNCP agora (sem julgamento, cancelado ou data implausível). Tente novamente em instantes.",
+    };
+  }
+
+  return registrarCandidatoNoItem({
+    candidato,
+    item: cargaItem.item,
+    userId: user.id,
+    conversaId: mensagem.conversa.id,
+    mensagemId: mensagem.id,
+    candidatoId: `${candidatoId}:${numeroItem}`,
+    termoBuscaUsado: sugestao.termoBuscaUsado,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -406,17 +630,9 @@ export async function descartarCandidatoAssistente(
   const user = await requireRole("pesquisa");
   const { mensagemId, candidatoId, itemId } = descartarSchema.parse(entrada);
 
-  const mensagem = await db.mensagemAssistente.findUnique({
-    where: { id: mensagemId },
-    select: {
-      ferramentasUsadas: true,
-      conversa: { select: { id: true, userId: true, processoId: true } },
-    },
-  });
-
-  if (!mensagem || mensagem.conversa.userId !== user.id) {
-    return { ok: false, mensagem: "Sugestão não encontrada nesta conversa." };
-  }
+  const cargaMensagem = await carregarMensagemDoUsuario(mensagemId, user.id);
+  if (!cargaMensagem.ok) return { ok: false, mensagem: cargaMensagem.mensagem };
+  const { mensagem } = cargaMensagem;
 
   const sugestao = acharSugestao(mensagem.ferramentasUsadas, candidatoId);
   if (!sugestao) {

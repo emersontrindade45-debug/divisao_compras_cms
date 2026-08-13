@@ -23,6 +23,22 @@ import type { CandidatoSimilaridade } from "@/lib/ia/types";
  */
 export const MAX_SUGESTOES_POR_BUSCA = 25;
 
+/**
+ * Identidade estruturada da contratação de origem, quando o provedor a expõe
+ * (hoje só o PNCP — ver `IdentidadeContratacao` em `lib/ia/types`). Sem ela o
+ * card não tem como pedir ao servidor os outros itens da mesma licitação.
+ *
+ * `.nullable().optional()` (não só `.nullable()`) porque mensagens gravadas
+ * antes deste campo existir não têm a chave — exigi-la quebraria a leitura de
+ * conversas antigas (CLAUDE.md §9.12).
+ */
+const identidadeContratacaoSchema = z.object({
+  cnpjOrgao: z.string(),
+  ano: z.string(),
+  numeroSequencial: z.string(),
+  numeroItem: z.number(),
+});
+
 export const candidatoSugeridoSchema = z.object({
   /** Estável dentro do passo (`c1`, `c2`...): é o que o clique manda de volta. */
   id: z.string().min(1),
@@ -38,6 +54,7 @@ export const candidatoSugeridoSchema = z.object({
   /** Item que o modelo disse estar pesquisando; a tela permite corrigir. */
   itemIdSugerido: z.string().nullable(),
   termoBuscaUsado: z.string(),
+  identidadeContratacao: identidadeContratacaoSchema.nullable().optional(),
 });
 
 export type CandidatoSugerido = z.infer<typeof candidatoSugeridoSchema>;
@@ -62,6 +79,7 @@ export function paraSugestao(
     quantidade: candidato.quantidade,
     itemIdSugerido: contexto.itemIdSugerido,
     termoBuscaUsado: contexto.termoBuscaUsado,
+    identidadeContratacao: candidato.identidadeContratacao ?? null,
   };
 }
 

@@ -1,6 +1,6 @@
 import "server-only";
 import { setMaxListeners } from "node:events";
-import type { CandidatoSimilaridade } from "@/lib/ia/types";
+import type { CandidatoSimilaridade, IdentidadeContratacao } from "@/lib/ia/types";
 import { cnpjOrgaoProprio, normalizarCnpj } from "@/lib/domain/orgaoProprio";
 import { tokenizar, raizPlural } from "@/lib/similaridade/texto";
 import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorrencia";
@@ -656,6 +656,104 @@ export async function buscarContratosPNCP(
   } catch (err) {
     console.error(`[PNCP] Erro inesperado ao buscar contratações para "${termo}":`, err);
     return [];
+  } finally {
+    ctx.encerrar();
+  }
+}
+
+/**
+ * Teto de itens consultados ao listar TODOS os itens de uma contratação já
+ * identificada (picker de "outros itens desta licitação" no card do
+ * assistente — diferente de `buscarContratosPNCP`, que descobre contratações a
+ * partir de um termo). Uma ata de registro de preços pode ter centenas de
+ * itens, e cada um custa uma requisição extra a `/resultados`.
+ */
+const MAX_ITENS_LISTAGEM_COMPRA = 30;
+
+/**
+ * Lista os itens homologados de UMA contratação específica já identificada
+ * (cnpj/ano/sequencial do edital), para oferecer ao analista os itens que a
+ * busca por relevância não trouxe como candidato principal — o ranqueamento em
+ * `buscarItensDaCompra` mantém só os `MAX_ITENS_RELEVANTES_POR_COMPRA` mais
+ * aderentes ao termo, descartando o resto em silêncio.
+ *
+ * `orgaoNome` vem do candidato original (mesma contratação, mesmo órgão) —
+ * este endpoint do PNCP não devolve o nome do órgão, só o CNPJ.
+ *
+ * Mesma regra de preço das demais buscas: só item com `valorUnitarioHomologado`
+ * e data plausível entra na lista (IN 65/2021 — nunca o valor estimado).
+ */
+export async function listarItensDaCompraPNCP(
+  identidade: Pick<IdentidadeContratacao, "cnpjOrgao" | "ano" | "numeroSequencial">,
+  orgaoNome: string,
+): Promise<{ candidatos: CandidatoSimilaridade[]; completo: boolean }> {
+  const processo: PNCPSearchItem = {
+    numero_controle_pncp: `${identidade.cnpjOrgao}/${identidade.ano}/${identidade.numeroSequencial}`,
+    orgao_nome: orgaoNome,
+    orgao_cnpj: identidade.cnpjOrgao,
+    ano: identidade.ano,
+    numero_sequencial: identidade.numeroSequencial,
+  };
+
+  const ctx = criarContextoBusca();
+  try {
+    const { itens: todos, completo: paginacaoCompleta } = await buscarTodosItens(processo, ctx);
+    if (!paginacaoCompleta) return { candidatos: [], completo: false };
+
+    const consultaveis = todos.filter((item) => item.temResultado !== false);
+    const selecionados = consultaveis.slice(0, MAX_ITENS_LISTAGEM_COMPRA);
+    const completo = selecionados.length === consultaveis.length;
+
+    const resultados = await processarComConcorrencia(
+      selecionados,
+      LOTE_BUSCA_RESULTADOS,
+      (item) => buscarResultadoDoItem(processo, item.numeroItem, ctx),
+      (item, erro) =>
+        console.warn(
+          `[PNCP] Erro no resultado do item ${item.numeroItem} de ${processo.numero_controle_pncp}:`,
+          erro,
+        ),
+    );
+
+    // Prazo vencido durante as consultas: mesma regra das demais buscas deste
+    // arquivo — a lista sai vazia (o chamador trata como "tente de novo"), não
+    // pela metade.
+    if (ctx.vencido()) return { candidatos: [], completo: false };
+
+    const candidatos: CandidatoSimilaridade[] = [];
+    selecionados.forEach((item, indice) => {
+      const resultado = resultados[indice];
+      if (!resultado?.valorUnitarioHomologado) return;
+
+      const dataReferencia =
+        dataPlausivel(resultado.dataResultado) ?? dataPlausivel(item.dataAtualizacao);
+      if (!dataReferencia) return;
+
+      candidatos.push({
+        tipoCandidato: "contratacao_publica",
+        fonteDescricao: limparDescricao(item.descricao),
+        fonteOrgaoOuId: orgaoNome,
+        fonteUrl: montarUrlEdital(processo),
+        valorUnitario: resultado.valorUnitarioHomologado,
+        dataReferencia,
+        unidade: item.unidadeMedida,
+        quantidade: resultado.quantidadeHomologada ?? item.quantidade,
+        identidadeContratacao: {
+          cnpjOrgao: identidade.cnpjOrgao,
+          ano: identidade.ano,
+          numeroSequencial: identidade.numeroSequencial,
+          numeroItem: item.numeroItem,
+        },
+      });
+    });
+
+    return { candidatos, completo };
+  } catch (err) {
+    console.error(
+      `[PNCP] Erro ao listar itens da contratação ${processo.numero_controle_pncp}:`,
+      err,
+    );
+    return { candidatos: [], completo: false };
   } finally {
     ctx.encerrar();
   }
