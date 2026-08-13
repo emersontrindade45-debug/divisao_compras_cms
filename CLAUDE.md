@@ -877,3 +877,16 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     descompasso segue aberto em `parsePlanilha.ts` (a planilha da Câmara pode trazer "1.000" como
     texto), e foi deixado intocado de propósito: mexer ali muda ingestão em produção e é tarefa
     própria, não efeito colateral.
+71. **`break-words`/`whitespace-normal` num filho não desfaz `whitespace-nowrap` herdado de um
+    ancestral — são propriedades CSS diferentes, e a primeira correção tratou a errada.** O
+    `TableCell` (`ui/table.tsx`) aplica `whitespace-nowrap` por padrão em todo `<td>`; a célula
+    expandida do roteiro de cálculo (`colSpan={8}`) passava só `className="p-2"`, sem sobrescrever
+    isso, então o `<p>` da memória de cálculo — mesmo com `break-words` — herdava `nowrap` do `<td>`
+    e ficava preso numa linha só, cortada por overflow. A primeira tentativa de correção (envolver o
+    conteúdo em `grid grid-cols-1` para impedir que o texto sem largura definida inflasse a tabela
+    inteira) resolvia um sintoma real — mas diferente do que o usuário via — e o problema persistiu
+    idêntico depois do deploy. Diagnóstico correto: ler o componente de UI de terceiros usado
+    (`TableCell`) antes de mexer no chamador, porque a classe padrão de um componente compartilhado é
+    tão candidata a causa quanto o código que acabou de mudar. Verificado com repro isolado via
+    Playwright (`boundingBox().height`: 18px numa linha só vs. 54px em 3 linhas após
+    `whitespace-normal`) antes de reportar como corrigido — não só por leitura do CSS.

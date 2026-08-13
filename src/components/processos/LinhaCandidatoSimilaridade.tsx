@@ -160,7 +160,7 @@ export function LinhaCandidatoSimilaridade({
       </TableRow>
       {editando && (
         <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={8} className="p-2">
+          <TableCell colSpan={8} className="p-2 whitespace-normal">
             {/* `grid grid-cols-1` (Tailwind: track = minmax(0,1fr)) impede que o
                 texto sem quebra da memória de cálculo dite a largura da célula —
                 numa tabela de layout automático, um filho de bloco comum faria
