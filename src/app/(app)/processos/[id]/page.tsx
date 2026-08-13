@@ -165,22 +165,20 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
         processo={processoMapeado}
         acoes={
           <>
+            <ConformidadePanel conformidade={conformidade} processoId={processo.id} />
             <ExcluirProcessoDialog processoId={processo.id} numero={processo.numero} />
             <AssistenteToggle rotulo="Assistente" />
           </>
         }
       />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <ProcessoTabs
-          processo={processoMapeado}
-          conformidade={conformidade}
-          fontes={fontes}
-          cotacoes={cotacoes}
-          serie={serie}
-          fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
-        />
-        <ConformidadePanel conformidade={conformidade} processoId={processo.id} />
-      </div>
+      <ProcessoTabs
+        processo={processoMapeado}
+        conformidade={conformidade}
+        fontes={fontes}
+        cotacoes={cotacoes}
+        serie={serie}
+        fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
+      />
     </div>
   );
 }

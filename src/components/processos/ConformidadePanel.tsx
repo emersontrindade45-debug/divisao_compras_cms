@@ -1,6 +1,10 @@
+"use client";
+
 import Link from "next/link";
 import { AlertTriangle, Check, Minus, ShieldCheck, X } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type {
   ConformidadeProcesso,
   EstadoItemConformidade,
@@ -29,11 +33,13 @@ const ROTULO: Record<EstadoItemConformidade, string> = {
 };
 
 /**
- * Checklist vivo de conformidade com a IN 65/2021, ao lado do processo.
+ * Checklist de conformidade com a IN 65/2021, ao lado do título do processo.
  *
  * Responde a pergunta que o servidor faz o tempo todo — "já posso fechar?" —
- * sem exigir que ele saiba a norma de cor. Cada linha aponta para a etapa em
- * que a pendência se resolve.
+ * sem exigir que ele saiba a norma de cor. Vive atrás de um gatilho compacto
+ * (não de um card fixo na página) porque é material de consulta ocasional:
+ * como card sempre visível, disputava 20rem de largura com o conteúdo
+ * principal e com o assistente, justo quando os dois mais precisam do espaço.
  */
 export function ConformidadePanel({
   conformidade,
@@ -47,52 +53,74 @@ export function ConformidadePanel({
   ).length;
   const impeditivos = conformidade.itens.some((i) => i.estado === "bloqueio");
 
+  const resumo =
+    pendencias === 0
+      ? "Nenhuma pendência registrada."
+      : impeditivos
+        ? `${pendencias} pendência(s), com item impeditivo.`
+        : `${pendencias} pendência(s) a resolver.`;
+
   return (
-    <Card className="lg:sticky lg:top-6">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <ShieldCheck className="size-4" />
-          Conformidade IN 65/2021
-        </CardTitle>
-        <p className="text-xs text-muted-foreground">
-          {pendencias === 0
-            ? "Nenhuma pendência registrada."
-            : impeditivos
-              ? `${pendencias} pendência(s), com item impeditivo.`
-              : `${pendencias} pendência(s) a resolver.`}
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-1 pb-4">
-        {conformidade.itens.map((item) => {
-          const Icone = ICONE[item.estado];
-          return (
-            <Link
-              key={item.codigo}
-              href={`/processos/${processoId}?etapa=${item.etapaAlvo}`}
-              className="flex items-start gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-muted/60"
-            >
-              <span
-                className={cn(
-                  "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full",
-                  CLASSE_ICONE[item.estado],
-                )}
-                aria-hidden
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button variant="outline" size="sm" className="gap-2">
+            <ShieldCheck
+              className={cn(
+                "size-4",
+                pendencias === 0
+                  ? "text-success"
+                  : impeditivos
+                    ? "text-danger-strong"
+                    : "text-warning-foreground dark:text-warning",
+              )}
+              aria-hidden
+            />
+            <span className="hidden sm:inline">Conformidade</span>
+            {pendencias > 0 && (
+              <Badge variant={impeditivos ? "destructive" : "outline"}>{pendencias}</Badge>
+            )}
+          </Button>
+        }
+      />
+      <PopoverContent align="end">
+        <div className="border-b px-4 py-3">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <ShieldCheck className="size-4" aria-hidden />
+            Conformidade IN 65/2021
+          </p>
+          <p className="text-xs text-muted-foreground">{resumo}</p>
+        </div>
+        <div className="space-y-1 p-2">
+          {conformidade.itens.map((item) => {
+            const Icone = ICONE[item.estado];
+            return (
+              <Link
+                key={item.codigo}
+                href={`/processos/${processoId}?etapa=${item.etapaAlvo}`}
+                className="flex items-start gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-muted/60"
               >
-                <Icone className="size-3" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-xs font-medium">
-                  {item.titulo}
-                  <span className="sr-only"> — {ROTULO[item.estado]}</span>
+                <span
+                  className={cn(
+                    "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full",
+                    CLASSE_ICONE[item.estado],
+                  )}
+                  aria-hidden
+                >
+                  <Icone className="size-3" />
                 </span>
-                <span className="block text-xs text-muted-foreground">
-                  {item.detalhe}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-medium">
+                    {item.titulo}
+                    <span className="sr-only"> — {ROTULO[item.estado]}</span>
+                  </span>
+                  <span className="block text-xs text-muted-foreground">{item.detalhe}</span>
                 </span>
-              </span>
-            </Link>
-          );
-        })}
-      </CardContent>
-    </Card>
+              </Link>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

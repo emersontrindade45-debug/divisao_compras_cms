@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ConformidadePanel } from "../ConformidadePanel";
 import { avaliarConformidade, type ConformidadeInput } from "@/lib/domain/conformidade";
@@ -18,15 +18,22 @@ function conformidade(overrides: Partial<ConformidadeInput> = {}) {
   });
 }
 
+/** Abre o popover — a lista de itens só existe no DOM depois do clique no gatilho. */
+function abrir() {
+  fireEvent.click(screen.getByRole("button", { name: /conformidade/i }));
+}
+
 describe("ConformidadePanel", () => {
-  it("renderiza uma linha por item de conformidade", () => {
+  it("renderiza uma linha por item de conformidade ao abrir", () => {
     const c = conformidade();
     render(<ConformidadePanel conformidade={c} processoId="p1" />);
+    abrir();
     expect(screen.getAllByRole("link")).toHaveLength(c.itens.length);
   });
 
   it("cada linha aponta para a etapa em que a pendência se resolve", () => {
     render(<ConformidadePanel conformidade={conformidade()} processoId="p1" />);
+    abrir();
     const links = screen.getAllByRole("link");
     for (const link of links) {
       expect(link.getAttribute("href")).toMatch(
@@ -35,8 +42,11 @@ describe("ConformidadePanel", () => {
     }
   });
 
-  it("resume as pendências no cabeçalho", () => {
-    render(<ConformidadePanel conformidade={conformidade()} processoId="p1" />);
+  it("resume as pendências no gatilho e no popover", () => {
+    const c = conformidade();
+    render(<ConformidadePanel conformidade={c} processoId="p1" />);
+    expect(screen.getByRole("button", { name: /conformidade/i })).toBeInTheDocument();
+    abrir();
     expect(screen.getByText(/pendência/i)).toBeInTheDocument();
   });
 
@@ -53,6 +63,7 @@ describe("ConformidadePanel", () => {
       ],
     });
     render(<ConformidadePanel conformidade={c} processoId="p1" />);
+    abrir();
     expect(screen.getByText(/item impeditivo/i)).toBeInTheDocument();
   });
 
@@ -70,12 +81,14 @@ describe("ConformidadePanel", () => {
       serie: { precosIncluidos: 3, valorEstimado: 100, coeficienteVariacao: 8 },
     });
     render(<ConformidadePanel conformidade={c} processoId="p1" />);
+    abrir();
     expect(screen.getByText(/nenhuma pendência/i)).toBeInTheDocument();
   });
 
   it("mostra o detalhe de cada item, não só o título", () => {
     const c = conformidade();
     render(<ConformidadePanel conformidade={c} processoId="p1" />);
+    abrir();
     expect(screen.getByText(/registrar justificativa nos autos/i)).toBeInTheDocument();
     expect(screen.getByText(/nenhuma fonte registrada ainda/i)).toBeInTheDocument();
   });
