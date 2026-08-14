@@ -417,6 +417,51 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
   // Busca externa
   // -------------------------------------------------------------------------
 
+  /**
+   * Empurra para o fim os candidatos cuja URL já foi descartada pelo analista
+   * neste processo — sem excluir nenhum. `total`/`encontrados` continuam
+   * intactos; só a ORDEM muda, e só entre eles mesmos e o resto (estável:
+   * preserva a ordem relativa dentro de cada grupo).
+   *
+   * **Por que demover, não filtrar.** Até 2026-08-11 (commit eb9cf46) um
+   * candidato descartado era EXCLUÍDO da busca para sempre: o analista mudava
+   * de ideia e não tinha como reaproveitar, porque o card nunca mais aparecia.
+   * A demoção preserva essa correção — o card ainda pode aparecer — e ataca o
+   * problema oposto, medido em 2026-08-14 pela régua de
+   * `scripts/avaliar-busca-pncp.ts`: sem nenhum sinal de descarte na ordem,
+   * 76-79% dos candidatos já descartados reapareciam dentro do corte de 25,
+   * empurrando candidato nunca visto para fora só porque o edital dele chegou
+   * depois na busca textual do PNCP.
+   *
+   * **Por que é seguro para o recall.** Um candidato só entra no conjunto
+   * demovido se JÁ tem `descartado: true` no banco — decisão humana anterior,
+   * não inferência de texto. Um candidato "fonte" (virou preço) ou "mantido"
+   * nunca é `descartado`, então esta função não pode empurrá-lo: ao contrário
+   * do primeiro fix tentado aqui (reordenar por contagem de token, revertido
+   * por derrubar a visibilidade de candidatos-fonte com correspondência
+   * textual fraca — ver histórico do commit), este não tem como confundir
+   * "texto parecido pouco" com "já julgado ruim".
+   */
+  async function demoverJaDescartados(
+    processoId: string | null,
+    candidatos: CandidatoSimilaridade[],
+  ): Promise<CandidatoSimilaridade[]> {
+    if (!processoId || candidatos.length === 0) return candidatos;
+
+    const descartados = await db.resultadoSimilaridade.findMany({
+      where: { item: { processoId }, descartado: true, fonteUrl: { not: null } },
+      select: { fonteUrl: true },
+    });
+    const urlsDescartadas = new Set(
+      descartados.map((d) => d.fonteUrl).filter((u): u is string => Boolean(u)),
+    );
+    if (urlsDescartadas.size === 0) return candidatos;
+
+    const novos = candidatos.filter((c) => !c.fonteUrl || !urlsDescartadas.has(c.fonteUrl));
+    const jaDescartados = candidatos.filter((c) => c.fonteUrl && urlsDescartadas.has(c.fonteUrl));
+    return [...novos, ...jaDescartados];
+  }
+
   async function buscarPncp(
     termo: string,
     itemIdSugerido: string | null,
@@ -424,17 +469,13 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     valorMaximo?: number,
   ) {
     const temFiltroValor = valorMinimo !== undefined || valorMaximo !== undefined;
-    const encontrados = await buscarContratosPNCP(termo, { valorMinimo, valorMaximo });
+    const buscados = await buscarContratosPNCP(termo, { valorMinimo, valorMaximo });
+    const encontrados = await demoverJaDescartados(ctx.processoId, buscados);
 
-    // Todos os candidatos devolvidos pelo PNCP viram card, mesmo que o analista
-    // tenha descartado esse contrato numa busca anterior. O filtro por URL
-    // descartada foi removido porque impedia o analista de mudar de ideia: ele
-    // clicava "Descartar", depois queria adicionar aquele contrato, mas ele
-    // sumia permanentemente das pesquisas seguintes (nunca virava card de novo,
-    // só aparecia no texto do modelo — sem botão para adicionar).
-    // O botão "Descartar" no card ainda existe para remover da tela os que não
-    // interessam nesta sessão, mas o histórico de descartes não bloqueia mais
-    // o surgimento do card em buscas novas.
+    // Nenhum candidato é excluído por já ter sido descartado numa busca
+    // anterior — o card continua podendo aparecer, e o analista pode mudar de
+    // ideia. `demoverJaDescartados` só reordena: candidatos já descartados vão
+    // para o fim, para não ocupar o corte de 25 na frente de algo nunca visto.
     if (encontrados.length === 0) {
       return {
         resposta: {

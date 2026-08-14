@@ -1397,3 +1397,57 @@ candidato sem roteiro como grandeza distinta (em vez de unitária) derruba o tes
 > analista escolhe um roteiro com passos de TR. A instrução processual precisa declarar isso —
 > a memória de cálculo redigida automaticamente já inclui essa frase ("valor do escopo do TR no
 > período"). Produção pendente: aplicar `/api/admin/migrate` após o deploy (CLAUDE.md §9.19).
+
+## M22 — Régua de avaliação da busca PNCP e demoção de candidatos já descartados (2026-08-14)
+
+Origem: sessão anterior deixou uma pergunta em aberto — a busca `buscar_pncp` do assistente tem
+"lacunas de inteligência" reais, ou é impressão? Até aqui não havia número, só a sensação de que o
+analista via muito ruído. CLAUDE.md §7 exige responder "como você confirma que isso está correto?"
+antes de mexer — então a primeira entrega não foi código, foi instrumento de medição.
+
+**`scripts/avaliar-busca-pncp.ts` (novo, commitado agora — ficou pronto numa sessão anterior sem
+commit).** Reexecuta a busca real do PNCP para cada termo já usado em produção e mede recall contra
+o gabarito que o próprio analista já gerou clicando: `promovidoParaFonte` = positivo forte,
+`descartado` = negativo, nem um nem outro = positivo fraco. Métrica principal: `positivosVisiveis`
+(candidato bom aparece no corte de 25 que o assistente exibe). Sem isso, mudança de ranqueamento é
+injulgável — `pnpm test` passa igual antes e depois.
+
+**Baseline medida em 2026-08-14 (223 rótulos, 46 termos):** positivos visíveis 83%, mas
+**negativos visíveis 76%** — mais de 3 em cada 4 candidatos que o analista já descartou reaparecem
+no topo de uma busca nova. Medido (não suposto) por que: 49-51% dos negativos batem só 1 token
+discriminante do termo com a descrição do item, e o resultado final de `buscarContratosPNCP` é a
+concatenação simples dos editais na ordem que a busca textual do PNCP devolveu — sem
+reranqueamento cruzando editais, o IDF de `ranquearPorRelevancia` só ordena dentro de cada edital.
+
+**Primeira tentativa, revertida por dano medido.** Reordenar todos os candidatos (de todos os
+editais) por contagem de tokens discriminantes casados parecia a correção óbvia. Antes de
+implementar, medir a hipótese contra o gabarito real (CLAUDE.md §9.67) já mostrava risco: 20% dos
+candidatos que viraram FONTE de preço (o sinal mais forte que existe) também batem só 1 token —
+variação morfológica que o stemmer simples não cobre ("telha" vs "telhado"). Implementado, testado
+(63/63, mutação confirmada) e **medido de novo contra a régua**: negativos visíveis caíram, mas os
+3 candidatos-fonte de match fraco ficaram **todos invisíveis** (0/3) — o filtro léxico não distingue
+"pouco texto em comum porque é ruído" de "pouco texto em comum porque é sinônimo". Revertido
+inteiro (código e teste) antes de virar commit.
+
+**Fix que ficou: demoção por histórico de descarte, não por texto.** Em vez de inferir relevância do
+texto, usa a única fonte que não engana — decisão humana já registrada. `demoverJaDescartados`
+(`lib/assistente/ferramentas.ts`) busca as URLs que o analista já descartou **neste processo** e
+empurra esses candidatos para o fim da lista, preservando a ordem relativa dos dois grupos. Não
+exclui nada (mantém a correção do M20/commit `eb9cf46`: o analista pode mudar de ideia, o card
+ainda aparece) e por construção **não pode** atingir um candidato-fonte ou mantido — nenhum dos
+dois tem `descartado: true` no banco, então o conjunto demovido nunca os contém. Ao contrário do
+primeiro fix, a segurança aqui não depende de calibrar um limiar: é estrutural.
+
+**Verificação.** Unitário com mutação (removendo a chamada, 2 dos 3 testes novos caem — o terceiro,
+"não consulta na conversa global", corretamente não depende da chamada). Como a régua chama
+`buscarContratosPNCP` direto — sem o wrapper de `ferramentas.ts`, que é quem tem o `processoId` —
+ela não exercita este fix; a validação real foi uma simulação determinística sobre os dados
+rotulados da baseline: reproduzir o particionamento exato de `demoverJaDescartados` (não-descartados
+mantêm posição relativa, descartados vão para o fim) sobre a posição registrada de cada candidato
+rotulado. Resultado: **negativos visíveis 81% → 9%**; **positivos visíveis 88% → 88%, sem nenhum
+piorar de posição** (a garantia estrutural, confirmada nos dados, não só no código). 925/925 testes
+da suíte, typecheck e lint limpos.
+
+**Pendência.** A régua real (não a simulação) não cobre este fix — para isso ela precisaria
+conhecer o `processoId` de origem de cada termo e reproduzir a demoção, não só chamar
+`buscarContratosPNCP`. Fica registrado como lacuna do instrumento, não do fix.

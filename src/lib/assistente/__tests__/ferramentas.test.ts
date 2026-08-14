@@ -263,6 +263,56 @@ describe("registry de ferramentas do assistente", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Descartados: reaparecem (M20/eb9cf46 — o analista pode mudar de ideia),
+  // mas perdem prioridade para não ocupar o corte de 25 na frente de um
+  // candidato nunca visto.
+  // -------------------------------------------------------------------------
+
+  describe("buscar_pncp — descartados não somem, só perdem prioridade", () => {
+    it("empurra candidato já descartado para o fim, sem excluí-lo", async () => {
+      mocks.buscarContratosPNCP.mockResolvedValue([
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/A" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/B" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/C" }),
+      ]);
+      mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+        { fonteUrl: "https://pncp.gov.br/app/editais/A" },
+      ]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      const urls = (resposta.candidatos as Array<{ url: string }>).map((c) => c.url);
+      expect(urls).toEqual([
+        "https://pncp.gov.br/app/editais/B",
+        "https://pncp.gov.br/app/editais/C",
+        "https://pncp.gov.br/app/editais/A",
+      ]);
+      // Nada foi excluído: os 3 continuam no total.
+      expect(resposta.total).toBe(3);
+    });
+
+    it("consulta os descartes só deste processo, com URL não nula", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(mocks.db.resultadoSimilaridade.findMany).toHaveBeenCalledWith({
+        where: { item: { processoId: "proc-1" }, descartado: true, fonteUrl: { not: null } },
+        select: { fonteUrl: true },
+      });
+    });
+
+    it("não consulta descartes na conversa global (sem processoId)", async () => {
+      const registry = montarRegistry(CTX_GLOBAL);
+
+      await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(mocks.db.resultadoSimilaridade.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Filtro de valor: o PNCP não tem esse parâmetro nativamente (ver pncp.ts),
   // o modelo só pode pedir a faixa — quem filtra é buscarContratosPNCP.
   // -------------------------------------------------------------------------
