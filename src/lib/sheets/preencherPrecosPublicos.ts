@@ -5,6 +5,9 @@ const MAX_PRECOS_POR_ITEM = 5;
 // Tamanho de fonte padrão do Sheets quando a célula não tem formatação
 // explícita — usado só se a leitura do cabeçalho não devolver um valor.
 const TAMANHO_FONTE_PADRAO = 10;
+// Fixo por pedido do usuário (não mais 50% da fonte do rótulo "Preço
+// Público" — a metade ficava pequena demais para ler o nome do órgão).
+const TAMANHO_FONTE_ORGAO = 8;
 const LIMITE_NOME_ORGAO = 45;
 
 export interface PrecoParaPreencher {
@@ -197,9 +200,9 @@ async function descobrirTamanhoFonteBase(
  * Só escreve em cédulas de valor VAZIAS (nunca sobrescreve preço já
  * lançado ali, manual ou de sincronização anterior) e, ao escrever, também
  * atualiza o cabeçalho daquela coluna para "Preço Público N - Órgão", com
- * o nome do órgão em fonte 50% menor que o rótulo — feito via
- * `textFormatRuns`, que o `values.batchUpdate` (usado para os valores) não
- * suporta.
+ * o nome do órgão em fonte fixa (`TAMANHO_FONTE_ORGAO`), menor que o rótulo
+ * — feito via `textFormatRuns`, que o `values.batchUpdate` (usado para os
+ * valores) não suporta.
  *
  * Limitação conhecida: o rótulo do cabeçalho é por COLUNA, não por linha —
  * numa planilha com vários itens compartilhando as mesmas colunas de preço
@@ -234,7 +237,6 @@ export async function preencherPrecosPublicos(
     linhaCabecalho,
     colunasPrecoPublico[0]!,
   );
-  const fonteOrgao = Math.max(1, Math.round(fonteBase / 2));
 
   const dataValores: { range: string; values: number[][] }[] = [];
   const cabecalhosParaAtualizar = new Map<number, string>(); // colIdx -> texto completo
@@ -290,7 +292,7 @@ export async function preencherPrecosPublicos(
                   userEnteredValue: { stringValue: texto },
                   textFormatRuns: [
                     { startIndex: 0, format: { fontSize: fonteBase } },
-                    { startIndex: prefixoLen, format: { fontSize: fonteOrgao } },
+                    { startIndex: prefixoLen, format: { fontSize: TAMANHO_FONTE_ORGAO } },
                   ],
                 },
               ],

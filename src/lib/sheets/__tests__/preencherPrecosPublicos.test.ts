@@ -101,7 +101,7 @@ describe("preencherPrecosPublicos", () => {
     );
     expect(cellData.textFormatRuns).toEqual([
       { startIndex: 0, format: { fontSize: 12 } },
-      { startIndex: "Preço Público I - ".length, format: { fontSize: 6 } },
+      { startIndex: "Preço Público I - ".length, format: { fontSize: 8 } },
     ]);
     expect(requests[0].updateCells.range).toEqual({
       sheetId: 42,

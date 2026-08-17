@@ -44,6 +44,13 @@ export async function sincronizarItemComPlanilha(
         descricao: true,
         processo: { select: { planilhaOrigemUrl: true } },
         resultadosSimilaridade: {
+          // Candidato descartado continua na tabela (não é excluído — ver
+          // commit "Demove candidatos já descartados"), só marcado com
+          // `descartado: true` e normalmente `scoreFinal: 0`. Sem este
+          // `where`, um item com poucos candidatos ativos deixava descartado
+          // preencher as vagas do top-5, entrando na planilha como se fosse
+          // fonte válida.
+          where: { descartado: false },
           orderBy: { scoreFinal: "desc" },
           take: MAX_PRECOS_POR_ITEM,
           select: { valorUnitario: true, valorConsiderado: true, fonteOrgaoOuId: true },
@@ -131,6 +138,7 @@ export async function preencherCotacao(
     select: {
       descricao: true,
       resultadosSimilaridade: {
+        where: { descartado: false },
         orderBy: { scoreFinal: "desc" },
         take: MAX_PRECOS_POR_ITEM,
         select: { valorUnitario: true, valorConsiderado: true, fonteOrgaoOuId: true },

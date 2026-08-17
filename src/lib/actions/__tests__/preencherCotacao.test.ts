@@ -83,6 +83,20 @@ describe("preencherCotacao", () => {
     expect(relacao.select).toHaveProperty("valorUnitario", true);
   });
 
+  // Achado em produção (2026-08-17): candidato descartado não é excluído da
+  // tabela, só marcado `descartado: true` (normalmente com `scoreFinal: 0`).
+  // Sem filtrar isso na consulta, um item com poucos candidatos ativos
+  // deixava descartado preencher as vagas do top-5 e ir para a planilha como
+  // se fosse fonte válida — foi o que aconteceu no processo 13915/2024.
+  it("exclui candidato descartado da consulta que alimenta a planilha", async () => {
+    await preencherCotacao("proc-1");
+
+    const argumento = mocks.db.item.findMany.mock.calls[0]![0] as {
+      select: { resultadosSimilaridade: { where?: Record<string, unknown> } };
+    };
+    expect(argumento.select.resultadosSimilaridade.where).toEqual({ descartado: false });
+  });
+
   it("envia à planilha só os preços dos candidatos, na ordem de score", async () => {
     await preencherCotacao("proc-1");
 
@@ -199,6 +213,15 @@ describe("sincronizarItemComPlanilha", () => {
       },
     ]);
     expect(res).toEqual({ sincronizado: true });
+  });
+
+  it("exclui candidato descartado da consulta usada na sincronização automática", async () => {
+    await sincronizarItemComPlanilha("item-1");
+
+    const argumento = mocks.db.item.findUnique.mock.calls[0]![0] as {
+      select: { resultadosSimilaridade: { where?: Record<string, unknown> } };
+    };
+    expect(argumento.select.resultadosSimilaridade.where).toEqual({ descartado: false });
   });
 
   it("usa o valor ajustado pelo roteiro de cálculo, quando existir, no lugar do bruto", async () => {
