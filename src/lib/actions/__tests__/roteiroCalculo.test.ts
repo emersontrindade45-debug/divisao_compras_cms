@@ -231,12 +231,15 @@ describe("salvarRoteiroCalculo", () => {
     mocks.db.item.findUnique.mockResolvedValue({
       descricao: "Item de teste",
       processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
-      resultadosSimilaridade: [{ valorUnitario: 6.89, valorConsiderado: 25906.4 }],
+      resultadosSimilaridade: [
+        { valorUnitario: 6.89, valorConsiderado: 25906.4, fonteOrgaoOuId: "Órgão A" },
+      ],
     });
     mocks.extrairSpreadsheetId.mockReturnValue("abc");
     mocks.preencherPrecosPublicos.mockResolvedValue({
       linhasPreenchidas: 1,
       linhasNaoEncontradas: [],
+      itensSemColunaDisponivel: [],
       abaUtilizada: "Cotação",
     });
 
@@ -247,7 +250,7 @@ describe("salvarRoteiroCalculo", () => {
     });
 
     expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
-      { descricao: "Item de teste", precos: [25906.4] },
+      { descricao: "Item de teste", precos: [{ valor: 25906.4, orgao: "Órgão A" }] },
     ]);
     expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -331,19 +334,22 @@ describe("limparRoteiroCalculo", () => {
     mocks.db.item.findUnique.mockResolvedValue({
       descricao: "Item de teste",
       processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
-      resultadosSimilaridade: [{ valorUnitario: 6.89, valorConsiderado: null }],
+      resultadosSimilaridade: [
+        { valorUnitario: 6.89, valorConsiderado: null, fonteOrgaoOuId: "Órgão A" },
+      ],
     });
     mocks.extrairSpreadsheetId.mockReturnValue("abc");
     mocks.preencherPrecosPublicos.mockResolvedValue({
       linhasPreenchidas: 1,
       linhasNaoEncontradas: [],
+      itensSemColunaDisponivel: [],
       abaUtilizada: "Cotação",
     });
 
     await limparRoteiroCalculo(RESULTADO_ID);
 
     expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
-      { descricao: "Item de teste", precos: [6.89] },
+      { descricao: "Item de teste", precos: [{ valor: 6.89, orgao: "Órgão A" }] },
     ]);
   });
 });

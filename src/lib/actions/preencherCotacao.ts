@@ -16,6 +16,7 @@ export interface PreencherCotacaoResultado {
   itensPreenchidos: number;
   itensSemCandidato: number;
   itensSemLinhaCorrespondente: string[];
+  itensSemColunaDisponivel: string[];
 }
 
 export interface SincronizarItemResultado {
@@ -45,7 +46,7 @@ export async function sincronizarItemComPlanilha(
         resultadosSimilaridade: {
           orderBy: { scoreFinal: "desc" },
           take: MAX_PRECOS_POR_ITEM,
-          select: { valorUnitario: true, valorConsiderado: true },
+          select: { valorUnitario: true, valorConsiderado: true, fonteOrgaoOuId: true },
         },
       },
     });
@@ -69,16 +70,21 @@ export async function sincronizarItemComPlanilha(
         // bruto publicado pela fonte — mesma prioridade usada ao promover
         // para Fonte (`promoverFonte.ts`). Sem isso, um ajuste feito depois
         // da promoção nunca chegaria à planilha.
-        precos: item.resultadosSimilaridade.map((r) =>
-          valorUnitarioEfetivo({
+        precos: item.resultadosSimilaridade.map((r) => ({
+          valor: valorUnitarioEfetivo({
             valorUnitario: Number(r.valorUnitario),
             valorConsiderado: r.valorConsiderado == null ? null : Number(r.valorConsiderado),
           }),
-        ),
+          orgao: r.fonteOrgaoOuId,
+        })),
       },
     ]);
     if (resultado.linhasPreenchidas === 0) {
-      return { sincronizado: false, motivo: "Item sem linha correspondente na planilha" };
+      const motivo =
+        resultado.itensSemColunaDisponivel.length > 0
+          ? "Nenhuma coluna 'Preço Público' vazia disponível na planilha para este item"
+          : "Item sem linha correspondente na planilha";
+      return { sincronizado: false, motivo };
     }
     return { sincronizado: true };
   } catch (err) {
@@ -127,7 +133,7 @@ export async function preencherCotacao(
       resultadosSimilaridade: {
         orderBy: { scoreFinal: "desc" },
         take: MAX_PRECOS_POR_ITEM,
-        select: { valorUnitario: true, valorConsiderado: true },
+        select: { valorUnitario: true, valorConsiderado: true, fonteOrgaoOuId: true },
       },
     },
   });
@@ -140,12 +146,13 @@ export async function preencherCotacao(
     descricao: item.descricao,
     // Valor ajustado pelo roteiro de cálculo (TR), quando existir, no lugar
     // do bruto publicado pela fonte — mesma prioridade de `promoverFonte.ts`.
-    precos: item.resultadosSimilaridade.map((r) =>
-      valorUnitarioEfetivo({
+    precos: item.resultadosSimilaridade.map((r) => ({
+      valor: valorUnitarioEfetivo({
         valorUnitario: Number(r.valorUnitario),
         valorConsiderado: r.valorConsiderado === null ? null : Number(r.valorConsiderado),
       }),
-    ),
+      orgao: r.fonteOrgaoOuId,
+    })),
   }));
 
   let resultado;
@@ -159,6 +166,7 @@ export async function preencherCotacao(
 
   const itensSemCandidato = itensParaPreencher.filter((i) => i.precos.length === 0).length;
   const itensSemLinhaCorrespondente = resultado.linhasNaoEncontradas.map((l) => l.descricao);
+  const itensSemColunaDisponivel = resultado.itensSemColunaDisponivel.map((l) => l.descricao);
 
   await registrarAuditoria({
     userId: user.id,
@@ -171,6 +179,7 @@ export async function preencherCotacao(
       itensPreenchidos: resultado.linhasPreenchidas,
       itensSemCandidato,
       itensSemLinhaCorrespondente,
+      itensSemColunaDisponivel,
     },
   });
 
@@ -182,6 +191,7 @@ export async function preencherCotacao(
       itensPreenchidos: resultado.linhasPreenchidas,
       itensSemCandidato,
       itensSemLinhaCorrespondente,
+      itensSemColunaDisponivel,
     },
   };
 }

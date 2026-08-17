@@ -38,14 +38,15 @@ describe("preencherCotacao", () => {
       {
         descricao: "Cadeira giratória",
         resultadosSimilaridade: [
-          { valorUnitario: 850.5, valorConsiderado: null },
-          { valorUnitario: 910, valorConsiderado: null },
+          { valorUnitario: 850.5, valorConsiderado: null, fonteOrgaoOuId: "Órgão A" },
+          { valorUnitario: 910, valorConsiderado: null, fonteOrgaoOuId: "Órgão B" },
         ],
       },
     ]);
     mocks.preencherPrecosPublicos.mockResolvedValue({
       linhasPreenchidas: 1,
       linhasNaoEncontradas: [],
+      itensSemColunaDisponivel: [],
       abaUtilizada: "Cotação",
     });
   });
@@ -86,7 +87,13 @@ describe("preencherCotacao", () => {
     await preencherCotacao("proc-1");
 
     expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
-      { descricao: "Cadeira giratória", precos: [850.5, 910] },
+      {
+        descricao: "Cadeira giratória",
+        precos: [
+          { valor: 850.5, orgao: "Órgão A" },
+          { valor: 910, orgao: "Órgão B" },
+        ],
+      },
     ]);
   });
 
@@ -95,8 +102,8 @@ describe("preencherCotacao", () => {
       {
         descricao: "Cadeira giratória",
         resultadosSimilaridade: [
-          { valorUnitario: 850.5, valorConsiderado: 1200 },
-          { valorUnitario: 910, valorConsiderado: null },
+          { valorUnitario: 850.5, valorConsiderado: 1200, fonteOrgaoOuId: "Órgão A" },
+          { valorUnitario: 910, valorConsiderado: null, fonteOrgaoOuId: "Órgão B" },
         ],
       },
     ]);
@@ -104,7 +111,13 @@ describe("preencherCotacao", () => {
     await preencherCotacao("proc-1");
 
     expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
-      { descricao: "Cadeira giratória", precos: [1200, 910] },
+      {
+        descricao: "Cadeira giratória",
+        precos: [
+          { valor: 1200, orgao: "Órgão A" },
+          { valor: 910, orgao: "Órgão B" },
+        ],
+      },
     ]);
   });
 
@@ -160,14 +173,15 @@ describe("sincronizarItemComPlanilha", () => {
       descricao: "Cadeira giratória",
       processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
       resultadosSimilaridade: [
-        { valorUnitario: 850.5, valorConsiderado: null },
-        { valorUnitario: 910, valorConsiderado: null },
+        { valorUnitario: 850.5, valorConsiderado: null, fonteOrgaoOuId: "Órgão A" },
+        { valorUnitario: 910, valorConsiderado: null, fonteOrgaoOuId: "Órgão B" },
       ],
     });
     mocks.extrairSpreadsheetId.mockReturnValue("abc");
     mocks.preencherPrecosPublicos.mockResolvedValue({
       linhasPreenchidas: 1,
       linhasNaoEncontradas: [],
+      itensSemColunaDisponivel: [],
       abaUtilizada: "Cotação",
     });
   });
@@ -176,7 +190,13 @@ describe("sincronizarItemComPlanilha", () => {
     const res = await sincronizarItemComPlanilha("item-1");
 
     expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
-      { descricao: "Cadeira giratória", precos: [850.5, 910] },
+      {
+        descricao: "Cadeira giratória",
+        precos: [
+          { valor: 850.5, orgao: "Órgão A" },
+          { valor: 910, orgao: "Órgão B" },
+        ],
+      },
     ]);
     expect(res).toEqual({ sincronizado: true });
   });
@@ -185,13 +205,15 @@ describe("sincronizarItemComPlanilha", () => {
     mocks.db.item.findUnique.mockResolvedValue({
       descricao: "Cadeira giratória",
       processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
-      resultadosSimilaridade: [{ valorUnitario: 850.5, valorConsiderado: 25906.4 }],
+      resultadosSimilaridade: [
+        { valorUnitario: 850.5, valorConsiderado: 25906.4, fonteOrgaoOuId: "Órgão A" },
+      ],
     });
 
     await sincronizarItemComPlanilha("item-1");
 
     expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
-      { descricao: "Cadeira giratória", precos: [25906.4] },
+      { descricao: "Cadeira giratória", precos: [{ valor: 25906.4, orgao: "Órgão A" }] },
     ]);
   });
 
@@ -199,7 +221,7 @@ describe("sincronizarItemComPlanilha", () => {
     mocks.db.item.findUnique.mockResolvedValue({
       descricao: "Cadeira giratória",
       processo: { planilhaOrigemUrl: null },
-      resultadosSimilaridade: [{ valorUnitario: 850.5 }],
+      resultadosSimilaridade: [{ valorUnitario: 850.5, fonteOrgaoOuId: "Órgão A" }],
     });
 
     const res = await sincronizarItemComPlanilha("item-1");

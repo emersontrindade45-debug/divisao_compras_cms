@@ -289,19 +289,23 @@ describe("promoverResultadoSimilaridade", () => {
     mocks.db.item.findUnique.mockResolvedValue({
       descricao: "Aquisição de cadeiras ergonômicas",
       processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
-      resultadosSimilaridade: [{ valorUnitario: 850.5 }],
+      resultadosSimilaridade: [{ valorUnitario: 850.5, fonteOrgaoOuId: "Órgão A" }],
     });
     mocks.extrairSpreadsheetId.mockReturnValue("abc");
     mocks.preencherPrecosPublicos.mockResolvedValue({
       linhasPreenchidas: 1,
       linhasNaoEncontradas: [],
+      itensSemColunaDisponivel: [],
       abaUtilizada: "Cotação",
     });
 
     await promoverResultadoSimilaridade(RESULTADO_ID);
 
     expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
-      { descricao: "Aquisição de cadeiras ergonômicas", precos: [850.5] },
+      {
+        descricao: "Aquisição de cadeiras ergonômicas",
+        precos: [{ valor: 850.5, orgao: "Órgão A" }],
+      },
     ]);
     expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
       expect.objectContaining({
