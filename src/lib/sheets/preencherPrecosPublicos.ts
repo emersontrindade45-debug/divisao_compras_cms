@@ -4,6 +4,19 @@ import { getSheetsClient } from "./googleAuth";
 const MAX_PRECOS_POR_ITEM = 5;
 // Colunas M a Q ("PREÇO PÚBLICO I" a "V") na planilha modelo de mediana.
 const COLUNAS_PRECO_PUBLICO = ["M", "N", "O", "P", "Q"] as const;
+// Índice 0-based de cada coluna (A=0): usado para ler o valor atual da célula
+// antes de decidir se arquiva. M=12, R=17.
+const INDICE_COLUNA_PRECO_PUBLICO = 12;
+const INDICE_COLUNA_ARQUIVO = 17;
+// Onde os valores de M:Q são copiados antes de serem sobrescritos, quando a
+// linha já tinha algo ali (digitado à mão ou de uma sincronização anterior a
+// esta proteção existir). Sem isso, a escrita automática ao promover um
+// candidato (`promoverFonte.ts`, `roteiroCalculo.ts`) apagava silenciosamente
+// qualquer preço que já estivesse na planilha, sem deixar rastro do valor
+// anterior. Só arquiva na PRIMEIRA vez que a linha é tocada — se R:V já tem
+// conteúdo, a origem já foi preservada, e as escritas seguintes em M:Q são do
+// próprio sistema (recuperáveis reexecutando a busca), não dado manual.
+const COLUNAS_ARQUIVO_ANTERIOR = ["R", "S", "T", "U", "V"] as const;
 
 export interface ItemParaPreencher {
   descricao: string;
@@ -75,6 +88,9 @@ async function localizarAbaDeDados(
  * Preenche as colunas de Preço Público (M-Q) na planilha real do processo
  * (sincronizada previamente), detectando automaticamente a aba de dados e
  * casando cada item pelo texto da coluna MATERIAL — nunca por posição.
+ *
+ * Antes de sobrescrever uma linha que já tinha valor em M-Q, copia o que
+ * estava lá para R-V (só na primeira vez — ver `COLUNAS_ARQUIVO_ANTERIOR`).
  */
 export async function preencherPrecosPublicos(
   spreadsheetId: string,
@@ -84,8 +100,12 @@ export async function preencherPrecosPublicos(
   const { aba, valores, colunaMaterial } = await localizarAbaDeDados(spreadsheetId);
   const linhaPorMaterial = localizarLinhas(valores, colunaMaterial);
 
-  const data: { range: string; values: number[][] }[] = [];
+  const data: { range: string; values: (number | string)[][] }[] = [];
   const linhasNaoEncontradas: LinhaNaoEncontrada[] = [];
+  // Contado à parte de `data.length`: uma linha arquivada gera DUAS entradas
+  // em `data` (arquivo + preço novo), e isso não pode inflar a contagem de
+  // "linhas preenchidas" que a UI e a auditoria mostram ao usuário.
+  let linhasPreenchidas = 0;
 
   for (const item of itens) {
     if (item.precos.length === 0) continue;
@@ -94,12 +114,30 @@ export async function preencherPrecosPublicos(
       linhasNaoEncontradas.push({ descricao: item.descricao });
       continue;
     }
+
+    const linhaAtual = valores[linha - 1] ?? [];
+    const precoPublicoAtual = COLUNAS_PRECO_PUBLICO.map(
+      (_, i) => (linhaAtual[INDICE_COLUNA_PRECO_PUBLICO + i] ?? "").trim(),
+    );
+    const arquivoAtual = COLUNAS_ARQUIVO_ANTERIOR.map(
+      (_, i) => (linhaAtual[INDICE_COLUNA_ARQUIVO + i] ?? "").trim(),
+    );
+    const temValorParaPerder = precoPublicoAtual.some((v) => v !== "");
+    const arquivoJaExiste = arquivoAtual.some((v) => v !== "");
+    if (temValorParaPerder && !arquivoJaExiste) {
+      data.push({
+        range: `'${aba}'!R${linha}:V${linha}`,
+        values: [precoPublicoAtual],
+      });
+    }
+
     const precos = item.precos.slice(0, MAX_PRECOS_POR_ITEM);
     const colunaFinal = COLUNAS_PRECO_PUBLICO[precos.length - 1];
     data.push({
       range: `'${aba}'!M${linha}:${colunaFinal}${linha}`,
       values: [precos],
     });
+    linhasPreenchidas += 1;
   }
 
   if (data.length > 0) {
@@ -109,5 +147,5 @@ export async function preencherPrecosPublicos(
     });
   }
 
-  return { abaUtilizada: aba, linhasPreenchidas: data.length, linhasNaoEncontradas };
+  return { abaUtilizada: aba, linhasPreenchidas, linhasNaoEncontradas };
 }
