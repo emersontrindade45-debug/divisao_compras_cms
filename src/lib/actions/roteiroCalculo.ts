@@ -13,6 +13,7 @@ import {
   type ParametrosTR,
 } from "@/lib/domain/roteiroCalculo";
 import { roteiroCalculoSchema } from "@/lib/validations/roteiroCalculo";
+import { sincronizarItemComPlanilha } from "./preencherCotacao";
 import type { ActionResult } from "./processos";
 
 // ---------------------------------------------------------------------------
@@ -203,6 +204,23 @@ export async function salvarRoteiroCalculo(
     },
   });
 
+  // Melhor esforço, mesmo padrão de `promoverFonte.ts`: o ajuste feito aqui já
+  // mudou o valor considerado do candidato (e da Fonte/PrecoConsolidado, se
+  // promovido); sem repetir a escrita, a planilha ficaria com o preço bruto
+  // antigo enquanto a memória de cálculo já mostra o valor ajustado.
+  const sincronizacao = await sincronizarItemComPlanilha(resultado.item.id);
+  await registrarAuditoria({
+    userId: user.id,
+    processoId: resultado.item.processoId,
+    acao: "sincronizar_planilha_automatico",
+    detalhes: {
+      itemId: resultado.item.id,
+      resultadoId: resultado.id,
+      sincronizado: sincronizacao.sincronizado,
+      motivo: sincronizacao.motivo ?? null,
+    },
+  });
+
   revalidatePath(`/processos/${resultado.item.processoId}`);
 
   return { data: { valorConsiderado: execucao.valorFinal } };
@@ -272,6 +290,19 @@ export async function limparRoteiroCalculo(
       itemId: resultado.item.id,
       valorRestaurado: Number(resultado.valorUnitario),
       propagadoParaSerie: resultado.promovidoParaFonte,
+    },
+  });
+
+  const sincronizacao = await sincronizarItemComPlanilha(resultado.item.id);
+  await registrarAuditoria({
+    userId: user.id,
+    processoId: resultado.item.processoId,
+    acao: "sincronizar_planilha_automatico",
+    detalhes: {
+      itemId: resultado.item.id,
+      resultadoId: resultado.id,
+      sincronizado: sincronizacao.sincronizado,
+      motivo: sincronizacao.motivo ?? null,
     },
   });
 

@@ -38,7 +38,8 @@ export function EtapaConsolidacao({
         </p>
         <a
           href={`/api/relatorios/${processoId}/pdf`}
-          download
+          target="_blank"
+          rel="noopener noreferrer"
           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
         >
           <Download className="size-3.5" />

@@ -87,7 +87,8 @@ export default async function RelatoriosPage() {
                   <div className="flex shrink-0 gap-2">
                     <a
                       href={`/api/relatorios/${p.id}/pdf`}
-                      download
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 rounded-md border bg-background px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
                     >
                       <FileText className="size-3.5" />

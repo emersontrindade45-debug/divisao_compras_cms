@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { extrairSpreadsheetId } from "@/lib/sheets/googleSheets";
 import { preencherPrecosPublicos } from "@/lib/sheets/preencherPrecosPublicos";
+import { valorUnitarioEfetivo } from "@/lib/domain/roteiroCalculo";
 import type { ActionResult } from "./processos";
 
 const MAX_PRECOS_POR_ITEM = 5;
@@ -15,6 +16,77 @@ export interface PreencherCotacaoResultado {
   itensPreenchidos: number;
   itensSemCandidato: number;
   itensSemLinhaCorrespondente: string[];
+}
+
+export interface SincronizarItemResultado {
+  sincronizado: boolean;
+  motivo?: string;
+}
+
+/**
+ * Escreve os melhores preços de contratações similares de UM item na planilha
+ * de cotação de origem do processo — mesma escrita de `preencherPrecosPublicos`,
+ * mas disparada automaticamente ao promover um candidato para Fonte
+ * (`promoverFonte.ts`), sem exigir o clique manual em "Preencher cotação"
+ * depois. Melhor esforço, de propósito: processo sem planilha vinculada,
+ * planilha sem edição liberada para o service account ou qualquer outra falha
+ * de escrita não podem derrubar a promoção, que já foi persistida no banco —
+ * o retorno só informa o chamador para fins de auditoria.
+ */
+export async function sincronizarItemComPlanilha(
+  itemId: string,
+): Promise<SincronizarItemResultado> {
+  try {
+    const item = await db.item.findUnique({
+      where: { id: itemId },
+      select: {
+        descricao: true,
+        processo: { select: { planilhaOrigemUrl: true } },
+        resultadosSimilaridade: {
+          orderBy: { scoreFinal: "desc" },
+          take: MAX_PRECOS_POR_ITEM,
+          select: { valorUnitario: true, valorConsiderado: true },
+        },
+      },
+    });
+    if (!item) return { sincronizado: false, motivo: "Item não encontrado" };
+    if (!item.processo.planilhaOrigemUrl) {
+      return { sincronizado: false, motivo: "Processo sem planilha de origem sincronizada" };
+    }
+
+    const spreadsheetId = extrairSpreadsheetId(item.processo.planilhaOrigemUrl);
+    if (!spreadsheetId) {
+      return { sincronizado: false, motivo: "URL de planilha de origem inválida" };
+    }
+    if (item.resultadosSimilaridade.length === 0) {
+      return { sincronizado: false, motivo: "Nenhum candidato de preço público para o item" };
+    }
+
+    const resultado = await preencherPrecosPublicos(spreadsheetId, [
+      {
+        descricao: item.descricao,
+        // Valor ajustado pelo roteiro de cálculo (TR) tem prioridade sobre o
+        // bruto publicado pela fonte — mesma prioridade usada ao promover
+        // para Fonte (`promoverFonte.ts`). Sem isso, um ajuste feito depois
+        // da promoção nunca chegaria à planilha.
+        precos: item.resultadosSimilaridade.map((r) =>
+          valorUnitarioEfetivo({
+            valorUnitario: Number(r.valorUnitario),
+            valorConsiderado: r.valorConsiderado == null ? null : Number(r.valorConsiderado),
+          }),
+        ),
+      },
+    ]);
+    if (resultado.linhasPreenchidas === 0) {
+      return { sincronizado: false, motivo: "Item sem linha correspondente na planilha" };
+    }
+    return { sincronizado: true };
+  } catch (err) {
+    return {
+      sincronizado: false,
+      motivo: err instanceof Error ? err.message : "Falha ao escrever na planilha",
+    };
+  }
 }
 
 export async function preencherCotacao(
@@ -55,7 +127,7 @@ export async function preencherCotacao(
       resultadosSimilaridade: {
         orderBy: { scoreFinal: "desc" },
         take: MAX_PRECOS_POR_ITEM,
-        select: { valorUnitario: true },
+        select: { valorUnitario: true, valorConsiderado: true },
       },
     },
   });
@@ -66,7 +138,14 @@ export async function preencherCotacao(
 
   const itensParaPreencher = itens.map((item) => ({
     descricao: item.descricao,
-    precos: item.resultadosSimilaridade.map((r) => Number(r.valorUnitario)),
+    // Valor ajustado pelo roteiro de cálculo (TR), quando existir, no lugar
+    // do bruto publicado pela fonte — mesma prioridade de `promoverFonte.ts`.
+    precos: item.resultadosSimilaridade.map((r) =>
+      valorUnitarioEfetivo({
+        valorUnitario: Number(r.valorUnitario),
+        valorConsiderado: r.valorConsiderado === null ? null : Number(r.valorConsiderado),
+      }),
+    ),
   }));
 
   let resultado;

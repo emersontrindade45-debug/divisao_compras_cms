@@ -92,7 +92,9 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      // "inline" (não "attachment"): abre no visualizador de PDF do navegador
+      // para conferência antes de baixar, em vez de forçar o download direto.
+      "Content-Disposition": `inline; filename="${filename}"`,
       "Cache-Control": "no-store",
     },
   });

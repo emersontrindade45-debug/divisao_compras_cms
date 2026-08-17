@@ -11,6 +11,7 @@ import {
   podePromoverCandidato,
 } from "@/lib/domain/tipoFonteSimilaridade";
 import { valorUnitarioEfetivo } from "@/lib/domain/roteiroCalculo";
+import { sincronizarItemComPlanilha } from "./preencherCotacao";
 import type { ActionResult } from "./processos";
 
 const promoverSchema = z.object({
@@ -213,6 +214,27 @@ export async function promoverResultadoSimilaridade(
       valorUnitario,
       valorOriginalFonte: Number(resultado.valorUnitario),
       valorAjustadoPeloAnalista: houveAjuste,
+    },
+  });
+
+  // Melhor esforço: escreve o preço promovido na planilha de cotação de
+  // origem do processo (colunas "PREÇO PÚBLICO"), a mesma escrita do botão
+  // manual "Preencher cotação" — mas disparada aqui para o usuário não
+  // precisar lançar o valor na planilha por fora e depois sincronizar.
+  // Processo sem planilha vinculada, ou falha de escrita, não podem reverter
+  // uma promoção já persistida; por isso roda fora da transação e só é
+  // registrada em auditoria, nunca propagada como erro da ação.
+  const sincronizacao = await sincronizarItemComPlanilha(itemId);
+  await registrarAuditoria({
+    userId: user.id,
+    processoId: resultado.item.processoId,
+    acao: "sincronizar_planilha_automatico",
+    detalhes: {
+      itemId,
+      fonteId,
+      resultadoId: resultado.id,
+      sincronizado: sincronizacao.sincronizado,
+      motivo: sincronizacao.motivo ?? null,
     },
   });
 

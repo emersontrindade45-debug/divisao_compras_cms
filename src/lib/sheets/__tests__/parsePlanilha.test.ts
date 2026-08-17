@@ -92,7 +92,11 @@ describe("parsePlanilha — exemplo telefonia (1 item)", () => {
     const estat = estatisticaDoItem(itens[0]!)!;
     expect(estat.totalPrecos).toBe(4);
     expect(estat.precosIncluidos).toBe(3);
-    expect(estat.valorEstimado).toBeCloseTo(3324.54, 2);
+    // valorEstimado usa a média aritmética dos preços incluídos, não a mediana
+    // pré-calculada na planilha — a mediana não tem funcionalidade para o usuário.
+    expect(estat.valorEstimado).toBeCloseTo(3049.69, 2);
+    expect(estat.valorEstimado).toBeCloseTo(estat.media, 2);
+    expect(estat.mediana).toBeCloseTo(3324.54, 2);
     expect(estat.menorValor).toBeCloseTo(2500, 2);
   });
 });

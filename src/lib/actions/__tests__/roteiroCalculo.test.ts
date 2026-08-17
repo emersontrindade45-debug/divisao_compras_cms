@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => {
     requireRole: vi.fn(),
     registrarAuditoria: vi.fn(),
     revalidatePath: vi.fn(),
+    extrairSpreadsheetId: vi.fn(),
+    preencherPrecosPublicos: vi.fn(),
   };
 });
 
@@ -24,6 +26,12 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/rbac", () => ({ requireRole: mocks.requireRole }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("@/lib/sheets/googleSheets", () => ({
+  extrairSpreadsheetId: mocks.extrairSpreadsheetId,
+}));
+vi.mock("@/lib/sheets/preencherPrecosPublicos", () => ({
+  preencherPrecosPublicos: mocks.preencherPrecosPublicos,
+}));
 
 import {
   limparRoteiroCalculo,
@@ -74,6 +82,14 @@ describe("salvarRoteiroCalculo", () => {
     mocks.tx.resultadoSimilaridade.update.mockResolvedValue({ id: RESULTADO_ID });
     mocks.tx.fonte.updateMany.mockResolvedValue({ count: 1 });
     mocks.tx.precoConsolidado.updateMany.mockResolvedValue({ count: 1 });
+    // Sincronização automática com a planilha (best-effort): por padrão sem
+    // planilha vinculada, no-op silencioso — testes que não são sobre esse
+    // comportamento não precisam mocká-lo.
+    mocks.db.item.findUnique.mockResolvedValue({
+      descricao: "Item de teste",
+      processo: { planilhaOrigemUrl: null },
+      resultadosSimilaridade: [],
+    });
   });
 
   // Caso 2 do usuário: 6,89 × 940 (medida do TR) × 4 (execuções) = 25.906,40.
@@ -207,6 +223,66 @@ describe("salvarRoteiroCalculo", () => {
       }),
     );
   });
+
+  // Pergunta do usuário: um ajuste feito na memória de cálculo (roteiro/TR)
+  // depois da promoção também precisa chegar na planilha — não só a promoção
+  // inicial. E precisa ir o valor AJUSTADO, não o bruto publicado pela fonte.
+  it("sincroniza o item com a planilha usando o valor ajustado, não o bruto", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({
+      descricao: "Item de teste",
+      processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
+      resultadosSimilaridade: [{ valorUnitario: 6.89, valorConsiderado: 25906.4 }],
+    });
+    mocks.extrairSpreadsheetId.mockReturnValue("abc");
+    mocks.preencherPrecosPublicos.mockResolvedValue({
+      linhasPreenchidas: 1,
+      linhasNaoEncontradas: [],
+      abaUtilizada: "Cotação",
+    });
+
+    await salvarRoteiroCalculo({
+      resultadoId: RESULTADO_ID,
+      roteiro: ROTEIRO_UNITARIO_X_TR,
+      periodicidade: null,
+    });
+
+    expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
+      { descricao: "Item de teste", precos: [25906.4] },
+    ]);
+    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acao: "sincronizar_planilha_automatico",
+        detalhes: expect.objectContaining({ itemId: "item-1", sincronizado: true }),
+      }),
+    );
+  });
+
+  it("não falha ao salvar o roteiro quando a planilha não pode ser escrita", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({
+      descricao: "Item de teste",
+      processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
+      resultadosSimilaridade: [{ valorUnitario: 6.89, valorConsiderado: 25906.4 }],
+    });
+    mocks.extrairSpreadsheetId.mockReturnValue("abc");
+    mocks.preencherPrecosPublicos.mockRejectedValue(new Error("cota do Google excedida"));
+
+    const res = await salvarRoteiroCalculo({
+      resultadoId: RESULTADO_ID,
+      roteiro: ROTEIRO_UNITARIO_X_TR,
+      periodicidade: null,
+    });
+
+    expect(res.data).toEqual({ valorConsiderado: 25906.4 });
+    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acao: "sincronizar_planilha_automatico",
+        detalhes: expect.objectContaining({
+          sincronizado: false,
+          motivo: "cota do Google excedida",
+        }),
+      }),
+    );
+  });
 });
 
 describe("limparRoteiroCalculo", () => {
@@ -220,6 +296,11 @@ describe("limparRoteiroCalculo", () => {
     mocks.tx.resultadoSimilaridade.update.mockResolvedValue({ id: RESULTADO_ID });
     mocks.tx.fonte.updateMany.mockResolvedValue({ count: 1 });
     mocks.tx.precoConsolidado.updateMany.mockResolvedValue({ count: 1 });
+    mocks.db.item.findUnique.mockResolvedValue({
+      descricao: "Item de teste",
+      processo: { planilhaOrigemUrl: null },
+      resultadosSimilaridade: [],
+    });
   });
 
   it("zera o roteiro e o valor considerado", async () => {
@@ -244,6 +325,26 @@ describe("limparRoteiroCalculo", () => {
       where: { resultadoSimilaridadeId: RESULTADO_ID },
       data: { valorUnitario: 6.89 },
     });
+  });
+
+  it("sincroniza a planilha com o valor restaurado (bruto) após limpar o roteiro", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({
+      descricao: "Item de teste",
+      processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
+      resultadosSimilaridade: [{ valorUnitario: 6.89, valorConsiderado: null }],
+    });
+    mocks.extrairSpreadsheetId.mockReturnValue("abc");
+    mocks.preencherPrecosPublicos.mockResolvedValue({
+      linhasPreenchidas: 1,
+      linhasNaoEncontradas: [],
+      abaUtilizada: "Cotação",
+    });
+
+    await limparRoteiroCalculo(RESULTADO_ID);
+
+    expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
+      { descricao: "Item de teste", precos: [6.89] },
+    ]);
   });
 });
 

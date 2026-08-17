@@ -155,7 +155,7 @@ export async function sincronizarPlanilha(
       await db.seriePreco.create({
         data: {
           itemId,
-          metodo: "mediana",
+          metodo: "media",
           valorEstimado: estat.valorEstimado,
           media: estat.media,
           mediana: estat.mediana,

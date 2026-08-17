@@ -218,6 +218,6 @@ export function estatisticaDoItem(item: ItemPlanilha): EstatisticaItem | null {
     coeficienteVariacao: round(cv),
     totalPrecos: item.precos.length,
     precosIncluidos: incluidos.length,
-    valorEstimado: round(mediana),
+    valorEstimado: round(media),
   };
 }

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
   const db = {
     resultadoSimilaridade: { findUnique: vi.fn() },
     fonte: { findUnique: vi.fn() },
+    item: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   };
   return {
@@ -20,6 +21,8 @@ const mocks = vi.hoisted(() => {
     requireRole: vi.fn(),
     registrarAuditoria: vi.fn(),
     revalidatePath: vi.fn(),
+    extrairSpreadsheetId: vi.fn(),
+    preencherPrecosPublicos: vi.fn(),
   };
 });
 
@@ -27,6 +30,12 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/rbac", () => ({ requireRole: mocks.requireRole }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("@/lib/sheets/googleSheets", () => ({
+  extrairSpreadsheetId: mocks.extrairSpreadsheetId,
+}));
+vi.mock("@/lib/sheets/preencherPrecosPublicos", () => ({
+  preencherPrecosPublicos: mocks.preencherPrecosPublicos,
+}));
 
 import { Prisma } from "@prisma/client";
 import { despromoverResultadoSimilaridade, promoverResultadoSimilaridade } from "../promoverFonte";
@@ -69,6 +78,14 @@ describe("promoverResultadoSimilaridade", () => {
     mocks.tx.precoConsolidado.create.mockResolvedValue({ id: "preco-1" });
     mocks.tx.resultadoSimilaridade.updateMany.mockResolvedValue({ count: 1 });
     mocks.db.resultadoSimilaridade.findUnique.mockResolvedValue(resultadoBase());
+    // Sincronização automática com a planilha (best-effort): por padrão o
+    // processo não tem planilha vinculada, então ela é um no-op silencioso —
+    // os testes que não são sobre esse comportamento não precisam mocká-lo.
+    mocks.db.item.findUnique.mockResolvedValue({
+      descricao: "Aquisição de cadeiras ergonômicas",
+      processo: { planilhaOrigemUrl: null },
+      resultadosSimilaridade: [],
+    });
   });
 
   it("cria Fonte e Evidencia atomicamente na mesma transação", async () => {
@@ -263,6 +280,59 @@ describe("promoverResultadoSimilaridade", () => {
       }),
     );
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/processos/proc-1");
+  });
+
+  // Tarefa: promover um candidato escreve automaticamente o preço na planilha
+  // de cotação de origem (colunas "PREÇO PÚBLICO"), sem exigir o clique manual
+  // em "Preencher cotação" depois.
+  it("sincroniza automaticamente o item promovido com a planilha e audita o resultado", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({
+      descricao: "Aquisição de cadeiras ergonômicas",
+      processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
+      resultadosSimilaridade: [{ valorUnitario: 850.5 }],
+    });
+    mocks.extrairSpreadsheetId.mockReturnValue("abc");
+    mocks.preencherPrecosPublicos.mockResolvedValue({
+      linhasPreenchidas: 1,
+      linhasNaoEncontradas: [],
+      abaUtilizada: "Cotação",
+    });
+
+    await promoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(mocks.preencherPrecosPublicos).toHaveBeenCalledWith("abc", [
+      { descricao: "Aquisição de cadeiras ergonômicas", precos: [850.5] },
+    ]);
+    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acao: "sincronizar_planilha_automatico",
+        detalhes: expect.objectContaining({ itemId: "item-1", sincronizado: true }),
+      }),
+    );
+  });
+
+  it("não falha a promoção quando a planilha não pode ser escrita, e audita o motivo", async () => {
+    mocks.db.item.findUnique.mockResolvedValue({
+      descricao: "Aquisição de cadeiras ergonômicas",
+      processo: { planilhaOrigemUrl: "https://docs.google.com/spreadsheets/d/abc/edit" },
+      resultadosSimilaridade: [{ valorUnitario: 850.5 }],
+    });
+    mocks.extrairSpreadsheetId.mockReturnValue("abc");
+    mocks.preencherPrecosPublicos.mockRejectedValue(new Error("cota do Google excedida"));
+
+    const res = await promoverResultadoSimilaridade(RESULTADO_ID);
+
+    // A promoção em si continua bem-sucedida — a escrita na planilha é melhor esforço.
+    expect(res.data).toEqual({ fonteId: "fonte-1" });
+    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acao: "sincronizar_planilha_automatico",
+        detalhes: expect.objectContaining({
+          sincronizado: false,
+          motivo: "cota do Google excedida",
+        }),
+      }),
+    );
   });
 
   it("retorna erro e não abre transação quando já foi promovido", async () => {

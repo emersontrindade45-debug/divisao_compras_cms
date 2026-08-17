@@ -119,7 +119,12 @@ export function RelatorioResumoCard({ processo, serie }: RelatorioResumoCardProp
           </a>
           {serie && (
             <>
-              <a href={`/api/relatorios/${processo.id}/pdf`} download className={linkBtn}>
+              <a
+                href={`/api/relatorios/${processo.id}/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={linkBtn}
+              >
                 <FileText className="size-3.5" />
                 Memória de cálculo (PDF)
               </a>
