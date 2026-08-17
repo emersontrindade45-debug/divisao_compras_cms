@@ -5,6 +5,7 @@ import { ProcessoFilters, type FiltrosProcesso } from "../ProcessoFilters";
 const FILTROS_VAZIOS: FiltrosProcesso = {
   busca: "",
   status: "todos",
+  faseAndamento: "todos",
   responsavel: "todos",
   dataInicio: "",
   dataFim: "",

@@ -1,4 +1,5 @@
 import type { StatusDominio } from "@/lib/domain/status";
+import type { FaseAndamento } from "@/lib/domain/faseAndamento";
 
 export type ClassificacaoItem = "comum" | "especifico";
 
@@ -13,6 +14,8 @@ export interface ProcessoFixture {
   classificacao: ClassificacaoItem;
   responsavel: string;
   status: StatusDominio;
+  /** Fase operacional (não confundir com `status`, que é aderência IN 65/2021). */
+  faseAndamento: FaseAndamento;
   /** ISO 8601 — "YYYY-MM-DD" */
   dataAbertura: string;
 }
@@ -29,6 +32,7 @@ export const PROCESSOS: ProcessoFixture[] = [
     classificacao: "comum",
     responsavel: "Ana Souza",
     status: "aderente",
+    faseAndamento: "concluido",
     dataAbertura: "2026-02-10",
   },
   {
@@ -42,6 +46,7 @@ export const PROCESSOS: ProcessoFixture[] = [
     classificacao: "especifico",
     responsavel: "Bruno Lima",
     status: "pendente",
+    faseAndamento: "nao_iniciado",
     dataAbertura: "2026-03-05",
   },
   {
@@ -55,6 +60,7 @@ export const PROCESSOS: ProcessoFixture[] = [
     classificacao: "comum",
     responsavel: "Carla Dias",
     status: "parcial",
+    faseAndamento: "em_andamento",
     dataAbertura: "2026-01-22",
   },
   {
@@ -68,6 +74,7 @@ export const PROCESSOS: ProcessoFixture[] = [
     classificacao: "especifico",
     responsavel: "Diego Alves",
     status: "nao-aderente",
+    faseAndamento: "em_correcao",
     dataAbertura: "2025-11-30",
   },
   {
@@ -81,6 +88,7 @@ export const PROCESSOS: ProcessoFixture[] = [
     classificacao: "comum",
     responsavel: "Ana Souza",
     status: "pendente",
+    faseAndamento: "nao_iniciado",
     dataAbertura: "2026-04-12",
   },
   {
@@ -94,6 +102,7 @@ export const PROCESSOS: ProcessoFixture[] = [
     classificacao: "especifico",
     responsavel: "Carla Dias",
     status: "aderente",
+    faseAndamento: "concluido",
     dataAbertura: "2025-12-15",
   },
   {
@@ -107,6 +116,7 @@ export const PROCESSOS: ProcessoFixture[] = [
     classificacao: "comum",
     responsavel: "Bruno Lima",
     status: "parcial",
+    faseAndamento: "em_andamento",
     dataAbertura: "2026-02-28",
   },
   {
@@ -120,6 +130,7 @@ export const PROCESSOS: ProcessoFixture[] = [
     classificacao: "especifico",
     responsavel: "Diego Alves",
     status: "nao-aderente",
+    faseAndamento: "em_correcao",
     dataAbertura: "2025-10-08",
   },
 ];

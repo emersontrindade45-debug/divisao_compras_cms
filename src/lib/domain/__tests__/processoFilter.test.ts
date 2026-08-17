@@ -6,6 +6,7 @@ import type { FiltrosProcesso } from "@/components/processos/ProcessoFilters";
 const VAZIO: FiltrosProcesso = {
   busca: "",
   status: "todos",
+  faseAndamento: "todos",
   responsavel: "todos",
   dataInicio: "",
   dataFim: "",
@@ -31,6 +32,12 @@ describe("filtrarProcessos", () => {
   it("filtra por status", () => {
     const r = filtrarProcessos(PROCESSOS, { ...VAZIO, status: "pendente" });
     expect(r.every((p) => p.status === "pendente")).toBe(true);
+    expect(r.length).toBeGreaterThan(0);
+  });
+
+  it("filtra por fase de andamento", () => {
+    const r = filtrarProcessos(PROCESSOS, { ...VAZIO, faseAndamento: "em_correcao" });
+    expect(r.every((p) => p.faseAndamento === "em_correcao")).toBe(true);
     expect(r.length).toBeGreaterThan(0);
   });
 

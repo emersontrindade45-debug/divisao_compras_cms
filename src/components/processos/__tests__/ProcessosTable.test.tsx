@@ -1,7 +1,11 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ProcessosTable } from "../ProcessosTable";
 import { PROCESSOS } from "@/lib/fixtures/processos";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 describe("ProcessosTable", () => {
   it("renderiza todas as linhas inicialmente", () => {

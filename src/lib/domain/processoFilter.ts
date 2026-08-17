@@ -1,9 +1,11 @@
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import type { StatusDominio } from "@/lib/domain/status";
+import type { FaseAndamento } from "@/lib/domain/faseAndamento";
 
 export interface FiltrosProcesso {
   busca: string;
   status: StatusDominio | "todos";
+  faseAndamento: FaseAndamento | "todos";
   responsavel: string;
   dataInicio: string;
   dataFim: string;
@@ -21,6 +23,7 @@ export function filtrarProcessos(
       if (!alvo.includes(busca)) return false;
     }
     if (filtros.status !== "todos" && p.status !== filtros.status) return false;
+    if (filtros.faseAndamento !== "todos" && p.faseAndamento !== filtros.faseAndamento) return false;
     if (filtros.responsavel !== "todos" && p.responsavel !== filtros.responsavel) return false;
     if (filtros.dataInicio && p.dataAbertura < filtros.dataInicio) return false;
     if (filtros.dataFim && p.dataAbertura > filtros.dataFim) return false;

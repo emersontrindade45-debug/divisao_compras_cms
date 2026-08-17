@@ -9,12 +9,14 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { ProcessoFilters, type FiltrosProcesso } from "@/components/processos/ProcessoFilters";
+import { FaseAndamentoSelect } from "@/components/processos/FaseAndamentoSelect";
 import { filtrarProcessos } from "@/lib/domain/processoFilter";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 
 const FILTROS_INICIAIS: FiltrosProcesso = {
   busca: "",
   status: "todos",
+  faseAndamento: "todos",
   responsavel: "todos",
   dataInicio: "",
   dataFim: "",
@@ -63,6 +65,13 @@ const COLUNAS: ColumnDef<ProcessoFixture>[] = [
     accessorKey: "status",
     header: "Status",
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
+  },
+  {
+    accessorKey: "faseAndamento",
+    header: "Fase",
+    cell: ({ row }) => (
+      <FaseAndamentoSelect processoId={row.original.id} fase={row.original.faseAndamento} />
+    ),
   },
 ];
 

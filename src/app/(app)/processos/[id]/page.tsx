@@ -71,6 +71,7 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
     classificacao: processo.classificacao === "especifico" ? "especifico" : "comum",
     responsavel: processo.responsavel,
     status: STATUS_MAP[processo.status] ?? "pendente",
+    faseAndamento: processo.faseAndamento,
     dataAbertura: processo.dataAbertura.toISOString().slice(0, 10),
   };
 

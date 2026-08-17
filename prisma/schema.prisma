@@ -21,6 +21,13 @@ enum StatusProcesso {
   pendente
 }
 
+enum FaseAndamento {
+  nao_iniciado
+  em_andamento
+  concluido
+  em_correcao
+}
+
 enum ClassificacaoItem {
   comum
   especifico
@@ -190,6 +197,10 @@ model Processo {
   classificacao           ClassificacaoItem
   responsavel             String
   status                  StatusProcesso    @default(pendente)
+  // Fase operacional do processo (não confundir com `status`, que é a
+  // aderência à IN 65/2021). Escolhida manualmente pelo servidor — não há
+  // regra que a derive do estado dos dados.
+  faseAndamento           FaseAndamento     @default(nao_iniciado)
   dataAbertura            DateTime
   planilhaOrigemUrl       String?
   // JSON serializado de ContextoTR: tabelaItens, modeloExecucao, materiaisEquipamentos.

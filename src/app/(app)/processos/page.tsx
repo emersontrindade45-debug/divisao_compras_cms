@@ -47,6 +47,7 @@ export default async function ProcessosPage({
     classificacao: p.classificacao === "especifico" ? "especifico" : "comum",
     responsavel: p.responsavel,
     status: STATUS_MAP[p.status] ?? "pendente",
+    faseAndamento: p.faseAndamento,
     dataAbertura: p.dataAbertura.toISOString().slice(0, 10),
   }));
 

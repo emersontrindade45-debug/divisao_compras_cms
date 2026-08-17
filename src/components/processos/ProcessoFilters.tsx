@@ -2,11 +2,13 @@
 
 import { Input } from "@/components/ui/input";
 import { STATUS_CONFIG, type StatusDominio } from "@/lib/domain/status";
+import { FASE_ANDAMENTO_CONFIG, type FaseAndamento } from "@/lib/domain/faseAndamento";
 import type { FiltrosProcesso } from "@/lib/domain/processoFilter";
 
 export type { FiltrosProcesso };
 
 const STATUS_OPTIONS = Object.entries(STATUS_CONFIG) as [StatusDominio, { label: string }][];
+const FASE_OPTIONS = Object.entries(FASE_ANDAMENTO_CONFIG) as [FaseAndamento, { label: string }][];
 
 const selectClasses =
   "h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
@@ -51,6 +53,25 @@ export function ProcessoFilters({
         >
           <option value="todos">Todos</option>
           {STATUS_OPTIONS.map(([value, { label }]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-xs text-muted-foreground" htmlFor="filtro-fase">
+          Fase
+        </label>
+        <select
+          id="filtro-fase"
+          className={selectClasses}
+          value={filtros.faseAndamento}
+          onChange={(e) => update("faseAndamento", e.target.value as FiltrosProcesso["faseAndamento"])}
+        >
+          <option value="todos">Todas</option>
+          {FASE_OPTIONS.map(([value, { label }]) => (
             <option key={value} value={value}>
               {label}
             </option>
