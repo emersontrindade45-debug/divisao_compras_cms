@@ -75,7 +75,7 @@ export function EtapaPesquisa({
       <section className="space-y-3">
         <SecaoTitulo
           titulo="Pesquisa por similaridade"
-          descricao="Fonte prioritária pela IN 65/2021: contratações públicas comparáveis, a partir do TR e da planilha de itens."
+          descricao="Fonte prioritária pela IN 65/2021: contratações públicas comparáveis. Envie o TR aqui; use o assistente de IA para buscar e refinar os candidatos a partir dele."
         />
         <PesquisaSimilaridadeUploadForm processoId={processoId} />
         <PreencherCotacaoForm processoId={processoId} />

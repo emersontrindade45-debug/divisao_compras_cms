@@ -20,18 +20,22 @@ import type { SeriePrecoFixture, TipoFonte } from "@/lib/fixtures/seriePrecos";
 import type { StatusDominio } from "@/lib/domain/status";
 
 /**
- * `extrairTR` e `buscarSimilaridadeItens` (server actions disparadas em sequência
- * pelo formulário de upload do TR desta página — ver `pesquisaSimilaridade.ts`)
- * usam o registry de provedores públicos (docs/ApiPlan.md §3.4). São duas
- * requisições separadas propositalmente: cada uma tem seu próprio teto de
- * `maxDuration`, então a extração do TR (o que o assistente precisa) sempre
- * termina dentro do teto mesmo que a busca de contratos similares — que roda
- * depois, com itens — fique parcial. Um arquivo com `"use server"` só pode
- * exportar funções assíncronas (Next 16/Turbopack) — `maxDuration` não pode
- * morar lá; a configuração de rota vive no segmento (esta página). Mesmo teto
- * e mesma justificativa da rota do assistente (`/api/assistente/chat/route.ts`):
- * 60s é o limite do plano Hobby (confirmado com o usuário em 2026-08-18) e é
- * aceito em todos os planos — subir isso exige confirmar o plano da conta antes.
+ * `extrairTR` (server action disparada pelo formulário de upload do TR desta
+ * página — ver `pesquisaSimilaridade.ts`) extrai o texto integral do PDF (sem
+ * IA, via `extrairTextoPdf`) e a especificação técnica de cada item (via IA,
+ * para a busca de similaridade). A busca de contratos similares por si só não
+ * roda mais nesta tela — ela ficava sujeita a instabilidade momentânea das
+ * APIs públicas (PNCP/Compras.gov) sem chance de refinar o termo na mesma
+ * interação; passou a ser exclusiva do assistente de IA (`buscar_pncp`), que
+ * já lê o TR extraído aqui via `ler_tr`. Decidido com o usuário em 2026-08-18.
+ * `buscarSimilaridadeItens` continua existindo em `pesquisaSimilaridade.ts`
+ * para reprocessamento futuro, mas nenhuma UI a chama hoje. Um arquivo com
+ * `"use server"` só pode exportar funções assíncronas (Next 16/Turbopack) —
+ * `maxDuration` não pode morar lá; a configuração de rota vive no segmento
+ * (esta página). Mesmo teto e mesma justificativa da rota do assistente
+ * (`/api/assistente/chat/route.ts`): 60s é o limite do plano Hobby (confirmado
+ * com o usuário em 2026-08-18) e é aceito em todos os planos — subir isso
+ * exige confirmar o plano da conta antes.
  */
 export const maxDuration = 60;
 

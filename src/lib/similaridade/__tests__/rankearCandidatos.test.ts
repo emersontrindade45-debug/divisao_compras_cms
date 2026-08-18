@@ -34,7 +34,6 @@ describe("rankearCandidatos", () => {
   it("exclui candidatos fora da janela de recencia antes de chamar a IA", async () => {
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([
         {
           candidato: candidato(10),
@@ -61,7 +60,6 @@ describe("rankearCandidatos", () => {
   it("calcula o score final com os pesos 40/35/25", async () => {
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([
         {
           candidato: candidato(10),
@@ -83,7 +81,6 @@ describe("rankearCandidatos", () => {
   it("ordena os resultados por score final decrescente", async () => {
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([
         {
           candidato: candidato(10, 100),
@@ -121,7 +118,6 @@ describe("rankearCandidatos", () => {
     // scoreFinal 76.5 (>= 70), mas a categoria errada não pode ser resgatada pela média.
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([
         {
           candidato: candidato(10),
@@ -145,7 +141,6 @@ describe("rankearCandidatos", () => {
     const relevante = candidato(20, 200, "Cadeira giratória de escritório");
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([]),
     };
 
@@ -157,7 +152,6 @@ describe("rankearCandidatos", () => {
   it("descarta candidatos com score final abaixo do mínimo aceitável", async () => {
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([
         {
           candidato: candidato(10, 100),
@@ -193,7 +187,6 @@ describe("rankearCandidatos", () => {
   it("repassa a natureza do objeto ao filtro de recência (janela mais curta para bem_consumo)", async () => {
     const provedor: ProvedorIA = {
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn().mockResolvedValue([]),
     };
 

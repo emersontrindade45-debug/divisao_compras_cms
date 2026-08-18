@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { getOpenAIClient, OPENAI_MODEL } from "./openaiClient";
-import type { ItemExtraidoTR, CandidatoSimilaridade, ScoreSimilaridade, ContextoTR, ProvedorIA } from "./types";
+import type { ItemExtraidoTR, CandidatoSimilaridade, ScoreSimilaridade, ProvedorIA } from "./types";
 
 const itemExtraidoTRSchema = z.object({
   descricao: z.string(),
@@ -26,36 +26,6 @@ const rankingSchema = z.object({ avaliacoes: z.array(avaliacaoSimilaridadeSchema
 
 /** Avaliação bruta retornada pela IA para um candidato, antes do cálculo do scoreFinal. */
 type AvaliacaoBruta = Omit<ScoreSimilaridade, "candidato" | "scoreFinal"> & { indice: number };
-
-const contextoTRSchema = z.object({
-  tabelaItens: z.string(),
-  modeloExecucao: z.string(),
-  materiaisEquipamentos: z.string(),
-});
-
-const PROMPT_CONTEXTO_TR = `Você é um analista de compras públicas. Leia o Termo de Referência (TR) em anexo
-e extraia EXATAMENTE as três seções abaixo, copiando fielmente o conteúdo do documento (sem resumir,
-sem parafrasear, sem omitir detalhes técnicos):
-
-1. "tabelaItens": Copie integralmente a tabela de itens do objeto da contratação — aquela que lista
-   número do item, especificação/descrição, frequência (quando houver), unidade de medida e quantidade.
-   Inclua o parágrafo introdutório que precede a tabela (ex.: "1.1 Contratação de serviços de...").
-   Se não houver tabela explícita mas houver lista numerada de itens, copie-a integralmente.
-
-2. "modeloExecucao": Copie integralmente a seção de MODELO DE EXECUÇÃO DO OBJETO (normalmente
-   intitulada "Modelo de execução" ou numerada como seção 4, 5 ou 6 do TR). Inclua todas as
-   subseções: condições de execução, prazos, dinâmica, especificações técnicas por área/elemento,
-   exigências de EPI, restrições de acesso, obrigações de relatório etc.
-   Se esta seção não existir no documento, retorne string vazia.
-
-3. "materiaisEquipamentos": Copie integralmente a seção sobre MATERIAIS E EQUIPAMENTOS (normalmente
-   intitulada "Materiais e equipamentos" ou similar, geralmente após o modelo de execução).
-   Inclua todas as subseções: fornecimento de materiais, armazenamento, EPI/EPC, amostras, prazo
-   de correção de negligências etc.
-   Se esta seção não existir no documento, retorne string vazia.
-
-Retorne um objeto JSON com os campos "tabelaItens", "modeloExecucao" e "materiaisEquipamentos".
-Não resuma — copie o texto original integralmente.`;
 
 const PROMPT_EXTRACAO = `Você é um analista de compras públicas. Leia o Termo de Referência (TR) em anexo
 e extraia cada item a ser cotado. Para cada item, retorne um objeto com:
@@ -146,47 +116,18 @@ function parseJsonResponse<T>(texto: string, schema: z.ZodType<T>, contexto: str
 }
 
 /**
- * Teto por chamada só para a extração do TR (`extrairContextoTR`/`extrairEspecificacaoTR`),
- * mais alto que o padrão de `openaiClient.ts` (20s). Desde que a extração passou a ser uma
- * Server Action isolada, sem o laço de busca por item competindo pelo mesmo `maxDuration`
- * (ver `extrairTR` em `pesquisaSimilaridade.ts`), sobra orçamento para um único attempt mais
- * longo. `maxRetries: 0` é deliberado: repetir uma chamada de visão sobre um PDF grande que já
- * estourou o timeout tende a estourar de novo pelo mesmo motivo — dois attempts curtos têm
- * menos chance de concluir do que um attempt longo.
+ * Teto por chamada só para `extrairEspecificacaoTR`, mais alto que o padrão de
+ * `openaiClient.ts` (20s). Desde que a extração passou a ser uma Server Action
+ * isolada, sem o laço de busca por item competindo pelo mesmo `maxDuration`
+ * (ver `extrairTR` em `pesquisaSimilaridade.ts`), sobra orçamento para um único
+ * attempt mais longo. `maxRetries: 0` é deliberado: repetir uma chamada de
+ * visão sobre um PDF grande que já estourou o timeout tende a estourar de novo
+ * pelo mesmo motivo — dois attempts curtos têm menos chance de concluir do que
+ * um attempt longo.
  */
 const OPCOES_EXTRACAO_TR = { timeout: 50_000, maxRetries: 0 };
 
 export class OpenAIProvider implements ProvedorIA {
-  async extrairContextoTR(pdfBuffer: Buffer): Promise<ContextoTR> {
-    const ai = getOpenAIClient();
-    const response = await ai.chat.completions.create(
-      {
-        model: OPENAI_MODEL,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: PROMPT_CONTEXTO_TR },
-              {
-                type: "file",
-                file: {
-                  filename: "tr.pdf",
-                  file_data: `data:application/pdf;base64,${pdfBuffer.toString("base64")}`,
-                },
-              },
-            ],
-          },
-        ],
-      },
-      OPCOES_EXTRACAO_TR,
-    );
-
-    const texto = response.choices[0]?.message?.content ?? "{}";
-    return parseJsonResponse(texto, contextoTRSchema, "extrairContextoTR");
-  }
-
   async extrairEspecificacaoTR(pdfBuffer: Buffer): Promise<ItemExtraidoTR[]> {
     const ai = getOpenAIClient();
     const response = await ai.chat.completions.create(

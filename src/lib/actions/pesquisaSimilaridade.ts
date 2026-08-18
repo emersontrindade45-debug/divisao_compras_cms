@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { getProvedorIA } from "@/lib/ia";
+import { extrairTextoPdf } from "@/lib/ia/extrairTextoPdf";
 import { rankearCandidatos } from "@/lib/similaridade/rankearCandidatos";
 import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPublicos";
 import { filtrarPorPalavrasChave } from "@/lib/similaridade/filtroPalavrasChave";
@@ -110,14 +111,18 @@ export async function extrairTR(
 
   const provedor = getProvedorIA();
 
-  // Executa as duas extrações em paralelo: itens (para similaridade) e contexto
-  // (tabela de itens + modelo de execução + materiais, para o assistente).
+  // O texto integral (sem IA) alimenta o assistente via `trContexto` — extração
+  // via IA em campos fixos (tabela de itens / modelo de execução / materiais)
+  // falhava silenciosamente em TRs de serviço contínuo, cuja estrutura de seções
+  // não bate com a nomenclatura esperada pelo prompt (processo 908/2022). A
+  // extração de itens para busca de similaridade continua via IA — ali o
+  // objetivo é normalizar/estruturar, não preservar o texto original.
   let extratos: ItemExtraidoTR[];
-  let contextoTR: Awaited<ReturnType<typeof provedor.extrairContextoTR>>;
+  let textoIntegralTR: string;
   try {
-    [extratos, contextoTR] = await Promise.all([
+    [extratos, textoIntegralTR] = await Promise.all([
       provedor.extrairEspecificacaoTR(trPdfBuffer),
-      provedor.extrairContextoTR(trPdfBuffer),
+      extrairTextoPdf(trPdfBuffer),
     ]);
   } catch (err) {
     return {
@@ -125,12 +130,12 @@ export async function extrairTR(
     };
   }
 
-  // Persiste o contexto (para o assistente) e os itens extraídos brutos (para a
-  // busca de similaridade reaproveitar sem reprocessar o PDF).
+  // Persiste o texto integral (para o assistente) e os itens extraídos brutos
+  // (para a busca de similaridade reaproveitar sem reprocessar o PDF).
   await db.processo.update({
     where: { id: processoId },
     data: {
-      trContexto: JSON.stringify(contextoTR),
+      trContexto: textoIntegralTR,
       trItensExtraidos: JSON.stringify(extratos),
     },
   });

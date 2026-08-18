@@ -228,17 +228,16 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           "Peça ao servidor para fazer upload do PDF do Termo de Referência na aba de Pesquisa.",
       };
     }
-    const contexto = JSON.parse(processo.trContexto) as {
-      tabelaItens: string;
-      modeloExecucao: string;
-      materiaisEquipamentos: string;
-    };
+    // Texto integral do PDF, sem interpretação prévia por IA — o TR varia muito de
+    // estrutura por tipo de objeto (bens, serviços contínuos, obras), e uma extração
+    // em campos fixos (tabela de itens / modelo de execução / materiais) descartava
+    // silenciosamente conteúdo real quando a nomenclatura de seção não batia com a
+    // esperada (processo 908/2022). O texto completo garante que nada se perde; cabe
+    // ao próprio assistente localizar a informação relevante dentro dele.
     return {
       disponivel: true,
       numero: processo.numero,
-      tabelaItens: contexto.tabelaItens,
-      modeloExecucao: contexto.modeloExecucao,
-      materiaisEquipamentos: contexto.materiaisEquipamentos || "(não consta no TR)",
+      textoIntegral: processo.trContexto,
     };
   }
 
@@ -807,11 +806,19 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     {
       nome: "ler_tr",
       descricao:
-        "Lê o conteúdo do Termo de Referência extraído e salvo no processo: tabela de itens, " +
-        "modelo de execução do objeto e materiais/equipamentos. Use quando o usuário perguntar " +
-        "sobre especificações técnicas, exigências de execução ou materiais do TR, ou quando " +
-        "precisar das especificações para avaliar candidatos de similaridade. " +
-        "Não aceita processoId — opera sempre sobre o processo desta conversa.",
+        "Lê o texto integral do Termo de Referência (TR) do processo, extraído do PDF sem nenhum " +
+        "resumo ou reestruturação prévia — é o documento completo, na íntegra. O TR varia muito de " +
+        "estrutura conforme o tipo de objeto (aquisição de bens, serviço contínuo, obra, etc.): " +
+        "às vezes há uma tabela explícita de itens com unidade/quantidade; em serviços contínuos " +
+        "(ex.: limpeza, vigilância), o 'objeto' costuma ser descrito em metros quadrados/postos de " +
+        "trabalho, e o que corresponde a 'materiais e equipamentos' ou 'modelo de execução' pode " +
+        "estar disperso em subseções com nomes distintos (ex.: '5.11 Lista de equipamentos', " +
+        "'5.3 Da limpeza do espelho d'água'). NÃO espere títulos de seção fixos — leia o texto " +
+        "inteiro e localize você mesmo objeto, especificações técnicas, quantidades, frequência de " +
+        "execução, materiais/equipamentos exigidos e obrigações contratuais relevantes à pergunta. " +
+        "Use quando o usuário perguntar sobre especificações técnicas, exigências de execução ou " +
+        "materiais do TR, ou quando precisar de especificações para avaliar candidatos de " +
+        "similaridade. Não aceita processoId — opera sempre sobre o processo desta conversa.",
       parametros: { type: "object", properties: {} },
     },
     {

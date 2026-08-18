@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   requireAuth: vi.fn(),
   registrarAuditoria: vi.fn(),
   getProvedorIA: vi.fn(),
+  extrairTextoPdf: vi.fn(),
   rankearCandidatos: vi.fn(),
   buscarCandidatosPublicos: vi.fn(),
   filtrarPorPalavrasChave: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/rbac", () => ({ requireAuth: mocks.requireAuth }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("@/lib/ia", () => ({ getProvedorIA: mocks.getProvedorIA }));
+vi.mock("@/lib/ia/extrairTextoPdf", () => ({ extrairTextoPdf: mocks.extrairTextoPdf }));
 vi.mock("@/lib/similaridade/rankearCandidatos", () => ({
   rankearCandidatos: mocks.rankearCandidatos,
 }));
@@ -67,9 +69,9 @@ describe("extrairTR — persiste contexto e especificações independentemente d
       extrairEspecificacaoTR: vi.fn().mockResolvedValue([
         { descricao: "Assentamento de tubo", especificacaoTecnica: "PVC 100mm", unidade: "M", quantidade: 10, termoBusca: "tubo pvc" },
       ]),
-      extrairContextoTR: vi.fn().mockResolvedValue({ tabelaItens: "tabela", modeloExecucao: "", materiaisEquipamentos: "" }),
       rankearSimilaridade: vi.fn(),
     });
+    mocks.extrairTextoPdf.mockResolvedValue("texto integral do TR");
   });
 
   it("persiste trContexto e trItensExtraidos no processo, sem tocar na busca de similaridade", async () => {
@@ -79,7 +81,7 @@ describe("extrairTR — persiste contexto e especificações independentemente d
     expect(mocks.db.processo.update).toHaveBeenCalledWith({
       where: { id: "proc-1" },
       data: expect.objectContaining({
-        trContexto: JSON.stringify({ tabelaItens: "tabela", modeloExecucao: "", materiaisEquipamentos: "" }),
+        trContexto: "texto integral do TR",
         trItensExtraidos: JSON.stringify([
           { descricao: "Assentamento de tubo", especificacaoTecnica: "PVC 100mm", unidade: "M", quantidade: 10, termoBusca: "tubo pvc" },
         ]),
@@ -101,7 +103,6 @@ describe("extrairTR — persiste contexto e especificações independentemente d
   it("retorna erro estruturado quando a extração falha, sem persistir nada", async () => {
     mocks.getProvedorIA.mockReturnValue({
       extrairEspecificacaoTR: vi.fn().mockRejectedValue(new Error("timeout")),
-      extrairContextoTR: vi.fn().mockResolvedValue({ tabelaItens: "", modeloExecucao: "", materiaisEquipamentos: "" }),
       rankearSimilaridade: vi.fn(),
     });
 
@@ -130,7 +131,6 @@ describe("buscarSimilaridadeItens — reaproveita a extração já persistida, s
     mocks.db.resultadoSimilaridade.createMany.mockResolvedValue({ count: 1 });
     mocks.getProvedorIA.mockReturnValue({
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn(),
     });
     mocks.buscarCandidatosPublicos.mockResolvedValue([]);
@@ -154,7 +154,7 @@ describe("buscarSimilaridadeItens — reaproveita a extração já persistida, s
     await buscarSimilaridadeItens("proc-1");
 
     expect(provedor.extrairEspecificacaoTR).not.toHaveBeenCalled();
-    expect(provedor.extrairContextoTR).not.toHaveBeenCalled();
+    expect(mocks.extrairTextoPdf).not.toHaveBeenCalled();
     expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("tubo pvc");
   });
 
@@ -249,7 +249,6 @@ describe("buscarSimilaridadeItens — orçamento de tempo do laço de itens", ()
     mocks.db.resultadoSimilaridade.createMany.mockResolvedValue({ count: 1 });
     mocks.getProvedorIA.mockReturnValue({
       extrairEspecificacaoTR: vi.fn(),
-      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn(),
     });
     mocks.buscarCandidatosPublicos.mockResolvedValue([]);
