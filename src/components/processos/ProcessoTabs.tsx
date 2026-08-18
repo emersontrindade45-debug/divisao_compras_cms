@@ -43,6 +43,7 @@ export function ProcessoTabs({
   cotacoes = [],
   serie,
   fontesSimilaridade,
+  itens = [],
 }: {
   processo: ProcessoFixture;
   conformidade: ConformidadeProcesso;
@@ -50,6 +51,7 @@ export function ProcessoTabs({
   cotacoes?: CotacaoResumo[];
   serie?: SeriePrecoFixture;
   fontesSimilaridade?: ReactNode;
+  itens?: { id: string; descricao: string }[];
 }) {
   const searchParams = useSearchParams();
   const etapaDaUrl = parseEtapa(searchParams.get("etapa"));
@@ -121,6 +123,7 @@ export function ProcessoTabs({
           processoId={processo.id}
           fontes={fontes}
           fontesSimilaridade={fontesSimilaridade}
+          itens={itens}
         />
       </TabsContent>
 

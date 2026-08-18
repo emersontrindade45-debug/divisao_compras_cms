@@ -8,6 +8,7 @@ const searchParams = { valor: new URLSearchParams() };
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParams.valor,
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 beforeEach(() => {

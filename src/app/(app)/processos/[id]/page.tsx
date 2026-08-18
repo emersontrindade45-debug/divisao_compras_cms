@@ -10,9 +10,11 @@ import {
 import { AssistenteToggle } from "@/components/assistente/AssistenteDock";
 import { ConformidadePanel } from "@/components/processos/ConformidadePanel";
 import { ExcluirProcessoDialog } from "@/components/processos/ExcluirProcessoDialog";
+import { AlterarStatusDialog } from "@/components/processos/AlterarStatusDialog";
 import { FontesSimilaridadeList } from "@/components/processos/FontesSimilaridadeList";
 import { obterProcessoDetalhado } from "@/lib/actions/listar";
 import { avaliarConformidade } from "@/lib/domain/conformidade";
+import { hasPermission, requireAuth } from "@/lib/auth/rbac";
 import type { ProcessoFixture } from "@/lib/fixtures/processos";
 import type { SeriePrecoFixture, TipoFonte } from "@/lib/fixtures/seriePrecos";
 import type { StatusDominio } from "@/lib/domain/status";
@@ -44,7 +46,8 @@ const TIPO_FONTE_MAP: Record<string, TipoFonte> = {
 
 export default async function ProcessoDetalhePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const processo = await obterProcessoDetalhado(id);
+  const [user, processo] = await Promise.all([requireAuth(), obterProcessoDetalhado(id)]);
+  const podeRevisarStatus = hasPermission(user.role, "revisao");
 
   if (!processo) {
     return (
@@ -74,6 +77,11 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
     faseAndamento: processo.faseAndamento,
     dataAbertura: processo.dataAbertura.toISOString().slice(0, 10),
   };
+
+  const itensResumo = processo.itens.map((item) => ({
+    id: item.id,
+    descricao: item.descricao,
+  }));
 
   const fontes: FonteResumo[] = processo.itens.flatMap((item) =>
     item.fontes.map((f) => ({
@@ -167,6 +175,13 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
         acoes={
           <>
             <ConformidadePanel conformidade={conformidade} processoId={processo.id} />
+            {podeRevisarStatus && (
+              <AlterarStatusDialog
+                processoId={processo.id}
+                numero={processo.numero}
+                statusAtual={processoMapeado.status}
+              />
+            )}
             <ExcluirProcessoDialog processoId={processo.id} numero={processo.numero} />
             <AssistenteToggle rotulo="Assistente" />
           </>
@@ -179,6 +194,7 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
         cotacoes={cotacoes}
         serie={serie}
         fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
+        itens={itensResumo}
       />
     </div>
   );

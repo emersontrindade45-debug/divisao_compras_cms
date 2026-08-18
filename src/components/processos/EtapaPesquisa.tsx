@@ -13,6 +13,7 @@ import {
 import { EmptyState } from "@/components/common/EmptyState";
 import { PesquisaSimilaridadeUploadForm } from "./PesquisaSimilaridadeUploadForm";
 import { PreencherCotacaoForm } from "./PreencherCotacaoForm";
+import { CadastrarFonteForm, type ItemOption } from "./CadastrarFonteForm";
 import { formatBRL, formatDate } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
@@ -62,10 +63,12 @@ export function EtapaPesquisa({
   processoId,
   fontes,
   fontesSimilaridade,
+  itens,
 }: {
   processoId: string;
   fontes: FonteResumo[];
   fontesSimilaridade?: ReactNode;
+  itens: ItemOption[];
 }) {
   return (
     <div className="space-y-8">
@@ -84,11 +87,12 @@ export function EtapaPesquisa({
           titulo={`Fontes registradas (${fontes.length})`}
           descricao="Preços já promovidos a fonte oficial deste processo, por item."
         />
+        <CadastrarFonteForm itens={itens} />
         {fontes.length === 0 ? (
           <EmptyState
             icon={Globe}
             title="Nenhuma fonte registrada ainda"
-            description="Promova resultados da pesquisa por similaridade ou registre fontes pelas telas de contratações, sites e cotações."
+            description="Promova resultados da pesquisa por similaridade acima ou cadastre uma fonte manualmente, se a pesquisa já foi feita fora do sistema."
           />
         ) : (
           <Card>

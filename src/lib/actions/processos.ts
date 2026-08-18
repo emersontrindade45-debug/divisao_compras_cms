@@ -48,6 +48,10 @@ export async function atualizarStatusProcesso(
     detalhes: { statusAnterior: processo.status, statusNovo: status, justificativa },
   });
 
+  revalidatePath("/dashboard");
+  revalidatePath("/processos");
+  revalidatePath(`/processos/${processoId}`);
+
   return {};
 }
 
