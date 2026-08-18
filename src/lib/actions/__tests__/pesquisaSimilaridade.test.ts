@@ -146,3 +146,60 @@ describe("processarPesquisaSimilaridade — metadados de preço de referência (
     });
   });
 });
+
+// Orçamento de tempo do laço de itens (ORCAMENTO_TEMPO_ITENS_MS em
+// pesquisaSimilaridade.ts) — sem ele, um processo com muitos itens/TR grande
+// estourava o `maxDuration = 60` da rota e a Vercel matava a função sem
+// resposta estruturada (504 no processo 908/2022, ver CLAUDE.md §9.64).
+describe("processarPesquisaSimilaridade — orçamento de tempo do laço de itens", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireAuth.mockResolvedValue(USER);
+    mocks.db.item.findMany.mockResolvedValue([
+      { id: "item-1", descricao: "Item dentro do orçamento", caracteristicasTecnicas: "", unidade: "UN", quantidade: 1, natureza: null, palavrasChave: [], processoId: "proc-1" },
+      { id: "item-2", descricao: "Item fora do orçamento", caracteristicasTecnicas: "", unidade: "UN", quantidade: 1, natureza: null, palavrasChave: [], processoId: "proc-1" },
+    ]);
+    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue(null);
+    mocks.db.resultadoSimilaridade.deleteMany.mockResolvedValue({ count: 0 });
+    mocks.db.resultadoSimilaridade.createMany.mockResolvedValue({ count: 1 });
+    mocks.db.processo.update.mockResolvedValue({});
+    mocks.getProvedorIA.mockReturnValue({
+      extrairEspecificacaoTR: vi.fn().mockResolvedValue([]),
+      extrairContextoTR: vi.fn().mockResolvedValue({ tabelaItens: "", modeloExecucao: "", materiaisEquipamentos: "" }),
+      rankearSimilaridade: vi.fn(),
+    });
+    mocks.buscarCandidatosPublicos.mockResolvedValue([]);
+    mocks.filtrarPorPalavrasChave.mockReturnValue([]);
+    mocks.resolverTermoBusca.mockReturnValue("termo");
+    mocks.rankearCandidatos.mockResolvedValue([]);
+  });
+
+  it("processa item dentro do orçamento e ignora, sem nenhuma chamada de rede/banco, o item que estourou o tempo", async () => {
+    // Relógio determinístico: chamada 1 = início do laço (t=0); a checagem de
+    // cada item roda de forma síncrona antes do primeiro `await` da tarefa
+    // (`processarComConcorrencia` cria os workers em sequência), então a
+    // ordem das chamadas segue a ordem dos itens.
+    const tempos = [0, 5_000, 35_000];
+    let chamada = 0;
+    const agoraFake = () => tempos[Math.min(chamada++, tempos.length - 1)];
+
+    const resultado = await processarPesquisaSimilaridade("proc-1", trFile(), { agora: agoraFake });
+
+    const itens = resultado.data?.itensProcessados ?? [];
+    const item1 = itens.find((i) => i.itemId === "item-1");
+    const item2 = itens.find((i) => i.itemId === "item-2");
+
+    expect(item1?.status).toBe("sucesso");
+    expect(item2).toMatchObject({
+      status: "ignorado",
+      erro: "Tempo de processamento esgotado neste turno. Rode a pesquisa novamente para processar os itens restantes.",
+    });
+
+    // A prova de que o item fora do orçamento não fez NENHUM trabalho (não só
+    // que foi rotulado como ignorado): se a checagem fosse removida, esta
+    // asserção cairia porque findFirst seria chamado 2x, não 1x.
+    expect(mocks.db.resultadoSimilaridade.findFirst).toHaveBeenCalledTimes(1);
+    expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledTimes(1);
+    expect(mocks.rankearCandidatos).toHaveBeenCalledTimes(1);
+  });
+});

@@ -18,6 +18,27 @@ import type { ActionResult } from "./processos";
 // serverless quando essas fontes estão instáveis (retries + backoff por item).
 const LIMITE_CONCORRENCIA_ITENS = 4;
 
+/**
+ * Orçamento de tempo do laço de itens, mesmo padrão de `ORCAMENTO_TEMPO_TURNO_MS`
+ * em `src/lib/assistente/laco.ts`.
+ *
+ * A página do processo declara `maxDuration = 60` (page.tsx). A extração do TR
+ * (duas chamadas OpenAI em paralelo, logo acima) agora está limitada a ~20s pelo
+ * client (`TIMEOUT_OPENAI_MS` em `openaiClient.ts`) — sem isso, o SDK herda um
+ * timeout de ~10min e uma chamada presa consumia sozinha o teto da função,
+ * derrubando-a sem resposta estruturada (o 504 relatado no processo 908/2022).
+ * Reserva-se ~5s para persistir o contexto do TR, gravar auditoria e revalidar
+ * a rota; o restante (~30s) é este orçamento.
+ *
+ * Checado ANTES de cada item começar a ser processado — nunca interrompe um
+ * item já em curso (mesma limitação aceita em `laco.ts`; os tetos internos de
+ * cada integração cobrem essa ponta). Item que não coube no orçamento volta
+ * como `status: "ignorado"`, sem nenhuma chamada de rede/IA/banco — a resposta
+ * sempre retorna ao cliente dentro do `maxDuration`, com um resultado por item
+ * (mesmo que parcial), em vez de a função ser morta em silêncio.
+ */
+const ORCAMENTO_TEMPO_ITENS_MS = 30_000;
+
 export interface ItemProcessadoSimilaridade {
   itemId: string;
   descricao: string;
@@ -51,7 +72,9 @@ function casarItemComExtrato(
 export async function processarPesquisaSimilaridade(
   processoId: string,
   formData: FormData,
+  opcoes: { agora?: () => number } = {},
 ): Promise<ActionResult<ResultadoPesquisaSimilaridade>> {
+  const agora = opcoes.agora ?? Date.now;
   const user = await requireAuth();
 
   const trPdfFile = formData.get("trPdf");
@@ -104,11 +127,23 @@ export async function processarPesquisaSimilaridade(
   }
 
   const mensagensErroPorItem = new Map<string, string>();
+  const inicioLoopItens = agora();
 
   const resultados = await processarComConcorrencia(
     itens,
     LIMITE_CONCORRENCIA_ITENS,
     async (item): Promise<ItemProcessadoSimilaridade> => {
+      if (agora() - inicioLoopItens >= ORCAMENTO_TEMPO_ITENS_MS) {
+        return {
+          itemId: item.id,
+          descricao: item.descricao,
+          totalCandidatos: 0,
+          status: "ignorado",
+          erro:
+            "Tempo de processamento esgotado neste turno. Rode a pesquisa novamente para processar os itens restantes.",
+        };
+      }
+
       const jaPromovido = await db.resultadoSimilaridade.findFirst({
         where: { itemId: item.id, promovidoParaFonte: true },
         select: { id: true },

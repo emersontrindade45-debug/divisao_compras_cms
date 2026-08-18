@@ -72,11 +72,20 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
   const itensComFontes = itens.filter((item) => item.resultadosSimilaridade.length > 0);
 
   if (itensComFontes.length === 0) {
-    return (
+    // Distingue "planilha ainda não sincronizada" de "itens existem, falta
+    // rodar a pesquisa" — sem isso, os dois casos mostravam a mesma mensagem
+    // genérica e um sync bem-sucedido parecia ter "sumido" com os itens.
+    return itens.length === 0 ? (
       <EmptyState
         icon={ExternalLink}
-        title="Nenhuma fonte encontrada ainda"
-        description="Faça a pesquisa por similaridade para localizar contratações públicas comprobatórias."
+        title="Nenhum item cadastrado"
+        description="Sincronize a planilha do processo para importar os itens antes de pesquisar similaridade."
+      />
+    ) : (
+      <EmptyState
+        icon={ExternalLink}
+        title="Itens aguardando pesquisa de similaridade"
+        description={`${itens.length} ${itens.length === 1 ? "item importado" : "itens importados"} da planilha. Envie o Termo de Referência (TR) acima para buscar contratos públicos similares.`}
       />
     );
   }

@@ -182,4 +182,31 @@ describe("FontesSimilaridadeList", () => {
     expect(screen.getByText(/R\$\s*997,50/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Roteiro de cálculo de Órgão Z/ })).toBeInTheDocument();
   });
+
+  // Sem esta distinção, sincronizar a planilha e não ter rodado a pesquisa
+  // ainda mostrava a MESMA mensagem genérica de "processo sem itens" — dava a
+  // impressão de que os itens recém-importados haviam sumido.
+  it("avisa que a planilha precisa ser sincronizada quando não há nenhum item", async () => {
+    mocks.obterFontesSimilaridade.mockResolvedValue([]);
+
+    const jsx = await FontesSimilaridadeList({ processoId: "proc-1" });
+    render(jsx);
+
+    expect(screen.getByText("Nenhum item cadastrado")).toBeInTheDocument();
+    expect(screen.getByText(/Sincronize a planilha/)).toBeInTheDocument();
+  });
+
+  it("avisa que falta rodar a pesquisa quando os itens existem mas nenhum tem resultado", async () => {
+    mocks.obterFontesSimilaridade.mockResolvedValue([
+      { ...ITEM_BASE, resultadosSimilaridade: [] },
+      { ...ITEM_BASE, id: "item-2", resultadosSimilaridade: [] },
+    ]);
+
+    const jsx = await FontesSimilaridadeList({ processoId: "proc-1" });
+    render(jsx);
+
+    expect(screen.getByText("Itens aguardando pesquisa de similaridade")).toBeInTheDocument();
+    expect(screen.getByText(/2 itens importados da planilha/)).toBeInTheDocument();
+    expect(screen.queryByText("Nenhum item cadastrado")).not.toBeInTheDocument();
+  });
 });
