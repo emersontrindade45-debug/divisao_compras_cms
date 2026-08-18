@@ -55,7 +55,7 @@ export function FornecedoresPageClient({ fornecedores, historico }: Fornecedores
       if (filtros.busca) {
         const termo = filtros.busca.toLowerCase();
         const matchRazao = f.razaoSocial.toLowerCase().includes(termo);
-        const matchCnpj = f.cnpj.includes(termo);
+        const matchCnpj = f.cnpj?.includes(termo) ?? false;
         if (!matchRazao && !matchCnpj) return false;
       }
 

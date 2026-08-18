@@ -31,6 +31,9 @@ export async function qualificarFornecedor(
     select: { id: true, cnpj: true, razaoSocial: true },
   });
   if (!fornecedor) return { error: "Fornecedor não encontrado." };
+  if (!fornecedor.cnpj) {
+    return { error: "Fornecedor sem CNPJ cadastrado — não é possível consultar situação cadastral." };
+  }
 
   const dataConsulta = new Date();
 

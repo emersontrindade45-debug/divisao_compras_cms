@@ -15,6 +15,6 @@ describe("FornecedoresTable", () => {
 
   it("mostra o CNPJ do primeiro fornecedor", () => {
     render(<FornecedoresTable fornecedores={FORNECEDORES} onVerHistorico={vi.fn()} />);
-    expect(screen.getByText(FORNECEDORES[0].cnpj)).toBeInTheDocument();
+    expect(screen.getByText(FORNECEDORES[0].cnpj as string)).toBeInTheDocument();
   });
 });

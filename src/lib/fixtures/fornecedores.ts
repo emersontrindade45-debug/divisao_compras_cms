@@ -1,6 +1,6 @@
 export interface FornecedorFixture {
   id: string;
-  cnpj: string;
+  cnpj: string | null;
   razaoSocial: string;
   nomeFantasia?: string;
   categoria: string[];

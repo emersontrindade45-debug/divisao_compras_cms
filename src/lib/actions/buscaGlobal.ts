@@ -12,7 +12,7 @@ export interface ProcessoBuscaGlobal {
 export interface FornecedorBuscaGlobal {
   id: string;
   razaoSocial: string;
-  cnpj: string;
+  cnpj: string | null;
   cidade: string;
   estado: string;
 }

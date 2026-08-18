@@ -220,7 +220,8 @@ export function GlobalSearch() {
                             >
                               <span className="font-medium">{f.razaoSocial}</span>
                               <span className="ml-2 text-muted-foreground">
-                                {f.cnpj} · {f.cidade}/{f.estado}
+                                {f.cnpj ? `${f.cnpj} · ` : ""}
+                                {f.cidade}/{f.estado}
                               </span>
                             </Link>
                           </li>
