@@ -17,6 +17,8 @@ const REGRAS_FORMATO = [
   'Linhas de legenda e rodapé ("Em conformidade...", "Preços Válidos" etc.) são ignoradas automaticamente.',
   'O título do processo vem do nome do arquivo no Google Sheets — inclua uma descrição antes do número (ex.: "e-CPF e e-CNPJ - Proc_2433/2025").',
   "O número do processo é extraído do nome do arquivo (formato: Proc_NNNN/AAAA).",
+  'Para o preço público voltar à planilha automaticamente, a aba precisa ter ao menos uma coluna cujo cabeçalho comece com "Preço Público" (ex.: "Preço Público I"); sem essa coluna, o valor não é escrito em lugar nenhum.',
+  "O preço só é escrito em célula vazia dessa coluna — preço já lançado ali (manual ou de sincronização anterior) nunca é sobrescrito; se todas as colunas de preço público da linha já estiverem ocupadas, o item fica sem ser preenchido.",
 ];
 
 export function SincronizarPlanilhaForm({ defaultUrl }: { defaultUrl?: string }) {
