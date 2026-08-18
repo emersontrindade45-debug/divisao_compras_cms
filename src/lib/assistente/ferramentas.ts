@@ -4,7 +4,8 @@ import { db } from "@/lib/db";
 import { avaliarConformidade } from "@/lib/domain/conformidade";
 import { MIN_FORNECEDORES_PESQUISA_DIRETA } from "@/lib/domain/in65Rules";
 import { CV_ANALISE_CRITICA } from "@/lib/domain/priceStats";
-import { buscarContratosPNCP } from "@/lib/integracoes/pncp";
+import { filtrarPorValor } from "@/lib/integracoes/pncp";
+import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPublicos";
 import {
   buscarWebPerplexity,
   perplexityConfigurada,
@@ -43,6 +44,17 @@ import {
 
 /** Quantos resultados de busca web voltam ao modelo (o resto vira ruído caro). */
 const MAX_RESULTADOS_WEB = 8;
+
+/**
+ * Teto de tempo por provedor em `buscar_pncp`, sobrescrevendo o padrão de 25s
+ * do registry (`REGISTRY_PROVEDORES_PUBLICOS`). Igual ao prazo real que o
+ * próprio PNCP já se impõe internamente (`TEMPO_MAX_BUSCA_MS` em
+ * `integracoes/pncp.ts`) — os outros três provedores (Painel de Preços,
+ * Compras.gov/catálogo, SINAPI) passam a respeitar o mesmo teto, então trocar
+ * de 1 para 4 fontes não muda o pior caso de tempo que `ORCAMENTO_TEMPO_TURNO_MS`
+ * (35s, `laco.ts`) já foi calibrado para tolerar.
+ */
+const TIMEOUT_BUSCA_ASSISTENTE_MS = 12_000;
 
 export interface ContextoFerramentas {
   userId: string;
@@ -469,8 +481,11 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     valorMaximo?: number,
   ) {
     const temFiltroValor = valorMinimo !== undefined || valorMaximo !== undefined;
-    const buscados = await buscarContratosPNCP(termo, { valorMinimo, valorMaximo });
-    const encontrados = await demoverJaDescartados(ctx.processoId, buscados);
+    const buscados = await buscarCandidatosPublicos(termo, {
+      timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
+    });
+    const filtrados = filtrarPorValor(buscados, { valorMinimo, valorMaximo });
+    const encontrados = await demoverJaDescartados(ctx.processoId, filtrados);
 
     // Nenhum candidato é excluído por já ter sido descartado numa busca
     // anterior — o card continua podendo aparecer, e o analista pode mudar de
@@ -483,10 +498,11 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           total: 0,
           candidatos: [],
           observacao: temFiltroValor
-            ? "O PNCP não devolveu nada para este termo dentro da faixa de valor informada. " +
-              "Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
-            : "O PNCP não devolveu nada para este termo. Tente outro recorte: troque o " +
-              "substantivo-núcleo, remova qualificadores ou use o nome comercial do produto.",
+            ? "Nenhuma fonte pública devolveu nada para este termo dentro da faixa de valor " +
+              "informada. Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
+            : "Nenhuma fonte pública (PNCP, Painel de Preços, Compras.gov, SINAPI) devolveu nada " +
+              "para este termo. Tente outro recorte: troque o substantivo-núcleo, remova " +
+              "qualificadores ou use o nome comercial do produto.",
         },
         sugestoes: [] as CandidatoSugerido[],
       };
@@ -826,11 +842,13 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     {
       nome: "buscar_pncp",
       descricao:
-        "Busca contratações públicas no PNCP — a fonte prioritária da IN 65/2021. Devolve " +
-        "candidatos com id, valor unitário, órgão e data. Contratações da própria Câmara já são " +
-        "excluídas. Varie o termo entre chamadas em vez de repetir o mesmo. Cada candidato já " +
-        "aparece na tela do usuário como cartão com link e botão de adicionar — você não " +
-        "registra nada, apenas ajuda a avaliar.",
+        "Busca contratações e preços públicos — a fonte prioritária da IN 65/2021 — em todas as " +
+        "fontes conectadas de uma vez (PNCP, Painel de Preços, catálogo CATMAT/CATSER do " +
+        "Compras.gov e SINAPI). Devolve candidatos com id, valor unitário, órgão e data, já " +
+        "deduplicados entre fontes. Contratações da própria Câmara já são excluídas. Varie o " +
+        "termo entre chamadas em vez de repetir o mesmo. Cada candidato já aparece na tela do " +
+        "usuário como cartão com link e botão de adicionar — você não registra nada, apenas " +
+        "ajuda a avaliar.",
       parametros: {
         type: "object",
         properties: {

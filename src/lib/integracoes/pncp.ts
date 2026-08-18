@@ -579,14 +579,16 @@ export interface FiltroValorPNCP {
 }
 
 /**
- * Aplica a faixa de valor sobre os candidatos já buscados. O PNCP não tem
- * parâmetro de faixa de valor em nenhum dos endpoints usados aqui (busca
- * textual e itens/resultados de uma compra) — o filtro só existe no lado da
- * aplicação, depois que o preço homologado já foi resolvido. Como
+ * Aplica a faixa de valor sobre os candidatos já buscados. Nenhuma das fontes
+ * públicas (PNCP, Painel de Preços, Compras.gov/catálogo, SINAPI) tem
+ * parâmetro de faixa de valor nativo — o filtro só existe no lado da
+ * aplicação, depois que o preço homologado já foi resolvido. Reusado por
+ * `lib/assistente/ferramentas.ts` sobre o resultado já mesclado de
+ * `buscarCandidatosPublicos`, não só sobre o PNCP puro. Como
  * `buscarItensDaCompra` já descarta todo item sem homologado, `valorUnitario`
  * aqui é sempre o preço efetivamente contratado, nunca o estimado.
  */
-function filtrarPorValor(
+export function filtrarPorValor(
   candidatos: CandidatoSimilaridade[],
   filtro?: FiltroValorPNCP,
 ): CandidatoSimilaridade[] {

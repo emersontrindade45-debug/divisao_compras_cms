@@ -101,6 +101,35 @@ describe("buscarCandidatosPublicos", () => {
     erroSpy.mockRestore();
   });
 
+  it("opcoes.timeoutMsPorProvedor sobrescreve o timeout padrão do registry", async () => {
+    vi.useFakeTimers();
+
+    const candidatoPainel: CandidatoSimilaridade = {
+      tipoCandidato: "painel_precos",
+      fonteDescricao: "Mesa",
+      fonteOrgaoOuId: "Org B",
+      valorUnitario: 400,
+      dataReferencia: new Date(),
+      unidade: "unidade",
+      quantidade: 1,
+    };
+
+    // Provedor travado; o timeout padrão do registry é 25s (TIMEOUT_PADRAO_MS)
+    // — se a sobrescrita não fosse respeitada, avançar só 12s não bastaria
+    // para resolver a busca.
+    vi.spyOn(pncp, "buscarContratosPNCP").mockReturnValue(new Promise(() => {}));
+    vi.spyOn(painelPrecos, "buscarPrecosPainelPrecos").mockResolvedValue([candidatoPainel]);
+    const erroSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const promessa = buscarCandidatosPublicos("mesa", { timeoutMsPorProvedor: 12_000 });
+    await vi.advanceTimersByTimeAsync(12_000);
+    const resultado = await promessa;
+
+    expect(resultado).toEqual([candidatoPainel]);
+    expect(erroSpy).toHaveBeenCalled();
+    erroSpy.mockRestore();
+  });
+
   it("deduplica candidatos que chegam de mais de um provedor para a mesma contratação", async () => {
     const dataReferencia = new Date("2026-01-10T00:00:00.000Z");
     const candidatoPncp: CandidatoSimilaridade = {

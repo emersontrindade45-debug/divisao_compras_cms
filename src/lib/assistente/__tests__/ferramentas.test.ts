@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
     seriePreco: { create: vi.fn(), findFirst: vi.fn() },
   },
   registrarAuditoria: vi.fn(),
-  buscarContratosPNCP: vi.fn(),
+  buscarCandidatosPublicos: vi.fn(),
   buscarWebPerplexity: vi.fn(),
   perplexityConfigurada: vi.fn(),
   rankearCandidatos: vi.fn(),
@@ -22,7 +22,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
-vi.mock("@/lib/integracoes/pncp", () => ({ buscarContratosPNCP: mocks.buscarContratosPNCP }));
+vi.mock("@/lib/similaridade/buscarCandidatosPublicos", () => ({
+  buscarCandidatosPublicos: mocks.buscarCandidatosPublicos,
+}));
 vi.mock("@/lib/integracoes/perplexity", () => ({
   buscarWebPerplexity: mocks.buscarWebPerplexity,
   perplexityConfigurada: mocks.perplexityConfigurada,
@@ -102,7 +104,7 @@ describe("registry de ferramentas do assistente", () => {
     mocks.db.item.findUnique.mockResolvedValue(ITEM);
     mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([]);
     mocks.db.resultadoSimilaridade.createMany.mockResolvedValue({ count: 1 });
-    mocks.buscarContratosPNCP.mockResolvedValue([candidato()]);
+    mocks.buscarCandidatosPublicos.mockResolvedValue([candidato()]);
     mocks.rankearCandidatos.mockResolvedValue([RANQUEADO]);
   });
 
@@ -215,7 +217,7 @@ describe("registry de ferramentas do assistente", () => {
       });
 
       expect(resultado.erro).toMatch(/JSON/i);
-      expect(mocks.buscarContratosPNCP).not.toHaveBeenCalled();
+      expect(mocks.buscarCandidatosPublicos).not.toHaveBeenCalled();
     });
 
     it("devolve erro legível quando falta campo obrigatório", async () => {
@@ -227,7 +229,7 @@ describe("registry de ferramentas do assistente", () => {
     });
 
     it("devolve erro em vez de lançar quando a ferramenta externa falha", async () => {
-      mocks.buscarContratosPNCP.mockRejectedValue(new Error("PNCP fora do ar"));
+      mocks.buscarCandidatosPublicos.mockRejectedValue(new Error("PNCP fora do ar"));
       const registry = montarRegistry(CTX_PROCESSO);
 
       const resultado = await registry.executar({
@@ -252,8 +254,8 @@ describe("registry de ferramentas do assistente", () => {
     });
   });
 
-  it("orienta a variar o termo quando o PNCP não devolve nada", async () => {
-    mocks.buscarContratosPNCP.mockResolvedValue([]);
+  it("orienta a variar o termo quando nenhuma fonte devolve nada", async () => {
+    mocks.buscarCandidatosPublicos.mockResolvedValue([]);
     const registry = montarRegistry(CTX_PROCESSO);
 
     const resposta = await chamar(registry, "buscar_pncp", { termo: "objeto genérico" });
@@ -270,7 +272,7 @@ describe("registry de ferramentas do assistente", () => {
 
   describe("buscar_pncp — descartados não somem, só perdem prioridade", () => {
     it("empurra candidato já descartado para o fim, sem excluí-lo", async () => {
-      mocks.buscarContratosPNCP.mockResolvedValue([
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
         candidato({ fonteUrl: "https://pncp.gov.br/app/editais/A" }),
         candidato({ fonteUrl: "https://pncp.gov.br/app/editais/B" }),
         candidato({ fonteUrl: "https://pncp.gov.br/app/editais/C" }),
@@ -313,24 +315,29 @@ describe("registry de ferramentas do assistente", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Filtro de valor: o PNCP não tem esse parâmetro nativamente (ver pncp.ts),
-  // o modelo só pode pedir a faixa — quem filtra é buscarContratosPNCP.
+  // Filtro de valor: nenhuma fonte pública tem esse parâmetro nativamente
+  // (ver pncp.ts, filtrarPorValor) — o modelo só pode pedir a faixa, e o
+  // filtro é aplicado localmente sobre o resultado já mesclado das 4 fontes.
   // -------------------------------------------------------------------------
 
   describe("buscar_pncp — faixa de valor", () => {
-    it("repassa valorMinimo/valorMaximo para buscarContratosPNCP", async () => {
+    it("busca sem a faixa e filtra localmente o resultado mesclado", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({ valorUnitario: 20 }),
+        candidato({ valorUnitario: 999, fonteUrl: "https://pncp.gov.br/app/editais/fora-da-faixa" }),
+      ]);
       const registry = montarRegistry(CTX_PROCESSO);
 
-      await chamar(registry, "buscar_pncp", {
+      const resposta = await chamar(registry, "buscar_pncp", {
         termo: "cadeira",
         valorMinimo: 18,
         valorMaximo: 25,
       });
 
-      expect(mocks.buscarContratosPNCP).toHaveBeenCalledWith("cadeira", {
-        valorMinimo: 18,
-        valorMaximo: 25,
+      expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("cadeira", {
+        timeoutMsPorProvedor: expect.any(Number),
       });
+      expect(resposta.total).toBe(1);
     });
 
     it("rejeita valorMinimo maior que valorMaximo", async () => {
@@ -343,11 +350,11 @@ describe("registry de ferramentas do assistente", () => {
       });
 
       expect(resposta.erro).toMatch(/valorMinimo/);
-      expect(mocks.buscarContratosPNCP).not.toHaveBeenCalled();
+      expect(mocks.buscarCandidatosPublicos).not.toHaveBeenCalled();
     });
 
     it("orienta a ampliar a faixa (não o termo) quando o filtro de valor zera o resultado", async () => {
-      mocks.buscarContratosPNCP.mockResolvedValue([]);
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({ valorUnitario: 999 })]);
       const registry = montarRegistry(CTX_PROCESSO);
 
       const resposta = await chamar(registry, "buscar_pncp", {

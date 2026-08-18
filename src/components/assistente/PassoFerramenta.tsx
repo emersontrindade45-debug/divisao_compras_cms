@@ -26,7 +26,7 @@ const ROTULOS: Record<string, string> = {
   ler_candidatos: "Lendo os candidatos já encontrados",
   ler_conformidade: "Conferindo a conformidade (IN 65/2021)",
   busca_global: "Procurando o processo",
-  buscar_pncp: "Buscando contratações no PNCP",
+  buscar_pncp: "Buscando preços e contratações públicas",
   buscar_web: "Pesquisando na web",
   registrar_candidatos: "Registrando candidatos no item",
 };

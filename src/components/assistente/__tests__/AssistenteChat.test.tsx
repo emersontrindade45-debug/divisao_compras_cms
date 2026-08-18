@@ -161,7 +161,7 @@ describe("AssistenteChat", () => {
     perguntar("procure");
 
     await waitFor(() => {
-      expect(screen.getByText("Buscando contratações no PNCP")).toBeInTheDocument();
+      expect(screen.getByText("Buscando preços e contratações públicas")).toBeInTheDocument();
     });
     // O termo pesquisado aparece; o JSON cru dos argumentos, não.
     expect(screen.getByText(/cadeira giratória/)).toBeInTheDocument();
@@ -341,7 +341,7 @@ describe("AssistenteChat", () => {
     perguntar("procure");
 
     await waitFor(() => {
-      expect(screen.getByText("Buscando contratações no PNCP")).toBeInTheDocument();
+      expect(screen.getByText("Buscando preços e contratações públicas")).toBeInTheDocument();
     });
     expect(container.querySelector(".animate-spin")).not.toBeNull();
   });
@@ -358,7 +358,7 @@ describe("AssistenteChat", () => {
     expect(container.querySelector(".animate-spin")).toBeNull();
     // O passo continua listado: o usuário precisa ver o que chegou a ser
     // tentado, e o termo é o que ele vai encurtar na próxima tentativa.
-    expect(screen.getByText("Buscando contratações no PNCP")).toBeInTheDocument();
+    expect(screen.getByText("Buscando preços e contratações públicas")).toBeInTheDocument();
   });
 
   it("o turno completo não dispara o aviso de interrupção", async () => {

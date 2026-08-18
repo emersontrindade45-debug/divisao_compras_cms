@@ -22,12 +22,32 @@ import { deduplicarCandidatos } from "./deduplicarCandidatos";
  * juntar os resultados: a mesma contratação pode aparecer tanto no PNCP
  * quanto no Painel de Preços/Compras.gov.
  */
-export async function buscarCandidatosPublicos(termo: string): Promise<CandidatoSimilaridade[]> {
+export interface OpcoesBuscarCandidatosPublicos {
+  /**
+   * Sobrescreve o `timeoutMs` de cada provedor do registry. Usado pelo
+   * assistente de IA (`lib/assistente/ferramentas.ts`), cujo orçamento por
+   * turno (`ORCAMENTO_TEMPO_TURNO_MS`, 35s) é bem mais apertado que o da
+   * Server Action síncrona (`pesquisaSimilaridade.ts`) — sem isso, uma única
+   * chamada de ferramenta poderia gastar os 25s padrão de cada provedor e
+   * estourar o `maxDuration` da rota de chat (CLAUDE.md §9.64/65). Omitido,
+   * usa o `timeoutMs` que cada provedor já declara no registry.
+   */
+  timeoutMsPorProvedor?: number;
+}
+
+export async function buscarCandidatosPublicos(
+  termo: string,
+  opcoes: OpcoesBuscarCandidatosPublicos = {},
+): Promise<CandidatoSimilaridade[]> {
   const provedoresHabilitados = REGISTRY_PROVEDORES_PUBLICOS.filter((provedor) => provedor.habilitado);
 
   const resultados = await Promise.allSettled(
     provedoresHabilitados.map((provedor) =>
-      comTimeout(provedor.buscar(termo), provedor.timeoutMs, provedor.chave),
+      comTimeout(
+        provedor.buscar(termo),
+        opcoes.timeoutMsPorProvedor ?? provedor.timeoutMs,
+        provedor.chave,
+      ),
     ),
   );
 
