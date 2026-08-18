@@ -1541,3 +1541,49 @@ todo dia 1º) caso não aceite, então isto deixou de ser bloqueante, só não f
 `/api/jobs/lembretes`) e é reaproveitado aqui — não foi criada variável nova. (3) SINAPI segue sem
 dado em produção — exige upload manual do `.xlsx` (WAF da Caixa bloqueia download automatizado, ver
 M17), fora do escopo desta entrada.
+
+## M24.2 — Extração do TR: texto integral (sem IA) em vez de 3 campos fixos (2026-08-18)
+
+Origem: usuário reportou que o assistente não conseguia resumir o TR do processo 908/2022 — "tabela
+de itens" e "modelo de execução" vinham vazios. Causa raiz confirmada lendo o PDF real anexado pelo
+usuário: `ContextoTR` (schema antigo) pedia à IA três campos por título de seção fixo ("Modelo de
+execução", "Materiais e equipamentos"). O TR do 908/2022 é serviço contínuo (limpeza), cuja estrutura
+não usa essa nomenclatura — o conteúdo equivalente está em subseções de "5. ESPECIFICAÇÕES" com nomes
+próprios (5.11 Lista de equipamentos, 5.3 Da limpeza do espelho d'água). A IA, seguindo a instrução
+ao pé da letra, devolvia string vazia para "seção não encontrada" — exatamente como o prompt mandava.
+
+**Correção:** troca a extração por `extrairTextoPdf` (`src/lib/ia/extrairTextoPdf.ts`), sem IA — o
+texto integral do PDF vai para `Processo.trContexto`, sem seleção prévia de seção. `lerTR` no
+assistente devolve esse texto bruto; a ferramenta `ler_tr` foi reescrita para instruir o modelo a
+localizar objeto/especificações/materiais/obrigações no texto corrido, cobrindo bens, serviços
+contínuos e obras — nunca espera título de seção fixo.
+
+**Escopo reduzido na mesma entrega, a pedido do usuário:** removida a segunda fase (busca síncrona de
+contratos similares) do formulário de upload na página do processo — ficava sujeita a instabilidade
+momentânea das APIs públicas (PNCP/Compras.gov) sem chance de refinar o termo na mesma interação. A
+tela agora só faz upload + extração do TR; a busca de similaridade é exclusiva do assistente de IA
+(`buscar_pncp`), que já lê o TR via `ler_tr`. `buscarSimilaridadeItens` continua existindo em
+`pesquisaSimilaridade.ts` para reprocessamento futuro, mas nenhuma UI a chama hoje.
+
+**Incidente em produção durante o deploy: `ReferenceError: DOMMatrix is not defined`.** Primeira
+versão usava `pdf-parse@2.4.5`, que importa o build `legacy` de `pdfjs-dist` — este arrasta um
+renderer de canvas inteiro e referencia `DOMMatrix` na avaliação do módulo, mesmo só chamando
+`getText()`. Em runtime Node serverless (sem `document`/`DOMMatrix`), o import falhava antes de
+qualquer handler rodar, derrubando a página `/processos/[id]` inteira (mesmo padrão do §9.54: recurso
+externo inicializado na avaliação do módulo). Trocado para `unpdf` — feito para runtimes serverless,
+só carrega `@napi-rs/canvas` (peer dependency opcional) quando `extractImages`/`renderPageAsImage`
+são chamadas, o que não é o caso aqui. Confirmado por dois caminhos: (1) mecanicamente, rodando a
+extração com `globalThis.document`/`globalThis.DOMMatrix` ambos `undefined`; (2) em produção, via
+`get_runtime_errors` da Vercel — o digest `775062324` não reapareceu depois do redeploy, e o usuário
+confirmou o upload do TR funcionando no navegador.
+
+**Verificação.** 986 testes passando, typecheck e lint limpos, `pnpm build` local verde. Deploy real
+(`d1f2989`) confirmado `READY` em produção via `get_deployment` (alias inclui o domínio de produção),
+sem erros de runtime na janela seguinte, e exercitado pelo usuário — upload do TR do 908/2022
+funcionando (§9.30: só "build verde" não prova aplicação saudável).
+
+**Pendências.** (1) O comentário de `parseNumberBR` em `parsePlanilha.ts` segue com o descompasso já
+registrado em §9.70 (docstring promete tratar "1.000" como milhar sem vírgula, o código não trata) —
+não tocado nesta entrega, fora de escopo. (2) Nenhum teste automatizado cobre o texto extraído contra
+um PDF real de TR — a verificação foi manual (usuário exercitando em produção); um teste de regressão
+com fixture de PDF real ficaria mais forte que os testes atuais (que mockam `extrairTextoPdf`).
