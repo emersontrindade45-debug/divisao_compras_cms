@@ -8,8 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   db: {
-    item: { findMany: vi.fn() },
-    processo: { update: vi.fn() },
+    item: { findMany: vi.fn(), update: vi.fn() },
+    processo: { update: vi.fn(), findUnique: vi.fn() },
     resultadoSimilaridade: {
       findFirst: vi.fn(),
       deleteMany: vi.fn(),
@@ -44,7 +44,7 @@ vi.mock("@/lib/similaridade/extrairTermoBusca", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 
-import { processarPesquisaSimilaridade } from "../pesquisaSimilaridade";
+import { extrairTR, buscarSimilaridadeItens } from "../pesquisaSimilaridade";
 
 const USER = { id: "user-1", role: "pesquisa", email: "u@e.com" };
 
@@ -54,25 +54,108 @@ function trFile(): FormData {
   return fd;
 }
 
-describe("processarPesquisaSimilaridade — metadados de preço de referência (SINAPI)", () => {
+describe("extrairTR — persiste contexto e especificações independentemente da busca de similaridade", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireAuth.mockResolvedValue(USER);
     mocks.db.item.findMany.mockResolvedValue([
       { id: "item-1", descricao: "Assentamento de tubo", caracteristicasTecnicas: "", unidade: "M", quantidade: 10, natureza: null, palavrasChave: [], processoId: "proc-1" },
     ]);
+    mocks.db.processo.update.mockResolvedValue({});
+    mocks.db.item.update.mockResolvedValue({});
+    mocks.getProvedorIA.mockReturnValue({
+      extrairEspecificacaoTR: vi.fn().mockResolvedValue([
+        { descricao: "Assentamento de tubo", especificacaoTecnica: "PVC 100mm", unidade: "M", quantidade: 10, termoBusca: "tubo pvc" },
+      ]),
+      extrairContextoTR: vi.fn().mockResolvedValue({ tabelaItens: "tabela", modeloExecucao: "", materiaisEquipamentos: "" }),
+      rankearSimilaridade: vi.fn(),
+    });
+  });
+
+  it("persiste trContexto e trItensExtraidos no processo, sem tocar na busca de similaridade", async () => {
+    const resultado = await extrairTR("proc-1", trFile());
+
+    expect(resultado.error).toBeUndefined();
+    expect(mocks.db.processo.update).toHaveBeenCalledWith({
+      where: { id: "proc-1" },
+      data: expect.objectContaining({
+        trContexto: JSON.stringify({ tabelaItens: "tabela", modeloExecucao: "", materiaisEquipamentos: "" }),
+        trItensExtraidos: JSON.stringify([
+          { descricao: "Assentamento de tubo", especificacaoTecnica: "PVC 100mm", unidade: "M", quantidade: 10, termoBusca: "tubo pvc" },
+        ]),
+      }),
+    });
+    expect(mocks.buscarCandidatosPublicos).not.toHaveBeenCalled();
+    expect(mocks.rankearCandidatos).not.toHaveBeenCalled();
+  });
+
+  it("persiste a especificação técnica extraída no item correspondente, para o assistente", async () => {
+    await extrairTR("proc-1", trFile());
+
+    expect(mocks.db.item.update).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+      data: { caracteristicasTecnicas: "PVC 100mm" },
+    });
+  });
+
+  it("retorna erro estruturado quando a extração falha, sem persistir nada", async () => {
+    mocks.getProvedorIA.mockReturnValue({
+      extrairEspecificacaoTR: vi.fn().mockRejectedValue(new Error("timeout")),
+      extrairContextoTR: vi.fn().mockResolvedValue({ tabelaItens: "", modeloExecucao: "", materiaisEquipamentos: "" }),
+      rankearSimilaridade: vi.fn(),
+    });
+
+    const resultado = await extrairTR("proc-1", trFile());
+
+    expect(resultado.error).toContain("timeout");
+    expect(mocks.db.processo.update).not.toHaveBeenCalled();
+    expect(mocks.db.item.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("buscarSimilaridadeItens — reaproveita a extração já persistida, sem reprocessar o PDF", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireAuth.mockResolvedValue(USER);
+    mocks.db.processo.findUnique.mockResolvedValue({
+      trItensExtraidos: JSON.stringify([
+        { descricao: "Assentamento de tubo", especificacaoTecnica: "PVC 100mm", unidade: "M", quantidade: 10, termoBusca: "tubo pvc" },
+      ]),
+    });
+    mocks.db.item.findMany.mockResolvedValue([
+      { id: "item-1", descricao: "Assentamento de tubo", caracteristicasTecnicas: "PVC 100mm", unidade: "M", quantidade: 10, natureza: null, palavrasChave: [], processoId: "proc-1" },
+    ]);
     mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue(null);
     mocks.db.resultadoSimilaridade.deleteMany.mockResolvedValue({ count: 0 });
     mocks.db.resultadoSimilaridade.createMany.mockResolvedValue({ count: 1 });
-    mocks.db.processo.update.mockResolvedValue({});
     mocks.getProvedorIA.mockReturnValue({
-      extrairEspecificacaoTR: vi.fn().mockResolvedValue([]),
-      extrairContextoTR: vi.fn().mockResolvedValue({ tabelaItens: "", modeloExecucao: "", materiaisEquipamentos: "" }),
+      extrairEspecificacaoTR: vi.fn(),
+      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn(),
     });
     mocks.buscarCandidatosPublicos.mockResolvedValue([]);
     mocks.filtrarPorPalavrasChave.mockReturnValue([]);
-    mocks.resolverTermoBusca.mockReturnValue("assentamento de tubo");
+    mocks.resolverTermoBusca.mockReturnValue("tubo pvc");
+  });
+
+  it("erro claro quando o TR ainda não foi extraído", async () => {
+    mocks.db.processo.findUnique.mockResolvedValue({ trItensExtraidos: null });
+
+    const resultado = await buscarSimilaridadeItens("proc-1");
+
+    expect(resultado.error).toBe("Envie o Termo de Referência antes de buscar contratos similares.");
+    expect(mocks.db.item.findMany).not.toHaveBeenCalled();
+  });
+
+  it("não chama a extração da IA — só busca e ranqueia a partir do que já foi persistido", async () => {
+    const provedor = mocks.getProvedorIA();
+    mocks.rankearCandidatos.mockResolvedValue([]);
+
+    await buscarSimilaridadeItens("proc-1");
+
+    expect(provedor.extrairEspecificacaoTR).not.toHaveBeenCalled();
+    expect(provedor.extrairContextoTR).not.toHaveBeenCalled();
+    expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("tubo pvc");
   });
 
   it("grava competenciaReferencia/regimeReferencia/localidadeReferencia quando o candidato os traz", async () => {
@@ -102,7 +185,7 @@ describe("processarPesquisaSimilaridade — metadados de preço de referência (
       },
     ]);
 
-    await processarPesquisaSimilaridade("proc-1", trFile());
+    await buscarSimilaridadeItens("proc-1");
 
     expect(mocks.db.resultadoSimilaridade.createMany).toHaveBeenCalledTimes(1);
     const gravado = mocks.db.resultadoSimilaridade.createMany.mock.calls[0]![0].data;
@@ -136,7 +219,7 @@ describe("processarPesquisaSimilaridade — metadados de preço de referência (
       },
     ]);
 
-    await processarPesquisaSimilaridade("proc-1", trFile());
+    await buscarSimilaridadeItens("proc-1");
 
     const gravado = mocks.db.resultadoSimilaridade.createMany.mock.calls[0]![0].data;
     expect(gravado[0]).toMatchObject({
@@ -148,13 +231,15 @@ describe("processarPesquisaSimilaridade — metadados de preço de referência (
 });
 
 // Orçamento de tempo do laço de itens (ORCAMENTO_TEMPO_ITENS_MS em
-// pesquisaSimilaridade.ts) — sem ele, um processo com muitos itens/TR grande
-// estourava o `maxDuration = 60` da rota e a Vercel matava a função sem
-// resposta estruturada (504 no processo 908/2022, ver CLAUDE.md §9.64).
-describe("processarPesquisaSimilaridade — orçamento de tempo do laço de itens", () => {
+// pesquisaSimilaridade.ts) — sem ele, um processo com muitos itens estourava o
+// `maxDuration = 60` da rota e a Vercel matava a função sem resposta
+// estruturada (504 no processo 908/2022, ver CLAUDE.md §9.64). Agora isolado
+// em `buscarSimilaridadeItens`, sem a extração do TR competindo pelo mesmo teto.
+describe("buscarSimilaridadeItens — orçamento de tempo do laço de itens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireAuth.mockResolvedValue(USER);
+    mocks.db.processo.findUnique.mockResolvedValue({ trItensExtraidos: JSON.stringify([]) });
     mocks.db.item.findMany.mockResolvedValue([
       { id: "item-1", descricao: "Item dentro do orçamento", caracteristicasTecnicas: "", unidade: "UN", quantidade: 1, natureza: null, palavrasChave: [], processoId: "proc-1" },
       { id: "item-2", descricao: "Item fora do orçamento", caracteristicasTecnicas: "", unidade: "UN", quantidade: 1, natureza: null, palavrasChave: [], processoId: "proc-1" },
@@ -162,10 +247,9 @@ describe("processarPesquisaSimilaridade — orçamento de tempo do laço de iten
     mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue(null);
     mocks.db.resultadoSimilaridade.deleteMany.mockResolvedValue({ count: 0 });
     mocks.db.resultadoSimilaridade.createMany.mockResolvedValue({ count: 1 });
-    mocks.db.processo.update.mockResolvedValue({});
     mocks.getProvedorIA.mockReturnValue({
-      extrairEspecificacaoTR: vi.fn().mockResolvedValue([]),
-      extrairContextoTR: vi.fn().mockResolvedValue({ tabelaItens: "", modeloExecucao: "", materiaisEquipamentos: "" }),
+      extrairEspecificacaoTR: vi.fn(),
+      extrairContextoTR: vi.fn(),
       rankearSimilaridade: vi.fn(),
     });
     mocks.buscarCandidatosPublicos.mockResolvedValue([]);
@@ -183,7 +267,7 @@ describe("processarPesquisaSimilaridade — orçamento de tempo do laço de iten
     let chamada = 0;
     const agoraFake = () => tempos[Math.min(chamada++, tempos.length - 1)];
 
-    const resultado = await processarPesquisaSimilaridade("proc-1", trFile(), { agora: agoraFake });
+    const resultado = await buscarSimilaridadeItens("proc-1", { agora: agoraFake });
 
     const itens = resultado.data?.itensProcessados ?? [];
     const item1 = itens.find((i) => i.itemId === "item-1");

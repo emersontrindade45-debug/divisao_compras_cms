@@ -20,14 +20,18 @@ import type { SeriePrecoFixture, TipoFonte } from "@/lib/fixtures/seriePrecos";
 import type { StatusDominio } from "@/lib/domain/status";
 
 /**
- * `processarPesquisaSimilaridade` (server action disparada pelo formulário de
- * upload do TR desta página) usa o registry de provedores públicos
- * (docs/ApiPlan.md §3.4) para todos os itens do processo. Um arquivo com
- * `"use server"` só pode exportar funções assíncronas (Next 16/Turbopack) —
- * `maxDuration` não pode morar lá; a configuração de rota vive no segmento
- * (esta página). Mesmo teto e mesma justificativa da rota do assistente
- * (`/api/assistente/chat/route.ts`): 60s é o limite do plano Hobby e é aceito
- * em todos os planos — subir isso exige confirmar o plano da conta antes.
+ * `extrairTR` e `buscarSimilaridadeItens` (server actions disparadas em sequência
+ * pelo formulário de upload do TR desta página — ver `pesquisaSimilaridade.ts`)
+ * usam o registry de provedores públicos (docs/ApiPlan.md §3.4). São duas
+ * requisições separadas propositalmente: cada uma tem seu próprio teto de
+ * `maxDuration`, então a extração do TR (o que o assistente precisa) sempre
+ * termina dentro do teto mesmo que a busca de contratos similares — que roda
+ * depois, com itens — fique parcial. Um arquivo com `"use server"` só pode
+ * exportar funções assíncronas (Next 16/Turbopack) — `maxDuration` não pode
+ * morar lá; a configuração de rota vive no segmento (esta página). Mesmo teto
+ * e mesma justificativa da rota do assistente (`/api/assistente/chat/route.ts`):
+ * 60s é o limite do plano Hobby (confirmado com o usuário em 2026-08-18) e é
+ * aceito em todos os planos — subir isso exige confirmar o plano da conta antes.
  */
 export const maxDuration = 60;
 

@@ -145,29 +145,43 @@ function parseJsonResponse<T>(texto: string, schema: z.ZodType<T>, contexto: str
   return resultado.data;
 }
 
+/**
+ * Teto por chamada só para a extração do TR (`extrairContextoTR`/`extrairEspecificacaoTR`),
+ * mais alto que o padrão de `openaiClient.ts` (20s). Desde que a extração passou a ser uma
+ * Server Action isolada, sem o laço de busca por item competindo pelo mesmo `maxDuration`
+ * (ver `extrairTR` em `pesquisaSimilaridade.ts`), sobra orçamento para um único attempt mais
+ * longo. `maxRetries: 0` é deliberado: repetir uma chamada de visão sobre um PDF grande que já
+ * estourou o timeout tende a estourar de novo pelo mesmo motivo — dois attempts curtos têm
+ * menos chance de concluir do que um attempt longo.
+ */
+const OPCOES_EXTRACAO_TR = { timeout: 50_000, maxRetries: 0 };
+
 export class OpenAIProvider implements ProvedorIA {
   async extrairContextoTR(pdfBuffer: Buffer): Promise<ContextoTR> {
     const ai = getOpenAIClient();
-    const response = await ai.chat.completions.create({
-      model: OPENAI_MODEL,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: PROMPT_CONTEXTO_TR },
-            {
-              type: "file",
-              file: {
-                filename: "tr.pdf",
-                file_data: `data:application/pdf;base64,${pdfBuffer.toString("base64")}`,
+    const response = await ai.chat.completions.create(
+      {
+        model: OPENAI_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: PROMPT_CONTEXTO_TR },
+              {
+                type: "file",
+                file: {
+                  filename: "tr.pdf",
+                  file_data: `data:application/pdf;base64,${pdfBuffer.toString("base64")}`,
+                },
               },
-            },
-          ],
-        },
-      ],
-    });
+            ],
+          },
+        ],
+      },
+      OPCOES_EXTRACAO_TR,
+    );
 
     const texto = response.choices[0]?.message?.content ?? "{}";
     return parseJsonResponse(texto, contextoTRSchema, "extrairContextoTR");
@@ -175,26 +189,29 @@ export class OpenAIProvider implements ProvedorIA {
 
   async extrairEspecificacaoTR(pdfBuffer: Buffer): Promise<ItemExtraidoTR[]> {
     const ai = getOpenAIClient();
-    const response = await ai.chat.completions.create({
-      model: OPENAI_MODEL,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: PROMPT_EXTRACAO },
-            {
-              type: "file",
-              file: {
-                filename: "tr.pdf",
-                file_data: `data:application/pdf;base64,${pdfBuffer.toString("base64")}`,
+    const response = await ai.chat.completions.create(
+      {
+        model: OPENAI_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: PROMPT_EXTRACAO },
+              {
+                type: "file",
+                file: {
+                  filename: "tr.pdf",
+                  file_data: `data:application/pdf;base64,${pdfBuffer.toString("base64")}`,
+                },
               },
-            },
-          ],
-        },
-      ],
-    });
+            ],
+          },
+        ],
+      },
+      OPCOES_EXTRACAO_TR,
+    );
 
     const texto = response.choices[0]?.message?.content ?? "{}";
     const { itens } = parseJsonResponse(texto, extracaoTRSchema, "extrairEspecificacaoTR");

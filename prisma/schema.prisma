@@ -206,6 +206,10 @@ model Processo {
   // JSON serializado de ContextoTR: tabelaItens, modeloExecucao, materiaisEquipamentos.
   // Preenchido quando o TR é processado; permanece como referência permanente para o assistente.
   trContexto              String?
+  // JSON serializado de ItemExtraidoTR[] (extração bruta do TR, por item). Permite que a
+  // busca de contratos similares rode sem reprocessar o PDF — extração e busca são etapas
+  // separadas (a extração sozinha já garante que o assistente tenha acesso ao TR).
+  trItensExtraidos        String?
   createdAt               DateTime          @default(now())
   updatedAt               DateTime          @updatedAt
 
@@ -495,15 +499,24 @@ model CapturaEvidencia {
 
 model Fornecedor {
   id                 String           @id @default(cuid())
-  cnpj               String           @unique
+  cnpj               String?          @unique
   razaoSocial        String
   nomeFantasia       String?
   categoria          String[]
-  cidade             String
-  estado             String
-  responsavelContato String
-  email              String
+  cidade             String           @default("")
+  estado             String           @default("")
+  responsavelContato String           @default("")
+  email              String           @default("")
+  emailsAdicionais   String[]         @default([])
   telefone           String?
+  /**
+   * Chave de upsert da sincronização com a planilha Google Sheets de
+   * fornecedores (M24) — não o `cnpj`, que falta em boa parte dos registros
+   * reais da planilha. Valor tipicamente `"${spreadsheetId}:${#}"`.
+   */
+  origemPlanilhaLinhaId      String?  @unique
+  origemPlanilhaFonte        String?
+  origemPlanilhaAtualizadoEm DateTime?
   score              Int              @default(0)
   totalCotacoes      Int              @default(0)
   totalRespostas     Int              @default(0)
@@ -525,6 +538,25 @@ model Fornecedor {
   qualificacoes     QualificacaoFornecedor[]
 
   @@map("fornecedores")
+}
+
+/// Log de cada execução de sincronização da planilha de fornecedores (M24) —
+/// manual, webhook (edição pontual) ou reconciliação periódica.
+model SincronizacaoFornecedores {
+  id                String    @id @default(cuid())
+  origem            String // "manual" | "reconciliacao" | "webhook"
+  linhasLidas       Int       @default(0)
+  linhasCriadas     Int       @default(0)
+  linhasAtualizadas Int       @default(0)
+  linhasDesativadas Int       @default(0)
+  linhasRejeitadas  Int       @default(0)
+  detalhes          Json?
+  iniciadoEm        DateTime  @default(now())
+  concluidoEm       DateTime?
+  erro              String?
+
+  @@index([origem, iniciadoEm])
+  @@map("sincronizacoes_fornecedores")
 }
 
 /**

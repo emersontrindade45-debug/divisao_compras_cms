@@ -53,6 +53,16 @@ export interface ResultadoPesquisaSimilaridade {
   itensProcessados: ItemProcessadoSimilaridade[];
 }
 
+export interface ItemAtualizadoTR {
+  itemId: string;
+  descricao: string;
+  especificacaoAtualizada: boolean;
+}
+
+export interface ResultadoExtracaoTR {
+  itensAtualizados: ItemAtualizadoTR[];
+}
+
 function casarItemComExtrato(
   descricaoItem: string,
   extratos: ItemExtraidoTR[],
@@ -69,12 +79,22 @@ function casarItemComExtrato(
   return parcial ?? null;
 }
 
-export async function processarPesquisaSimilaridade(
+/**
+ * Etapa ① — upload e extração do TR, isolada da busca de contratos similares
+ * (`buscarSimilaridadeItens`, abaixo). Antes as duas rodavam numa única
+ * Server Action: a extração (2 chamadas OpenAI) somada ao laço de busca por
+ * item podia ultrapassar os 60s de `maxDuration` da rota, e a Vercel matava
+ * a função sem resposta estruturada — o 504 registrado no processo 908/2022
+ * e reincidente depois (CLAUDE.md §9.64). Separar garante que o que o
+ * assistente precisa do TR (`Processo.trContexto` e `Item.caracteristicasTecnicas`)
+ * fique persistido assim que a extração termina, independentemente de a busca
+ * de similaridade — que tem seu próprio orçamento e pode ficar parcial em
+ * processos com muitos itens — rodar ou não em seguida.
+ */
+export async function extrairTR(
   processoId: string,
   formData: FormData,
-  opcoes: { agora?: () => number } = {},
-): Promise<ActionResult<ResultadoPesquisaSimilaridade>> {
-  const agora = opcoes.agora ?? Date.now;
+): Promise<ActionResult<ResultadoExtracaoTR>> {
   const user = await requireAuth();
 
   const trPdfFile = formData.get("trPdf");
@@ -85,7 +105,7 @@ export async function processarPesquisaSimilaridade(
 
   const itens = await db.item.findMany({ where: { processoId } });
   if (itens.length === 0) {
-    return { error: "Processo sem itens. Sincronize a planilha antes de buscar similaridade." };
+    return { error: "Processo sem itens. Sincronize a planilha antes de enviar o TR." };
   }
 
   const provedor = getProvedorIA();
@@ -93,23 +113,93 @@ export async function processarPesquisaSimilaridade(
   // Executa as duas extrações em paralelo: itens (para similaridade) e contexto
   // (tabela de itens + modelo de execução + materiais, para o assistente).
   let extratos: ItemExtraidoTR[];
+  let contextoTR: Awaited<ReturnType<typeof provedor.extrairContextoTR>>;
   try {
-    const [itensExtraidos, contextoTR] = await Promise.all([
+    [extratos, contextoTR] = await Promise.all([
       provedor.extrairEspecificacaoTR(trPdfBuffer),
       provedor.extrairContextoTR(trPdfBuffer),
     ]);
-    extratos = itensExtraidos;
-
-    // Persiste o contexto do TR no processo para referência permanente do assistente.
-    await db.processo.update({
-      where: { id: processoId },
-      data: { trContexto: JSON.stringify(contextoTR) },
-    });
   } catch (err) {
     return {
       error: err instanceof Error ? `Falha ao processar o TR: ${err.message}` : "Falha ao processar o TR.",
     };
   }
+
+  // Persiste o contexto (para o assistente) e os itens extraídos brutos (para a
+  // busca de similaridade reaproveitar sem reprocessar o PDF).
+  await db.processo.update({
+    where: { id: processoId },
+    data: {
+      trContexto: JSON.stringify(contextoTR),
+      trItensExtraidos: JSON.stringify(extratos),
+    },
+  });
+
+  // Persiste a especificação técnica extraída do TR em cada item para que o
+  // assistente de IA sempre tenha acesso via `ler_processo`, mesmo após o PDF
+  // ser descartado — só escritas em banco, sem chamada externa, então roda
+  // para todos os itens independentemente do tamanho do processo.
+  const itensAtualizados = await Promise.all(
+    itens.map(async (item): Promise<ItemAtualizadoTR> => {
+      const extratoTR = casarItemComExtrato(item.descricao, extratos);
+      if (extratoTR?.especificacaoTecnica && extratoTR.especificacaoTecnica !== item.caracteristicasTecnicas) {
+        await db.item.update({
+          where: { id: item.id },
+          data: { caracteristicasTecnicas: extratoTR.especificacaoTecnica },
+        });
+        return { itemId: item.id, descricao: item.descricao, especificacaoAtualizada: true };
+      }
+      return { itemId: item.id, descricao: item.descricao, especificacaoAtualizada: false };
+    }),
+  );
+
+  await registrarAuditoria({
+    userId: user.id,
+    processoId,
+    acao: "extrair_tr",
+    detalhes: {
+      itens: itens.length,
+      especificacoesAtualizadas: itensAtualizados.filter((i) => i.especificacaoAtualizada).length,
+    },
+  });
+
+  revalidatePath(`/processos/${processoId}`);
+
+  return { data: { itensAtualizados } };
+}
+
+/**
+ * Etapa ② — busca de contratos similares por item, a partir do TR já
+ * extraído (`extrairTR`). Não recebe o PDF nem chama a OpenAI para extração:
+ * lê `Processo.trItensExtraidos`, persistido na etapa ①. Isso também permite
+ * reprocessar itens que ficaram "ignorado" por orçamento de tempo sem exigir
+ * novo upload do TR.
+ */
+export async function buscarSimilaridadeItens(
+  processoId: string,
+  opcoes: { agora?: () => number } = {},
+): Promise<ActionResult<ResultadoPesquisaSimilaridade>> {
+  const agora = opcoes.agora ?? Date.now;
+  const user = await requireAuth();
+
+  const processo = await db.processo.findUnique({
+    where: { id: processoId },
+    select: { trItensExtraidos: true },
+  });
+  if (!processo) {
+    return { error: "Processo não encontrado." };
+  }
+  if (!processo.trItensExtraidos) {
+    return { error: "Envie o Termo de Referência antes de buscar contratos similares." };
+  }
+  const extratos = JSON.parse(processo.trItensExtraidos) as ItemExtraidoTR[];
+
+  const itens = await db.item.findMany({ where: { processoId } });
+  if (itens.length === 0) {
+    return { error: "Processo sem itens. Sincronize a planilha antes de buscar similaridade." };
+  }
+
+  const provedor = getProvedorIA();
 
   // Cada item busca candidatos pelo seu próprio termo (a busca textual do PNCP é o
   // que torna os resultados relevantes); o cache evita repetir a mesma busca de rede
@@ -159,23 +249,17 @@ export async function processarPesquisaSimilaridade(
         };
       }
 
+      // A especificação técnica do item (`caracteristicasTecnicas`) já foi persistida
+      // por `extrairTR` — aqui só falta o termo de busca gerado pela IA, que não tem
+      // campo próprio no item e por isso vem do extrato bruto salvo em `trItensExtraidos`.
       const extratoTR = casarItemComExtrato(item.descricao, extratos);
-      const itemTR = extratoTR ?? {
+      const itemTR: ItemExtraidoTR = {
         descricao: item.descricao,
         especificacaoTecnica: item.caracteristicasTecnicas ?? "",
         unidade: item.unidade,
         quantidade: item.quantidade,
+        termoBusca: extratoTR?.termoBusca,
       };
-
-      // Persiste a especificação técnica extraída do TR no item para que o
-      // assistente de IA sempre tenha acesso às especificações do TR via
-      // ler_processo, mesmo após o PDF ser descartado.
-      if (extratoTR?.especificacaoTecnica && extratoTR.especificacaoTecnica !== item.caracteristicasTecnicas) {
-        await db.item.update({
-          where: { id: item.id },
-          data: { caracteristicasTecnicas: extratoTR.especificacaoTecnica },
-        });
-      }
 
       const termoBusca = resolverTermoBusca({
         descricao: item.descricao,

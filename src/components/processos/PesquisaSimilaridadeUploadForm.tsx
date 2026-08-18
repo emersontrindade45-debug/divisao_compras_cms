@@ -4,12 +4,13 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { processarPesquisaSimilaridade } from "@/lib/actions/pesquisaSimilaridade";
+import { extrairTR, buscarSimilaridadeItens } from "@/lib/actions/pesquisaSimilaridade";
 import { useElapsedSeconds } from "@/hooks/useElapsedSeconds";
 
 export function PesquisaSimilaridadeUploadForm({ processoId }: { processoId: string }) {
   const [trFile, setTrFile] = useState<File | null>(null);
   const [pending, startTransition] = useTransition();
+  const [fase, setFase] = useState<"extraindo" | "buscando" | null>(null);
   const segundosDecorridos = useElapsedSeconds(pending);
 
   function handleSubmit(e: React.FormEvent) {
@@ -20,9 +21,24 @@ export function PesquisaSimilaridadeUploadForm({ processoId }: { processoId: str
     }
 
     startTransition(async () => {
+      // Duas Server Actions em sequência, não uma: cada requisição tem seu próprio teto de
+      // tempo (`maxDuration`), então a extração do TR — o que o assistente precisa — sempre
+      // termina e persiste antes da busca de contratos similares começar, mesmo que esta
+      // última fique parcial num processo com muitos itens (CLAUDE.md §9.64).
+      setFase("extraindo");
       const formData = new FormData();
       formData.set("trPdf", trFile);
-      const resultado = await processarPesquisaSimilaridade(processoId, formData);
+      const extracao = await extrairTR(processoId, formData);
+      if (extracao.error) {
+        toast.error(extracao.error);
+        setFase(null);
+        return;
+      }
+      toast.success("TR processado — especificações já disponíveis para o assistente.");
+
+      setFase("buscando");
+      const resultado = await buscarSimilaridadeItens(processoId);
+      setFase(null);
       if (resultado.error) {
         toast.error(resultado.error);
         return;
@@ -71,13 +87,18 @@ export function PesquisaSimilaridadeUploadForm({ processoId }: { processoId: str
         />
       </div>
       <Button type="submit" disabled={pending} size="sm">
-        {pending ? `Processando... (${segundosDecorridos}s)` : "Buscar contratos similares"}
+        {fase === "extraindo"
+          ? `Extraindo TR... (${segundosDecorridos}s)`
+          : fase === "buscando"
+            ? `Buscando contratos similares... (${segundosDecorridos}s)`
+            : "Buscar contratos similares"}
       </Button>
       {pending && (
         <p className="text-xs text-muted-foreground">
-          Cada item é analisado individualmente pela IA — processos com muitos itens podem levar
-          alguns minutos. Não atualize a página (F5) enquanto isso, ou o processamento será
-          interrompido.
+          {fase === "extraindo"
+            ? "O TR é lido primeiro; assim que terminar, suas especificações já ficam disponíveis para o assistente, mesmo que a busca de contratos similares a seguir demore mais."
+            : "Cada item é analisado individualmente pela IA — processos com muitos itens podem levar alguns minutos."}{" "}
+          Não atualize a página (F5) enquanto isso, ou o processamento será interrompido.
         </p>
       )}
     </form>
