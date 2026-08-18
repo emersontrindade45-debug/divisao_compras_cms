@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const statusFornecedorSchema = z.enum(["ativo", "inativo"]);
 
-const cnpjRegex = /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/;
+export const cnpjRegex = /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/;
 
 export const createFornecedorSchema = z.object({
   cnpj: z.string().regex(cnpjRegex, "CNPJ inválido (formato: XX.XXX.XXX/XXXX-XX)"),

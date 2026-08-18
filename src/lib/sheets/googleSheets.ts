@@ -73,7 +73,7 @@ function extrairAbas(html: string): Array<{ name: string; gid: string }> {
   return abas;
 }
 
-async function fetchText(url: string): Promise<string> {
+export async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, {
     redirect: "follow",
     headers: { "User-Agent": "Mozilla/5.0 (compatible; DivisaoComprasBot/1.0)" },
@@ -84,7 +84,7 @@ async function fetchText(url: string): Promise<string> {
   return res.text();
 }
 
-function csvUrl(id: string, gid: string): string {
+export function csvUrl(id: string, gid: string): string {
   return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
