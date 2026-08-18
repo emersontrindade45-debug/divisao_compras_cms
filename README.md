@@ -3,6 +3,7 @@
 Plataforma interna de orquestração da pesquisa de preços da Câmara Municipal de Santos, em conformidade com a IN SEGES/ME 65/2021.
 
 Briefing técnico: [CLAUDE.md](CLAUDE.md) · Roadmap: [docs/PLAN.md](docs/PLAN.md).
+Handoff em aberto (2026-08-18): [docs/HANDOFF-2026-08-18-tr-similaridade.md](docs/HANDOFF-2026-08-18-tr-similaridade.md).
 
 ## Pré-requisitos
 

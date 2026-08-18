@@ -19,6 +19,11 @@ Convenções deste plano:
 
 Legenda de fases: **FUNDAÇÃO** → **UI (mock)** → **BACKEND** → **CONFORMIDADE** → **ENTREGA**.
 
+> **Retomar daqui (2026-08-18):** extração do TR já está separada da busca de similares em
+> `origin/main` (`c5e64c5`), mas as migrations de produção **não foram confirmadas**.
+> Ler [HANDOFF-2026-08-18-tr-similaridade.md](HANDOFF-2026-08-18-tr-similaridade.md) antes de
+> qualquer outra tarefa nesse fluxo. Resumo no fim deste arquivo.
+
 ---
 
 ## M0 — Setup & Fundação `[FUNDAÇÃO]`
@@ -1541,3 +1546,40 @@ todo dia 1º) caso não aceite, então isto deixou de ser bloqueante, só não f
 `/api/jobs/lembretes`) e é reaproveitado aqui — não foi criada variável nova. (3) SINAPI segue sem
 dado em produção — exige upload manual do `.xlsx` (WAF da Caixa bloqueia download automatizado, ver
 M17), fora do escopo desta entrada.
+
+## Handoff 2026-08-18 — Extração do TR isolada da busca (504) + M24.0/M24.1
+
+Registro para retomar. Detalhe operacional (comandos, armadilhas, prompt da próxima sessão):
+[HANDOFF-2026-08-18-tr-similaridade.md](HANDOFF-2026-08-18-tr-similaridade.md).
+Lições novas: CLAUDE.md §9.73 (git add de arquivo compartilhado com outra sessão) e §9.74
+(`GET /api/admin/migrate` só vê o bundle deployado).
+
+**Problema.** Upload do TR + busca de similares na mesma Server Action, teto Hobby 60s. Soma
+estourava; Vercel matava a função (504, processo 908/2022). Usuário escolheu separar as etapas,
+não subir `maxDuration`.
+
+**Código em `origin/main` = `c5e64c5` — não reimplementar.**
+
+| Commit | Escopo |
+|---|---|
+| `0b9010b` | `extrairTR` + `buscarSimilaridadeItens`; coluna `Processo.trItensExtraidos`; timeout 50s/sem retry na extração; formulário em duas fases HTTP |
+| `e6ef891` | M24.1 parser puro da planilha de fornecedores (outra sessão) |
+| `c5e64c5` | M24.0 migration `20260818181842_fornecedor_sync_planilha` + `cnpj: string \| null` na UI/fixtures (corrigiu o build quebrado pelo schema que vazou em `0b9010b`) |
+
+Build local de `c5e64c5` verde (`prisma generate && next build`). Push `0b9010b..c5e64c5` feito.
+A sessão estourou o limite **antes** de confirmar o deploy READY e de aplicar as migrations.
+
+**Bloqueio (produção).** Duas migrations no código, nenhuma confirmada no banco de produção:
+
+- `20260818180258_adiciona_tr_itens_extraidos`
+- `20260818181842_fornecedor_sync_planilha`
+
+GET de 2026-08-18T18:23:02Z: 17 aplicadas, `pendentes: []` — era o **bundle antigo**, não “já
+está em dia”. Sem a primeira, `extrairTR` quebra em runtime (`column does not exist`).
+Listagem de processos e `lerTR` do assistente usam `select` sem a coluna nova (§9.46) e
+continuam de pé.
+
+**Próxima ação, nesta ordem:** deploy READY de `c5e64c5` → GET migrate (aspas do secret, ver
+handoff) → POST migrate (autorização já dada nesta sessão; reconfirmar se o contexto for outro)
+→ exercitar upload do TR num processo real. Não começar M24.2 antes da segunda migration
+estar aplicada.

@@ -903,3 +903,30 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     Postgres **local**, sem latência de rede) e `INSERT ... ON CONFLICT DO UPDATE` em lote (1
     round-trip por página, ~igual ao `createMany`) têm custo e semântica diferentes; a escolha entre
     eles se mede, não se presume (§9.69).
+73. **`git add` de um arquivo compartilhado pega o disco inteiro, não o hunk que você editou —
+    e em working tree compartilhada isso commita o trabalho de outra sessão.** Em 2026-08-18 a
+    correção do 504 no upload do TR mexeu só no bloco `Processo` de `prisma/schema.prisma`
+    (`trItensExtraidos`); o `git add prisma/schema.prisma` levou também o M24 que outra sessão
+    tinha deixado no mesmo arquivo (CNPJ nullable, `emailsAdicionais`, `SincronizacaoFornecedores`)
+    **sem a migration correspondente**. O commit `0b9010b` foi para `main`, o Prisma Client passou
+    a tipar `cnpj: string | null`, e o build de produção quebrou em `fornecedores/page.tsx`
+    (`FornecedorFixture.cnpj: string`). Staging se confirma com `git diff --cached` **antes** do
+    commit, não com a intenção do `git add`. Em arquivo que outra sessão também edita, o recorte
+    seguro é `git add -p` (hunk a hunk) ou copiar só o trecho próprio para um working tree
+    isolado. Corolário da §9.44: edição cirúrgica no editor não protege o `git add` do arquivo
+    inteiro. A correção certa, quando a outra sessão já está fechando o mesmo schema, é **não
+    reverter** — completar a migration e os tipos (foi o que o M24.0 fez em `c5e64c5`); reverter
+    no meio do trabalho alheio só gera o conflito seguinte.
+74. **`GET /api/admin/migrate` com `pendentes: []` não prova que a migration nova já está no
+    banco — prova só que o **bundle em execução** não a conhece.** A rota lê os arquivos em
+    `prisma/migrations` **do deploy que está servindo**, não do `origin/main`. Em 2026-08-18, após
+    o push de `0b9010b`, o GET devolveu 17 aplicadas e pendentes vazio: a migration
+    `20260818180258_adiciona_tr_itens_extraidos` não aparecia nem como pendente, porque a função
+    ainda era o deploy anterior. Tratar isso como “schema em dia” e pular o POST deixaria a
+    coluna nova inexistente e o upload do TR quebraria no primeiro uso (§9.19). Sequência
+    obrigatória: (1) deploy `READY` do commit que contém o arquivo da migration; (2) GET — a
+    nova **tem** que aparecer em `pendentes`; (3) POST; (4) GET de novo, `pendentes: []` **e** a
+    nova em `aplicadas`. GET estável com pendentes vazio *antes* do passo 1 é evidência de
+    bundle velho, não de sucesso. Mesma família da §9.21: estado vem da fonte certa (aqui, o
+    JSON da rota depois do deploy novo; lá, `get_deployment`), nunca de um proxy que ainda
+    aponta para o mundo anterior.
