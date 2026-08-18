@@ -1451,3 +1451,93 @@ da suíte, typecheck e lint limpos.
 **Pendência.** A régua real (não a simulação) não cobre este fix — para isso ela precisaria
 conhecer o `processoId` de origem de cada termo e reproduzir a demoção, não só chamar
 `buscarContratosPNCP`. Fica registrado como lacuna do instrumento, não do fix.
+
+## M23 — Carga inicial e resync automático do catálogo CATMAT/CATSER (2026-08-18)
+
+Origem: a página `/ingestoes` mostrava as duas seções vazias em produção. Não era bug — confirmado
+lendo direto o banco de produção (`PROD_READ_URL`): as 4 tabelas do M15/M16 existiam (migrations
+aplicadas) mas com 0 linhas, porque a ingestão real nunca tinha rodado lá (§9.19, "migration pronta
+≠ dado carregado"). Carga inicial disparada manualmente contra produção via
+`/api/admin/ingerir-catalogo`, com autorização do usuário: **CATSER 2.964 itens, CATMAT 328.880
+itens, 0 rejeitados.**
+
+**Pergunta seguinte do usuário: essas atualizações são automáticas?** Não havia — o único cron do
+projeto é `/api/jobs/lembretes`. Pedido: adicionar resync automático "no período adequado",
+respeitando a periodicidade real do Compras.gov.
+
+**Medição antes de decidir cadência (CLAUDE.md §9.69 — não adivinhar).** Não existe periodicidade
+oficial publicada para CATMAT/CATSER (ao contrário do SINAPI, mensal documentado). Medido contra a
+API real: amostra de 21 páginas do CATMAT espalhadas pelas 688 (10.380 itens) — ~2,3% tinham
+`dataHoraAtualizacao` nos últimos 30 dias, com o item mais recente atualizado ~3-4 semanas antes.
+Evidência de manutenção contínua (via pedidos de catalogação), não de um calendário de release.
+
+**Decisão final de cadência, com o usuário.** Perguntado se o cron diário calibrado ficava ou saía
+(dada a incerteza sobre o Hobby aceitar um 2º cron), o usuário respondeu que vai rodar a carga
+completa manualmente todo dia 1º do mês — e pediu para manter o cron automático rodando **toda
+segunda-feira**, como reforço entre uma rodada manual e outra. Isso muda o orçamento de tempo por
+execução (semanal precisa cobrir mais páginas por rodada que diário para não ficar bimestral/anual)
+— ver recalibração abaixo.
+
+**Achado que quase invalidou a entrega: `gravarPagina` nunca atualizava linha existente.**
+`createMany` + `skipDuplicates: true` (usado na carga inicial) ignora silenciosamente qualquer
+`codigo` já presente — um cron de "resync" construído em cima disso adicionaria só itens novos e
+nunca refletiria uma descrição/classe/status alterado num item já ingerido, o mesmo padrão de botão
+sem handler da §9.40 (a feature prometeria algo que o código não faz). Corrigido antes de expor o
+cron: `ModoEscritaCatalogo` (`"inserir"` default / `"upsert"`) em `catalogoComprasGov.ts`.
+
+**Por que SQL bruto em vez de `db.upsert()` por item.** Primeira versão fazia um `upsert` Prisma por
+item, com `processarComConcorrencia`; mediu ~35s **localmente** (Postgres sem latência de rede) para
+19 páginas — perto demais do teto de 60s do plano Hobby somando a latência real do pooler em
+produção. Trocado para um único `INSERT ... ON CONFLICT ("fonteChave", "codigo") DO UPDATE` por
+página (parametrizado via `Prisma.sql`/`Prisma.join`, sem concatenar dado de item na string): as
+mesmas 7 páginas do CATSER + 23 do CATMAT (11.500 itens) caem para ~22s localmente. `id` novo gerado
+por `gen_random_uuid()` no próprio SQL (builtin do Postgres desde a v13, confirmado na v18 do
+projeto) — não foi adicionada dependência nova só para replicar o `cuid()` que o Prisma gera
+client-side em `create`/`upsert` normais.
+
+**Por que não uma execução mensal única.** Uma ingestão completa do CATMAT mede ~13 min (688
+páginas, medido nesta mesma sessão ao popular produção) — muito acima do teto de 60s do Hobby
+(decisão já registrada em `scripts/ingerir-catalogo-compras-gov.ts` desde o M16). A rota nova,
+`/api/jobs/atualizar-catalogo-compras-gov`, roda **semanalmente, às segundas** (`vercel.json`,
+`0 4 * * 1`) e processa só uma fatia por execução: CATSER inteiro (7 páginas, barato) + N páginas do
+CATMAT a partir de um cursor lido do último `LoteIngestao` (`urlArquivo` grava
+`pagina=<inicial>-<final>`, mesmo formato da rota administrativa). Dá a volta para a página 1 dentro
+da mesma execução quando o cursor passa do fim, em vez de desperdiçar uma semana produzindo um lote
+vazio. A rota também serve de ferramenta manual: chamá-la repetidas vezes (sempre retoma do cursor
+salvo) equivale à carga completa que o usuário roda por conta própria todo dia 1º.
+
+**Recalibração para cadência semanal — achado: o gargalo é rede, não banco.** A calibração inicial
+(23 páginas/execução, ~22s, `CONCORRENCIA_PADRAO=5` de `catalogoComprasGov.ts`) tinha sido pensada
+para cron diário; com cron semanal, 23 páginas/semana levaria ~30 semanas (~7 meses) por volta
+completa — longe demais do "mensal" original. Testado **contra a API real + Postgres local**, não
+suposto:
+
+| páginas CATMAT | concorrência de página | tempo total medido |
+|---:|---:|---:|
+| 23 | 5 (padrão) | ~22s |
+| 60 | 5 (padrão) | ~69s — estoura os 60s do Hobby |
+| 60 | 10 | ~22s |
+| 90 | 10 | ~27s |
+| 120 | 20 | ~57s — sem folga, descartado |
+
+Aumentar só o lote sem aumentar a concorrência de página piora proporcionalmente (padrão
+`60→69s`); aumentar a concorrência de 5→10 dobra o throughput para o mesmo lote (`60 páginas`:
+69s→22s), confirmando que o gargalo é a latência de rede até o Compras.gov por página buscada, não a
+escrita no banco (já rápida, upsert em lote — ver acima). Fixado em **90 páginas, concorrência 10**:
+~27s medido, folga de mais da metade do teto de 60s mesmo sem contar a latência adicional que
+produção terá e o teste local não captura. 688/90 ≈ 7,6 semanas ≈ ~1,9 meses por volta completa.
+
+**Verificação.** Calibração medida contra a API real do Compras.gov + Postgres **local** (não mock —
+`next dev` local, mesmo padrão do fechamento do SINAPI em 2026-08-08), tabela acima. Suíte: 23 testes
+novos/alterados (`catalogoComprasGov.test.ts` cobre os dois modos de escrita por mutação —
+`createMany` não chamado em modo upsert e vice-versa —, `atualizar-catalogo-compras-gov/route.test.ts`
+cobre fail-closed, cursor a partir do banco e o wraparound de fim de catálogo), 99 arquivos / 959
+testes da suíte inteira, typecheck e lint limpos.
+
+**Pendências.** (1) O primeiro deploy com o cron novo precisa confirmar que o plano Hobby aceita um
+segundo cron job (hoje só existe `/api/jobs/lembretes`) — o usuário já tem um plano B (carga manual
+todo dia 1º) caso não aceite, então isto deixou de ser bloqueante, só não foi verificado ainda.
+(2) `CRON_SECRET` já existe em produção (usado por
+`/api/jobs/lembretes`) e é reaproveitado aqui — não foi criada variável nova. (3) SINAPI segue sem
+dado em produção — exige upload manual do `.xlsx` (WAF da Caixa bloqueia download automatizado, ver
+M17), fora do escopo desta entrada.

@@ -4,6 +4,10 @@
     {
       "path": "/api/jobs/lembretes",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/jobs/atualizar-catalogo-compras-gov",
+      "schedule": "0 4 * * 1"
     }
   ]
 }

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
     fonteReferencia: { findUnique: vi.fn() },
     loteIngestao: { create: vi.fn(), update: vi.fn() },
     itemCatalogoReferencia: { createMany: vi.fn() },
+    $executeRaw: vi.fn(),
   };
   return { db };
 });
@@ -52,6 +53,7 @@ describe("ingerirCatalogoComprasGov", () => {
     mocks.db.itemCatalogoReferencia.createMany.mockImplementation(
       async ({ data }: { data: unknown[] }) => ({ count: data.length }),
     );
+    mocks.db.$executeRaw.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -276,6 +278,43 @@ describe("ingerirCatalogoComprasGov", () => {
       data: expect.objectContaining({
         erro: expect.stringMatching(/1 de 3 páginas falharam.*\[2\]/),
       }),
+    });
+  });
+
+  describe("modoEscrita: 'upsert' (resync periódico, CLAUDE.md §9.69 — não é o default)", () => {
+    it("usa upsert em lote via $executeRaw, não createMany — createMany nunca atualiza linha existente", async () => {
+      vi.spyOn(global, "fetch").mockResolvedValue(
+        respostaPagina([itemCatmat(1, 0), itemCatmat(1, 1)], 1, 1),
+      );
+      mocks.db.$executeRaw.mockResolvedValue(2);
+
+      const resumo = await ingerirCatalogoComprasGov(CONFIG_CATALOGO_CATMAT, {
+        modoEscrita: "upsert",
+      });
+
+      expect(mocks.db.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(mocks.db.itemCatalogoReferencia.createMany).not.toHaveBeenCalled();
+      expect(resumo.linhasImportadas).toBe(2);
+    });
+
+    it("a query bruta faz ON CONFLICT (fonteChave, codigo) DO UPDATE — sem isso o resync não atualizaria nada", async () => {
+      vi.spyOn(global, "fetch").mockResolvedValue(respostaPagina([itemCatmat(1, 0)], 1, 1));
+
+      await ingerirCatalogoComprasGov(CONFIG_CATALOGO_CATMAT, { modoEscrita: "upsert" });
+
+      const chamada = mocks.db.$executeRaw.mock.calls[0];
+      const sqlTexto = (chamada[0] as TemplateStringsArray).join("");
+      expect(sqlTexto).toMatch(/ON CONFLICT \("fonteChave", "codigo"\) DO UPDATE/);
+      expect(sqlTexto).toMatch(/"descricao" = EXCLUDED\."descricao"/);
+    });
+
+    it("default ('inserir') continua usando createMany — não chama $executeRaw", async () => {
+      vi.spyOn(global, "fetch").mockResolvedValue(respostaPagina([itemCatmat(1, 0)], 1, 1));
+
+      await ingerirCatalogoComprasGov(CONFIG_CATALOGO_CATMAT);
+
+      expect(mocks.db.itemCatalogoReferencia.createMany).toHaveBeenCalled();
+      expect(mocks.db.$executeRaw).not.toHaveBeenCalled();
     });
   });
 });

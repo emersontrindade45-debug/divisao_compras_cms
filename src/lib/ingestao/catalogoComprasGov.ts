@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizar } from "@/lib/similaridade/texto";
 import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorrencia";
@@ -190,10 +191,31 @@ interface ContadorPagina {
   rejeitadas: number;
 }
 
-/** Normaliza e grava (em lote, com `skipDuplicates`) os itens de uma página já buscada. */
+/**
+ * "inserir" (default): `createMany` + `skipDuplicates` — rápido (1 round-trip por página), mas
+ * **nunca atualiza** uma linha já existente (`skipDuplicates` a ignora silenciosamente). Correto
+ * para a carga inicial de um catálogo vazio; incorreto para resync periódico, onde o objetivo é
+ * justamente refletir mudança em item já ingerido (medido contra a API real em 2026-08-18: ~2,3%
+ * dos itens do CATMAT têm `dataHoraAtualizacao` nos últimos 30 dias — ver
+ * `/api/jobs/atualizar-catalogo-compras-gov`).
+ *
+ * "upsert": `INSERT ... ON CONFLICT ("fonteChave", "codigo") DO UPDATE` em lote — **1 round-trip
+ * por página**, igual ao modo "inserir", mas atualiza `descricao`/`codigoClasse`/`ativo` de quem já
+ * existe. SQL bruto porque a API tipada do Prisma não tem "upsert em massa": `createMany` não
+ * aceita `onConflict: update`, e um `upsert` por item (chegou a ser a primeira versão desta função)
+ * mediu ~35s para 19 páginas contra o Postgres **local** — perto demais do teto de 60s do plano
+ * Hobby somando a latência real do pooler em produção. Parametrizado via `Prisma.sql`/`Prisma.join`
+ * (sem concatenar valor de item na string), mesmo risco de injection que qualquer query Prisma
+ * tipada, não mais. Usado só pela rota de resync agendado
+ * (`/api/jobs/atualizar-catalogo-compras-gov`).
+ */
+type ModoEscritaCatalogo = "inserir" | "upsert";
+
+/** Normaliza e grava os itens de uma página já buscada, no modo pedido (ver `ModoEscritaCatalogo`). */
 async function gravarPagina<TRaw>(
   config: ConfigFonteCatalogo<TRaw>,
   itensBrutos: TRaw[],
+  modoEscrita: ModoEscritaCatalogo = "inserir",
 ): Promise<ContadorPagina> {
   const validos: ItemCatalogoNormalizado[] = [];
   let rejeitadas = 0;
@@ -205,7 +227,23 @@ async function gravarPagina<TRaw>(
   }
 
   let importadas = 0;
-  if (validos.length > 0) {
+  if (validos.length > 0 && modoEscrita === "upsert") {
+    const linhas = validos.map(
+      (item) =>
+        Prisma.sql`(gen_random_uuid(), ${config.fonteChave}, ${item.codigo}, ${item.codigoClasse}, ${item.descricao}, ${item.descricaoNormalizada}, ${item.ativo}, now())`,
+    );
+    importadas = await db.$executeRaw`
+      INSERT INTO "itens_catalogo_referencia"
+        ("id", "fonteChave", "codigo", "codigoClasse", "descricao", "descricaoNormalizada", "ativo", "atualizadoEm")
+      VALUES ${Prisma.join(linhas)}
+      ON CONFLICT ("fonteChave", "codigo") DO UPDATE SET
+        "codigoClasse" = EXCLUDED."codigoClasse",
+        "descricao" = EXCLUDED."descricao",
+        "descricaoNormalizada" = EXCLUDED."descricaoNormalizada",
+        "ativo" = EXCLUDED."ativo",
+        "atualizadoEm" = now()
+    `;
+  } else if (validos.length > 0) {
     const resultado = await db.itemCatalogoReferencia.createMany({
       data: validos.map((item) => ({
         fonteChave: config.fonteChave,
@@ -234,6 +272,11 @@ export interface OpcoesIngestaoCatalogo {
   paginaInicial?: number;
   /** Concorrência de páginas simultâneas. Default `CONCORRENCIA_PADRAO` (CLAUDE.md §9.11). */
   concorrencia?: number;
+  /**
+   * "inserir" (default) para carga inicial rápida; "upsert" para resync periódico, que precisa
+   * atualizar item já existente — ver `ModoEscritaCatalogo` acima de `gravarPagina`.
+   */
+  modoEscrita?: "inserir" | "upsert";
 }
 
 export interface ResumoIngestaoCatalogo {
@@ -340,8 +383,10 @@ export async function ingerirCatalogoComprasGov<TRaw>(
     select: { id: true },
   });
 
+  const modoEscrita = opcoes.modoEscrita ?? "inserir";
+
   // A primeira página deste lote já foi buscada acima — grava aqui em vez de refazer a requisição.
-  const contadorPagina1 = await gravarPagina(config, primeira.resultado);
+  const contadorPagina1 = await gravarPagina(config, primeira.resultado, modoEscrita);
 
   const numerosDemaisPaginas = Array.from(
     { length: Math.max(0, paginaFinal - paginaInicial) },
@@ -360,7 +405,7 @@ export async function ingerirCatalogoComprasGov<TRaw>(
     async (pagina) => {
       const resposta = await buscarJSON(montarUrl(config.endpoint, pagina), schemaResposta);
       if (!resposta) return { lidas: 0, importadas: 0, rejeitadas: 0 };
-      return gravarPagina(config, resposta.resultado);
+      return gravarPagina(config, resposta.resultado, modoEscrita);
     },
     (pagina, erro) => {
       paginasComFalha.push(pagina);

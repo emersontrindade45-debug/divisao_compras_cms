@@ -890,3 +890,16 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     tão candidata a causa quanto o código que acabou de mudar. Verificado com repro isolado via
     Playwright (`boundingBox().height`: 18px numa linha só vs. 54px em 3 linhas após
     `whitespace-normal`) antes de reportar como corrigido — não só por leitura do CSS.
+72. **`createMany({ skipDuplicates: true })` nunca atualiza linha existente — ela é ignorada, não
+    sobrescrita.** Correto para carga inicial de tabela vazia; qualquer resync/reingestão periódica
+    construído em cima disso adiciona só itens novos e nunca reflete mudança em item já gravado — o
+    mesmo defeito da §9.40 (botão sem handler: a feature promete "atualizar" e o código só insere).
+    Descoberto ao planejar o cron de `ItemCatalogoReferencia` (M23, 2026-08-18): a função de
+    escrita do M16 usava `skipDuplicates` e um resync automático em cima dela teria sido
+    inofensivo-parecendo e sistematicamente incorreto desde o primeiro dia. Ao construir
+    reingestão/sincronização periódica sobre uma função de escrita já existente, checar **como ela
+    grava**, não só se ela já é chamada em algum lugar — `createMany`/`skipDuplicates`,
+    `upsert` (Prisma, 1 round-trip por item — mede ~35s para 19 páginas/9 mil itens mesmo contra
+    Postgres **local**, sem latência de rede) e `INSERT ... ON CONFLICT DO UPDATE` em lote (1
+    round-trip por página, ~igual ao `createMany`) têm custo e semântica diferentes; a escolha entre
+    eles se mede, não se presume (§9.69).
