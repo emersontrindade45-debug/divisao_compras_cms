@@ -1,5 +1,5 @@
 import "server-only";
-import { PDFParse } from "pdf-parse";
+import { extractText, getDocumentProxy } from "unpdf";
 
 /**
  * Extrai o texto integral de um PDF sem passar por IA. Usado para o Termo de
@@ -9,15 +9,18 @@ import { PDFParse } from "pdf-parse";
  * bate com a nomenclatura esperada — a IA retornava string vazia exatamente como
  * instruído para "seção não encontrada". Texto bruto elimina essa classe de erro:
  * nada é descartado por não casar com um título de seção esperado.
+ *
+ * `unpdf` (não `pdf-parse`) é deliberado: `pdf-parse` importa o build `legacy`
+ * de `pdfjs-dist`, que arrasta um renderer de canvas inteiro e referencia
+ * `DOMMatrix` na avaliação do módulo — quebra com `ReferenceError: DOMMatrix
+ * is not defined` em runtime Node serverless (sem DOM), mesmo só usando
+ * extração de texto. `unpdf` é feito para rodar em runtimes serverless
+ * (Vercel/Workers) e só carrega dependência de canvas (`@napi-rs/canvas`,
+ * peer opcional) se as funções de imagem/renderização forem chamadas — não é
+ * o caso aqui.
  */
 export async function extrairTextoPdf(pdfBuffer: Buffer): Promise<string> {
-  const parser = new PDFParse({ data: pdfBuffer });
-  try {
-    // pageJoiner vazio remove o marcador "-- N of M --" que a lib insere por padrão
-    // entre páginas — ruído para o assistente, que não precisa de paginação do PDF.
-    const resultado = await parser.getText({ pageJoiner: "" });
-    return resultado.text.trim();
-  } finally {
-    await parser.destroy();
-  }
+  const documento = await getDocumentProxy(new Uint8Array(pdfBuffer));
+  const { text } = await extractText(documento, { mergePages: true });
+  return text.trim();
 }
