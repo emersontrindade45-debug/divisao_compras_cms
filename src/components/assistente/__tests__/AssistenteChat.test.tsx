@@ -10,6 +10,7 @@ vi.mock("@/lib/actions/assistente", () => ({
   obterConversaAtiva: vi.fn(async () => null),
   listarItensDoProcesso: vi.fn(async () => []),
   adicionarCandidatoSugerido: vi.fn(async () => ({ ok: true, mensagem: "ok" })),
+  completarLinksOrigemCandidatos: vi.fn(async () => ({ ok: true, urls: {} })),
 }));
 
 // `SugestoesCandidatos` chama `useRouter().refresh()` para a tabela de

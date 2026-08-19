@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, ChevronUp, ExternalLink, Plus, X } from "lucide-react";
 import { toast } from "sonner";
@@ -8,12 +8,16 @@ import { Button } from "@/components/ui/button";
 import {
   adicionarCandidatoSugerido,
   adicionarItemDaContratacao,
+  completarLinksOrigemCandidatos,
   descartarCandidatoAssistente,
   listarOutrosItensDaContratacao,
   type ItemIrmaoDaContratacao,
 } from "@/lib/actions/assistente";
 import { identidadeDaContratacao, type CandidatoSugerido } from "@/lib/assistente/sugestoes";
-import { resolverLinkOrigem } from "@/lib/similaridade/linkOrigem";
+import {
+  precisaCompletarLinkPainel,
+  resolverLinkOrigem,
+} from "@/lib/similaridade/linkOrigem";
 
 // Cartões dos candidatos que a busca do assistente encontrou.
 //
@@ -69,6 +73,31 @@ export function SugestoesCandidatos({
   >({});
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
   const [carregandoContratacao, setCarregandoContratacao] = useState<string | null>(null);
+  /** URLs da compra específica preenchidas para cards antigos do Painel (`fonteUrl` nulo ou Lite). */
+  const [linksCompletos, setLinksCompletos] = useState<Record<string, string>>({});
+
+  const chavePendentes = sugestoes
+    .filter((s) =>
+      precisaCompletarLinkPainel(
+        s.tipoCandidato,
+        s.fonteUrl,
+        identidadeDaContratacao(s),
+      ),
+    )
+    .map((s) => s.id)
+    .join(",");
+
+  useEffect(() => {
+    if (!mensagemId || !chavePendentes) return;
+    let cancelado = false;
+    void completarLinksOrigemCandidatos({ mensagemId }).then((resultado) => {
+      if (cancelado || !resultado.ok) return;
+      setLinksCompletos(resultado.urls);
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [mensagemId, chavePendentes]);
 
   const sugestoesVisiveis = sugestoes.filter((s) => !descartados.has(s.id));
 
@@ -248,7 +277,12 @@ export function SugestoesCandidatos({
 
         const contratacaoExpandida = expandidos.has(sugestao.id);
         const contratacao = itensContratacao[sugestao.id];
-        const origem = resolverLinkOrigem(sugestao.tipoCandidato, sugestao.fonteUrl);
+        const identidade = identidadeDaContratacao(sugestao);
+        const origem = resolverLinkOrigem(
+          sugestao.tipoCandidato,
+          linksCompletos[sugestao.id] ?? sugestao.fonteUrl,
+          identidade,
+        );
 
         return (
           <li

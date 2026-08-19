@@ -17,6 +17,11 @@ import { candidatoEstaNoTempo } from "@/lib/similaridade/filtroRecencia";
 import { calcularScoreFinal } from "@/lib/similaridade/scoreFinal";
 import { janelaContratacaoPublica } from "@/lib/domain/in65Rules";
 import { listarItensDaCompraPNCP } from "@/lib/integracoes/pncp";
+import { resolverUrlsAcompanhamentoPainel } from "@/lib/integracoes/comprasGov";
+import {
+  precisaCompletarLinkPainel,
+  resolverLinkOrigem,
+} from "@/lib/similaridade/linkOrigem";
 import type { CandidatoSimilaridade, ItemExtraidoTR } from "@/lib/ia/types";
 
 // Leitura da conversa do assistente (M13).
@@ -165,6 +170,102 @@ export async function listarItensDoProcesso(
     orderBy: { createdAt: "asc" },
     select: { id: true, descricao: true },
   });
+}
+
+const completarLinksSchema = z.object({
+  mensagemId: z.string().min(1),
+});
+
+export interface ResultadoLinksOrigem {
+  ok: boolean;
+  mensagem?: string;
+  /** `candidatoId` → URL da contratação específica. */
+  urls: Record<string, string>;
+}
+
+/**
+ * Completa `fonteUrl` dos candidatos do Painel de Preços que foram gravados
+ * sem o `idCompra` (conversas antigas) ou com a home do Lite. O card precisa
+ * abrir a compra, como o PNCP abre o edital — não o portal genérico.
+ *
+ * Grava o resultado na própria mensagem para a próxima abertura não repetir
+ * a consulta à API.
+ */
+export async function completarLinksOrigemCandidatos(
+  input: unknown,
+): Promise<ResultadoLinksOrigem> {
+  const user = await requireAuth();
+  const { mensagemId } = completarLinksSchema.parse(input);
+
+  const carregada = await carregarMensagemDoUsuario(mensagemId, user.id);
+  if (!carregada.ok) {
+    return { ok: false, mensagem: carregada.mensagem, urls: {} };
+  }
+
+  const passos = lerPassos(carregada.mensagem.ferramentasUsadas);
+  const urls: Record<string, string> = {};
+  const pendentes: { id: string; passoIdx: number; sugestaoIdx: number }[] = [];
+
+  passos.forEach((passo, passoIdx) => {
+    passo.sugestoes?.forEach((sugestao, sugestaoIdx) => {
+      const identidade = identidadeDaContratacao(sugestao);
+      const origem = resolverLinkOrigem(
+        sugestao.tipoCandidato,
+        sugestao.fonteUrl,
+        identidade,
+      );
+      if (origem) {
+        urls[sugestao.id] = origem.href;
+        return;
+      }
+      if (
+        !precisaCompletarLinkPainel(sugestao.tipoCandidato, sugestao.fonteUrl, identidade)
+      ) {
+        return;
+      }
+      pendentes.push({ id: sugestao.id, passoIdx, sugestaoIdx });
+    });
+  });
+
+  if (pendentes.length === 0) {
+    return { ok: true, urls };
+  }
+
+  const resolvidas = await resolverUrlsAcompanhamentoPainel(
+    pendentes.map(({ passoIdx, sugestaoIdx }) => {
+      const sugestao = passos[passoIdx]!.sugestoes![sugestaoIdx]!;
+      return {
+        fonteDescricao: sugestao.fonteDescricao,
+        fonteOrgaoOuId: sugestao.fonteOrgaoOuId,
+        valorUnitario: sugestao.valorUnitario,
+        dataReferencia: sugestao.dataReferencia,
+      };
+    }),
+  );
+
+  let mudou = false;
+  pendentes.forEach((pendente, i) => {
+    const href = resolvidas[i];
+    if (!href) return;
+    urls[pendente.id] = href;
+    const sugestao = passos[pendente.passoIdx]!.sugestoes![pendente.sugestaoIdx]!;
+    if (sugestao.fonteUrl !== href) {
+      sugestao.fonteUrl = href;
+      if (sugestao.tipoCandidato === "contratacao_publica") {
+        sugestao.tipoCandidato = "painel_precos";
+      }
+      mudou = true;
+    }
+  });
+
+  if (mudou) {
+    await db.mensagemAssistente.update({
+      where: { id: carregada.mensagem.id },
+      data: { ferramentasUsadas: passos as unknown as Prisma.InputJsonValue },
+    });
+  }
+
+  return { ok: true, urls };
 }
 
 const aprovarSchema = z.object({

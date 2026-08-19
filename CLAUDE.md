@@ -914,3 +914,11 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     JSON real (e o OpenAPI), não o tipo que nós mesmos escrevemos (§9.63, §9.69). Corolário de
     UI: o rótulo do link segue o tipo/host da fonte (PNCP, Painel de Preços, SINAPI), nunca um
     nome de portal só porque foi o primeiro a ter URL.
+74. **Home de portal não é evidência da contratação.** Em 2026-08-19 o card do Painel de Preços
+    passou a apontar para `pesquisaprecos.compras.gov.br/pesquisa-precos-frontend-semlogin/`
+    (Lite) quando `fonteUrl` era nulo. O analista clicava e caía na home do portal, não na
+    compra do card — o PNCP, ao lado, já abria o edital certo. A URL certa do Painel é
+    `cnetmobile…/acompanhamento-compra?compra={idCompra}` (medido na API real: o item do
+    Comando do Exército, R$ 52.147,00, é `16032805900082024`). Sem `idCompra`, completar pela
+    API (órgão + valor + CATSER) ou omitir o link; nunca substituir pela homepage. Vale para
+    qualquer fonte: o href do card tem de identificar o mesmo objeto que o preço.

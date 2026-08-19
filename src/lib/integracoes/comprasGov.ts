@@ -1,7 +1,7 @@
 import "server-only";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
-import { tokenizar, raizPlural } from "@/lib/similaridade/texto";
-import { montarUrlAcompanhamentoCompra, URL_PAINEL_PRECOS_LITE } from "@/lib/similaridade/linkOrigem";
+import { tokenizar, raizPlural, normalizar } from "@/lib/similaridade/texto";
+import { montarUrlAcompanhamentoCompra } from "@/lib/similaridade/linkOrigem";
 import { db } from "@/lib/db";
 
 /**
@@ -280,8 +280,9 @@ function dataRange(): { dataInicio: string; dataFim: string } {
 
 async function buscarPrecosServico(
   codigoItemCatalogo: number,
+  janela?: { dataInicio: string; dataFim: string },
 ): Promise<PrecoPesquisaServico[]> {
-  const { dataInicio, dataFim } = dataRange();
+  const { dataInicio, dataFim } = janela ?? dataRange();
   const url =
     `${BASE_URL}/modulo-pesquisa-preco/3_consultarServico` +
     `?pagina=1` +
@@ -292,6 +293,124 @@ async function buscarPrecosServico(
 
   const data = await fetchJSON<RespostaPaginada<PrecoPesquisaServico>>(url);
   return data?.resultado ?? [];
+}
+
+function chaveNome(texto: string): string {
+  return normalizar(texto).replace(/\s+/g, " ").trim();
+}
+
+function acharCodigosPorDescricao(
+  catalogo: ServicosCatalogo[],
+  descricao: string,
+): number[] {
+  const alvo = chaveNome(descricao);
+  const exatos = [
+    ...new Set(
+      catalogo.filter((s) => chaveNome(s.nomeServico) === alvo).map((s) => s.codigoServico),
+    ),
+  ];
+  if (exatos.length > 0) return exatos;
+  return encontrarServicos(descricao, catalogo).map((s) => s.codigoServico);
+}
+
+function escolherIdCompra(
+  precos: PrecoPesquisaServico[],
+  candidato: CandidatoPainelParaUrl,
+): string | null {
+  const orgao = chaveNome(candidato.fonteOrgaoOuId);
+  const alvoMs = Date.parse(candidato.dataReferencia);
+  const casados = precos.filter((p) => {
+    if (!p.idCompra?.trim()) return false;
+    if (Math.abs(p.precoUnitario - candidato.valorUnitario) > 0.02) return false;
+    return chaveNome(p.nomeOrgao) === orgao || chaveNome(p.nomeUasg) === orgao;
+  });
+  if (casados.length === 0) return null;
+  if (casados.length === 1 || Number.isNaN(alvoMs)) return casados[0]!.idCompra!.trim();
+  casados.sort((a, b) => {
+    const da = Date.parse(a.dataResultado ?? a.dataCompra);
+    const db = Date.parse(b.dataResultado ?? b.dataCompra);
+    return Math.abs(da - alvoMs) - Math.abs(db - alvoMs);
+  });
+  return casados[0]!.idCompra!.trim();
+}
+
+async function emParalelo<T, R>(itens: T[], limite: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const saida: R[] = new Array(itens.length);
+  let proximo = 0;
+  async function worker() {
+    while (proximo < itens.length) {
+      const i = proximo++;
+      saida[i] = await fn(itens[i]!);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limite, itens.length) }, () => worker()));
+  return saida;
+}
+
+export interface CandidatoPainelParaUrl {
+  fonteDescricao: string;
+  fonteOrgaoOuId: string;
+  valorUnitario: number;
+  dataReferencia: string;
+}
+
+/**
+ * Reconstrói a URL do acompanhamento da compra para candidatos do Painel
+ * gravados sem `fonteUrl` (conversas antigas) ou com a home do Lite.
+ *
+ * Casa órgão + valor contra `3_consultarServico` no código CATSER da
+ * descrição — não devolve a home do portal. Sem casa, devolve `null`.
+ */
+export async function resolverUrlsAcompanhamentoPainel(
+  candidatos: CandidatoPainelParaUrl[],
+): Promise<(string | null)[]> {
+  if (candidatos.length === 0) return [];
+
+  const catalogo = await carregarCatalogoServicos();
+  if (catalogo.length === 0) return candidatos.map(() => null);
+
+  const descToCodigos = new Map<string, number[]>();
+  for (const c of candidatos) {
+    const chave = chaveNome(c.fonteDescricao);
+    if (descToCodigos.has(chave)) continue;
+    descToCodigos.set(chave, acharCodigosPorDescricao(catalogo, c.fonteDescricao));
+  }
+
+  const codigoToDatas = new Map<number, number[]>();
+  for (const c of candidatos) {
+    const ms = Date.parse(c.dataReferencia);
+    for (const codigo of descToCodigos.get(chaveNome(c.fonteDescricao)) ?? []) {
+      const lista = codigoToDatas.get(codigo) ?? [];
+      if (!Number.isNaN(ms)) lista.push(ms);
+      codigoToDatas.set(codigo, lista);
+    }
+  }
+
+  const codigos = [...codigoToDatas.keys()];
+  const precosPorCodigo = new Map<number, PrecoPesquisaServico[]>();
+  const lotes = await emParalelo(codigos, 3, async (codigo) => {
+    const timestamps = codigoToDatas.get(codigo) ?? [];
+    const janela =
+      timestamps.length === 0
+        ? dataRange()
+        : {
+            dataInicio: new Date(Math.min(...timestamps) - 4 * 86_400_000).toISOString().slice(0, 10),
+            dataFim: new Date(Math.max(...timestamps) + 4 * 86_400_000).toISOString().slice(0, 10),
+          };
+    return { codigo, precos: await buscarPrecosServico(codigo, janela) };
+  });
+  for (const { codigo, precos } of lotes) {
+    precosPorCodigo.set(codigo, precos);
+  }
+
+  return candidatos.map((c) => {
+    const precos: PrecoPesquisaServico[] = [];
+    for (const codigo of descToCodigos.get(chaveNome(c.fonteDescricao)) ?? []) {
+      precos.push(...(precosPorCodigo.get(codigo) ?? []));
+    }
+    const idCompra = escolherIdCompra(precos, c);
+    return idCompra ? montarUrlAcompanhamentoCompra(idCompra) : null;
+  });
 }
 
 // ── Ponto de entrada público ──────────────────────────────────────────────────
@@ -344,9 +463,9 @@ export async function buscarContratosComprasGov(
           tipoCandidato: "painel_precos",
           fonteDescricao: preco.descricaoItem,
           fonteOrgaoOuId: preco.nomeOrgao || preco.nomeUasg,
-          // Página pública da compra (`?compra={idCompra}`). Sem idCompra, o
-          // Lite — origem da série no Compras.gov.br — ainda é conferível.
-          fonteUrl: idCompra ? montarUrlAcompanhamentoCompra(idCompra) : URL_PAINEL_PRECOS_LITE,
+          // Só a compra. Sem idCompra o campo fica ausente — a home do Lite
+          // não substitui evidência da contratação (CLAUDE.md §9.74).
+          ...(idCompra ? { fonteUrl: montarUrlAcompanhamentoCompra(idCompra) } : {}),
           valorUnitario: preco.precoUnitario,
           dataReferencia: dataRef,
           unidade: preco.siglaUnidadeMedida || preco.nomeUnidadeMedida || "UN",

@@ -1,12 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SugestoesCandidatos } from "../SugestoesCandidatos";
-import { adicionarCandidatoSugerido } from "@/lib/actions/assistente";
+import { adicionarCandidatoSugerido, completarLinksOrigemCandidatos } from "@/lib/actions/assistente";
 import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 
 vi.mock("@/lib/actions/assistente", () => ({
   adicionarCandidatoSugerido: vi.fn(async () => ({ ok: true, mensagem: "Adicionado" })),
   descartarCandidatoAssistente: vi.fn(async () => ({ ok: true, mensagem: "Descartado" })),
+  completarLinksOrigemCandidatos: vi.fn(async () => ({ ok: true, urls: {} })),
 }));
 
 const refreshMock = vi.fn();
@@ -15,6 +16,10 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const adicionarMock = vi.mocked(adicionarCandidatoSugerido);
+const completarLinksMock = vi.mocked(completarLinksOrigemCandidatos);
+
+const URL_ACOMPANHAMENTO_EXERCITO =
+  "https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/compras/acompanhamento-compra?compra=16032805900082024";
 
 const SUGESTAO: CandidatoSugerido = {
   id: "c1",
@@ -45,6 +50,7 @@ describe("SugestoesCandidatos", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     adicionarMock.mockResolvedValue({ ok: true, mensagem: "Adicionado" });
+    completarLinksMock.mockResolvedValue({ ok: true, urls: {} });
   });
 
   it("mostra o contrato com valor, data e link do PNCP para conferência", () => {
@@ -77,7 +83,11 @@ describe("SugestoesCandidatos", () => {
     expect(screen.queryByText(/Sem link direto/)).not.toBeInTheDocument();
   });
 
-  it("card antigo do Painel (fonteUrl null) ainda oferece o Lite, em vez de omitir o link", () => {
+  it("card antigo do Painel resolve a compra específica, nunca a home do Lite", async () => {
+    completarLinksMock.mockResolvedValue({
+      ok: true,
+      urls: { c3: URL_ACOMPANHAMENTO_EXERCITO },
+    });
     const legado: CandidatoSugerido = {
       ...SUGESTAO,
       id: "c3",
@@ -86,11 +96,9 @@ describe("SugestoesCandidatos", () => {
     };
     render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[legado]} itens={ITENS} />);
 
-    const link = screen.getByRole("link", { name: /Painel de Preços/ });
-    expect(link).toHaveAttribute(
-      "href",
-      "https://pesquisaprecos.compras.gov.br/pesquisa-precos-frontend-semlogin/",
-    );
+    const link = await screen.findByRole("link", { name: /Painel de Preços/ });
+    expect(link).toHaveAttribute("href", URL_ACOMPANHAMENTO_EXERCITO);
+    expect(link.getAttribute("href")).not.toContain("pesquisaprecos.compras.gov.br");
   });
 
   it("adiciona à lista pelo clique, mandando só identificadores", async () => {

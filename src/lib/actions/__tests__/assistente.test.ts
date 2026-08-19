@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   db: {
-    mensagemAssistente: { findUnique: vi.fn(), findFirst: vi.fn() },
+    mensagemAssistente: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
     conversaAssistente: { findFirst: vi.fn() },
     item: { findUnique: vi.fn(), findMany: vi.fn() },
     resultadoSimilaridade: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   getProvedorIA: vi.fn(),
   revalidatePath: vi.fn(),
   listarItensDaCompraPNCP: vi.fn(),
+  resolverUrlsAcompanhamentoPainel: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
@@ -48,10 +49,14 @@ vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/lib/integracoes/pncp", () => ({
   listarItensDaCompraPNCP: mocks.listarItensDaCompraPNCP,
 }));
+vi.mock("@/lib/integracoes/comprasGov", () => ({
+  resolverUrlsAcompanhamentoPainel: mocks.resolverUrlsAcompanhamentoPainel,
+}));
 
 import {
   adicionarCandidatoSugerido,
   adicionarItemDaContratacao,
+  completarLinksOrigemCandidatos,
   listarOutrosItensDaContratacao,
   obterConversaAtiva,
 } from "../assistente";
@@ -653,5 +658,73 @@ describe("obterConversaAtiva", () => {
 
     expect(conversa!.mensagens[0]!.passos).toEqual([]);
     expect(conversa!.mensagens[0]!.citacoes).toEqual([]);
+  });
+});
+
+describe("completarLinksOrigemCandidatos", () => {
+  const URL_COMPRA =
+    "https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/compras/acompanhamento-compra?compra=16032805900082024";
+
+  const SUGESTAO_PAINEL = {
+    id: "c9",
+    tipoCandidato: "contratacao_publica" as const,
+    fonteDescricao:
+      "PRESTACAO DE SERVICO DE LIMPEZA E CONSERVACAO - AREAS  INTERNAS - 44 HORAS SEMANAIS DIURNAS - PRODUTIVIDADE 600 M2",
+    fonteOrgaoOuId: "COMANDO DO EXERCITO",
+    fonteUrl: null as string | null,
+    valorUnitario: 52147,
+    dataReferencia: "2025-07-09T00:00:00.000Z",
+    unidade: "M2",
+    quantidade: 7,
+    itemIdSugerido: "0908/2022",
+    termoBuscaUsado: "limpeza conservação predial m²",
+    identidadeContratacao: null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireAuth.mockResolvedValue(USER);
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue({
+      id: "msg-1",
+      ferramentasUsadas: [
+        { ferramenta: "buscar_pncp", argumentos: "{}", sugestoes: [{ ...SUGESTAO_PAINEL }] },
+      ],
+      conversa: { id: "conv-1", userId: "user-1", processoId: "proc-1" },
+    });
+    mocks.resolverUrlsAcompanhamentoPainel.mockResolvedValue([URL_COMPRA]);
+    mocks.db.mensagemAssistente.update.mockResolvedValue({ id: "msg-1" });
+  });
+
+  it("grava a URL do acompanhamento da compra, não a home do Lite", async () => {
+    const resultado = await completarLinksOrigemCandidatos({ mensagemId: "msg-1" });
+
+    expect(resultado).toEqual({ ok: true, urls: { c9: URL_COMPRA } });
+    expect(mocks.resolverUrlsAcompanhamentoPainel).toHaveBeenCalledWith([
+      expect.objectContaining({
+        fonteOrgaoOuId: "COMANDO DO EXERCITO",
+        valorUnitario: 52147,
+      }),
+    ]);
+    const gravado = mocks.db.mensagemAssistente.update.mock.calls[0]![0].data
+      .ferramentasUsadas as Array<{ sugestoes: Array<{ fonteUrl: string; tipoCandidato: string }> }>;
+    expect(gravado[0]!.sugestoes[0]!.fonteUrl).toBe(URL_COMPRA);
+    expect(gravado[0]!.sugestoes[0]!.tipoCandidato).toBe("painel_precos");
+    expect(JSON.stringify(gravado)).not.toContain("pesquisaprecos.compras.gov.br");
+  });
+
+  it("não consulta a API quando o card já tem a URL da contratação", async () => {
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue({
+      id: "msg-1",
+      ferramentasUsadas: [
+        { ferramenta: "buscar_pncp", argumentos: "{}", sugestoes: [SUGESTAO] },
+      ],
+      conversa: { id: "conv-1", userId: "user-1", processoId: "proc-1" },
+    });
+
+    const resultado = await completarLinksOrigemCandidatos({ mensagemId: "msg-1" });
+
+    expect(resultado.urls.c1).toBe(SUGESTAO.fonteUrl);
+    expect(mocks.resolverUrlsAcompanhamentoPainel).not.toHaveBeenCalled();
+    expect(mocks.db.mensagemAssistente.update).not.toHaveBeenCalled();
   });
 });
