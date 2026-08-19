@@ -1907,13 +1907,42 @@ Correção de razão social validada como útil em casos reais, ex.:
 social tinha o próprio CNPJ colado no início do nome (herdado de importação antiga da planilha).
 0 "não encontrado" real (404) nas 3 rodagens — a totalidade das falhas foi rate limit/rede.
 
-**Falta:** a contagem de falha temporária **subiu** a cada rodagem (479 → 519 → 664) em vez de
-cair — sinal de que deixou de ser rate limit da BrasilAPI (que reduziria com `MAX_TENTATIVAS`/menor
-concorrência) e passou a ser instabilidade da rede de saída do ambiente no momento (`fetch failed`,
-`ConnectTimeoutError`, `ECONNRESET` no log da 2ª/3ª rodagem — timeout de conexão em endereço IPv6
-da Cloudflare, que hospeda a BrasilAPI). Rodar de novo mais tarde/de outra rede tende a resolver o
-residual (~664 fornecedores, a maioria provavelmente com sobreposição entre as 3 listas de falha —
-não medido). Mesmo comando de sempre, sem parâmetro novo:
+**Diagnóstico do resíduo e mais 3 rodagens (2026-08-19, mesma sessão).** A contagem de falha
+temporária **subiu** a cada uma das 3 primeiras rodagens (479 → 519 → 664) em vez de cair — sinal
+de que não era só rate limit (que reduziria com `MAX_TENTATIVAS`/menor concorrência), mas também
+instabilidade de rede do ambiente: o log da 2ª/3ª rodagem tinha `ConnectTimeoutError`/`ECONNRESET`
+batendo em endereço **IPv6** (faixa da Cloudflare, que hospeda a BrasilAPI), clássico de
+instabilidade do IPv6 sob NAT virtual do WSL2.
+
+Correção aplicada: `dns.setDefaultResultOrder("ipv4first")` no topo do script (só afeta esse
+processo, não o app publicado) + flag nova `--concorrencia=N`. Resultado:
+- **4ª rodagem** (IPv4 forçado, concorrência padrão 3): exceções de rede caíram de dezenas para 11
+  ocorrências no log — confirma que o IPv6 era parte real do problema — mas a falha temporária
+  total ficou em 533, porque o que sobrou (rate limit HTTP 429, que não gera log de exceção) ainda
+  era relevante sob concorrência 3.
+- **5ª rodagem** (`--concorrencia=1`): falha temporária caiu para **168** — confirma que o 429
+  era a causa dominante depois de tirar a instabilidade de IPv6 da equação.
+- **6ª rodagem** (`--concorrencia=1`, imediatamente em seguida): **piorou** — 0 sucessos em
+  qualquer campo, 264 falhas. Rodar 6 vezes seguidas sem intervalo aparenta ter esbarrado num
+  limite mais agressivo da BrasilAPI (possível throttle/bloqueio temporário por IP) — parou aqui em
+  vez de insistir sem sinal de melhora.
+
+| Rodagem | Cidade/Estado | Tag | Telefone | Razão social | Falha temporária |
+|---|---|---|---|---|---|
+| 1ª (concorrência 3) | 483 | 112 | 1.179 | 673 | 479 |
+| 2ª (concorrência 3) | 74 | 19 | 215 | 119 | 519 |
+| 3ª (concorrência 3) | 9 | 1 | 76 | 26 | 664 |
+| 4ª (concorrência 3, IPv4 forçado) | 11 | 5 | 9 | 15 | 533 |
+| 5ª (concorrência 1) | 0 | 0 | 16 | 4 | 168 |
+| 6ª (concorrência 1, sem intervalo) | 0 | 0 | 0 | 0 | 264 (piorou) |
+| **Total aplicado (1ª–5ª)** | **577** | **137** | **1.495** | **837** | — |
+
+**Falta:** ~168–264 fornecedores ainda pendentes (o número exato da 6ª rodagem não é confiável,
+porque ela não teve nenhum sucesso — sinal de limite temporário, não de universo maior de
+candidatos). Antes de tentar de novo, **esperar um intervalo** (algumas horas, não minutos) em vez
+de repetir em sequência — a 6ª rodagem sugere que o `429` pode escalar para bloqueio mais agressivo
+sob uso contínuo. Comando (concorrência 1 já confirmada eficaz; sem `--concorrencia` volta ao
+padrão 3, mais rápido mas com mais 429):
 ```
-$env:DATABASE_URL="<connection string de produção>"; node_modules\.bin\tsx.CMD scripts/enriquecer-fornecedores-cnpj.ts
+$env:DATABASE_URL="<connection string de produção>"; node_modules\.bin\tsx.CMD scripts/enriquecer-fornecedores-cnpj.ts --concorrencia=1
 ```

@@ -1,6 +1,16 @@
 import * as dotenv from "dotenv";
+import dns from "node:dns";
 
 dotenv.config();
+
+// Rodagem real contra produção em 2026-08-19 (3 execuções) teve a contagem de falha temporária
+// SUBINDO a cada tentativa (479→519→664) — sintoma de rede, não de rate limit da BrasilAPI: os
+// erros eram `ConnectTimeoutError`/`ECONNRESET` batendo em endereço IPv6 (faixa da Cloudflare, que
+// hospeda a BrasilAPI), clássico de instabilidade do IPv6 sob NAT virtual do WSL2. Forçar IPv4
+// primeiro na resolução DNS evita a rota que está falhando (só afeta este processo do script, não
+// o app publicado). Se a causa real for do lado da BrasilAPI, isto não muda nada — mas não custa
+// tentar antes de aceitar backoff maior/nova tentativa depois.
+dns.setDefaultResultOrder("ipv4first");
 
 import { enriquecerFornecedoresPorCnpj } from "../src/lib/ingestao/enriquecerFornecedoresPorCnpj";
 
@@ -14,6 +24,7 @@ import { enriquecerFornecedoresPorCnpj } from "../src/lib/ingestao/enriquecerFor
  *   npx tsx scripts/enriquecer-fornecedores-cnpj.ts --dry-run           (não grava, só reporta)
  *   npx tsx scripts/enriquecer-fornecedores-cnpj.ts --dry-run --limite=20   (amostra local)
  *   npx tsx scripts/enriquecer-fornecedores-cnpj.ts                     (grava de verdade)
+ *   npx tsx scripts/enriquecer-fornecedores-cnpj.ts --concorrencia=1    (mais lento, menos 429)
  *
  * **Não rodar sem `--dry-run`/`--limite` contra o banco de produção sem antes conferir o resumo do
  * dry-run** (CLAUDE.md §8) — a `DATABASE_URL` do ambiente decide o banco de destino.
@@ -31,13 +42,23 @@ async function main() {
     return;
   }
 
+  const argConcorrencia = args.find((a) => a.startsWith("--concorrencia="))?.split("=")[1];
+  const concorrencia = argConcorrencia ? Number(argConcorrencia) : undefined;
+
+  if (argConcorrencia !== undefined && (!Number.isInteger(concorrencia) || (concorrencia ?? 0) <= 0)) {
+    console.error(`--concorrencia inválido: "${argConcorrencia}" (esperado inteiro > 0)`);
+    process.exitCode = 1;
+    return;
+  }
+
   console.log(
     `Iniciando enriquecimento por CNPJ${dryRun ? " (DRY RUN — nada será gravado)" : ""}` +
       (limite ? `, limitado a ${limite} fornecedor(es)` : "") +
+      (concorrencia ? `, concorrência ${concorrencia}` : "") +
       "...",
   );
 
-  const resumo = await enriquecerFornecedoresPorCnpj({ limite, dryRun });
+  const resumo = await enriquecerFornecedoresPorCnpj({ limite, concorrencia, dryRun });
 
   console.log("\nConcluído:");
   console.log(`  Processados: ${resumo.processados}`);
