@@ -1673,7 +1673,57 @@ Ambas as correções passaram por TDD com mutação (remover a correção faz o 
 falhar) e validação contra Postgres real (dedup + upsert reproduzindo o cenário exato de produção,
 incluindo CNPJs em lotes diferentes). 1002 testes, typecheck e lint limpos. Nenhum dos dois bugs
 apareceria num teste com fixture pequena ou mockado sem cuidado — só o volume e a estrutura reais da
-planilha de produção os expuseram; a rota ainda precisa ser executada de novo em produção (código
-corrigido, mas não re-exercitado) para confirmar que completa as ~5.595 linhas sem erro — os 3.500
-fornecedores já gravados não são afetados: o upsert por `linhaId` é idempotente e vai só atualizá-los
-ao reprocessar as mesmas linhas.
+planilha de produção os expuseram.
+
+**Terceiro bug, achado numa SEGUNDA tentativa real após deployar as duas correções acima (ainda
+2026-08-19) — a rota falhou de novo, com o mesmo erro de constraint, em 3,46s, sem tocar linha
+nenhuma.** CNPJ `22.791.023/0001-02` (DALEN SUPRIMENTOS) aparece em **3** linhas da planilha real:
+`26`, `4433` e `4651`. `deduplicarPorCnpj` corretamente mantém só a última (`4651`) — mas a execução
+**anterior** (a que gravou os 3.500 fornecedores) já tinha persistido esse CNPJ com
+`origemPlanilhaLinhaId = "26"`. A busca de colisão em `upsertLote` filtrava por
+`origemPlanilhaLinhaId: null`, então não via esse fornecedor (ele já tinha um `linhaId`, só que
+diferente do que a dedup atual escolheu) — o código tentava `INSERT` uma linha nova com
+`origemPlanilhaLinhaId: "4651"`, que não colide no `ON CONFLICT`, mas colide no `cnpj`, que é
+`@unique` e não faz parte da cláusula de conflito. Reproduzido isolando o CNPJ exato via script
+`pg` direto (`Detail: Key (cnpj)=(22.791.023/0001-02) already exists`) antes de alterar qualquer
+código. **Correção:** a busca de colisão em `upsertLote` deixa de filtrar por
+`origemPlanilhaLinhaId: null` — busca qualquer fornecedor com aquele CNPJ, gravado ou não antes,
+porque o `linhaId` vencedor da deduplicação pode mudar entre execuções (planilha editada, ou —
+como aqui — a própria correção anterior mudando qual ocorrência vence).
+
+**Terceiro bug fechado em 2026-08-19.** O teste automatizado escrito para reproduzir o cenário
+("mescla via UPDATE quando o CNPJ já pertence a fornecedor sincronizado antes com OUTRO linhaId")
+passava mesmo com a correção revertida — o mock de `fornecedor.findMany` devolvia a colisão sempre
+que `where.cnpj` estava presente, sem checar se `origemPlanilhaLinhaId: null` também estava no
+filtro, então não distinguia código com bug de código corrigido (mesmo modo de falha do §9.39/§9.53
+do CLAUDE.md). Corrigido fazendo o mock reproduzir a semântica real do Postgres: o fornecedor
+fixture tem `origemPlanilhaLinhaId: "26"` (não null), então uma query que filtre explicitamente por
+`= null` não o encontra — só a ausência do filtro encontra. Mutação confirmada nos dois sentidos
+(reintroduzir o filtro `null` derruba o teste; removê-lo o mantém verde). Suíte inteira (1003
+testes), `tsc --noEmit` e `eslint` limpos.
+
+**Planilha de fornecedores padronizada antes da sincronização (mesma sessão).** Auditoria via
+Sheets API (service account com acesso de Editor, concedido pelo usuário) encontrou, além dos 125
+CNPJs duplicados já conhecidos: 4 linhas com CNPJ de 13 dígitos por zero à esquerda perdido
+(confirmado por dígito verificador oficial, e em 2 casos batendo com outra linha da planilha que já
+tinha o mesmo CNPJ correto — a correção revelou 2 duplicatas que a auditoria original não veria); 6
+linhas com dado na coluna errada (telefone em "E-mail" ou vice-versa); 451 linhas com CNPJ sem
+máscara. Aplicado via `spreadsheets.values.batchUpdate` (571 células) + `batchUpdate` com
+`deleteDimension` (145 linhas removidas, grupos de duplicata mesclados numa só linha cada, em
+ordem decrescente de índice para não invalidar os índices seguintes no mesmo lote). Backup completo
+da planilha salvo antes de escrever qualquer coisa. Verificado lendo a planilha de novo do zero
+após a escrita: 0 duplicatas, 0 dado fora da coluna, 100% dos CNPJs válidos com máscara, 5.495 →
+5.350 linhas de dados. Duas linhas com CNPJ irrecuperável automaticamente (uma com dígito a mais,
+outra com texto no lugar do CNPJ) foram deixadas como estão, por decisão do usuário.
+
+**Falta:** commit desta correção + rodar `POST /api/admin/sincronizar-fornecedores` contra a
+planilha já padronizada. Efeito esperado no primeiro sync após isso: os ~145 fornecedores hoje
+gravados sob o `linhaId` das linhas removidas (duplicatas) devem virar `status: inativo` (o `#`
+deles sumiu da planilha), e o fornecedor consolidado sob o `linhaId` vencedor de cada grupo fica
+ativo com os dados mesclados — é o resultado esperado, não uma regressão. Nota separada, sem relação
+com o M24: **o deploy automático via GitHub não estava dando gatilho** na sessão anterior (`gh api
+repos/emersontrindade45-debug/divisao_compras_cms/hooks` retornou `[]`) — os deploys precisaram de
+`vercel deploy --prod --yes` manual, que esbarra num bug conhecido do CLI (`EACCES` no `lstat` do
+symlink `.claude/skills/find-skills`); contorno usado foi mover o symlink para fora do diretório
+antes do deploy. Considerar investigar a integração Git↔Vercel antes de depender do deploy manual
+de novo.

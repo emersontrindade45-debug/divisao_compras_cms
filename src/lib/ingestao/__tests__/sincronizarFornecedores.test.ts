@@ -93,13 +93,13 @@ describe("sincronizarFornecedores", () => {
     });
   });
 
-  it("mescla via UPDATE por id quando o CNPJ da linha já existe num fornecedor sem origemPlanilhaLinhaId, em vez de tentar INSERT", async () => {
+  it("mescla via UPDATE por id quando o CNPJ da linha já existe em outro fornecedor, em vez de tentar INSERT", async () => {
     mocks.db.fornecedor.findMany.mockImplementation(
-      async ({ where }: { where?: { origemPlanilhaLinhaId?: string | null } }) => {
-        if (where?.origemPlanilhaLinhaId === null) {
+      async ({ where }: { where?: { cnpj?: unknown } }) => {
+        if (where?.cnpj) {
           // Busca de colisão de CNPJ dentro de upsertLote: simula que o CNPJ da
           // linha "ACME LTDA" (12345678000190, mascarado pelo parser) já
-          // pertence a um fornecedor manual.
+          // pertence a um fornecedor manual (sem origemPlanilhaLinhaId).
           return [{ id: "forn-manual-existente", cnpj: "12.345.678/0001-90" }];
         }
         return [];
@@ -121,6 +121,48 @@ describe("sincronizarFornecedores", () => {
       return sql.includes("INSERT INTO");
     });
     expect(chamadaInsert).toBeDefined();
+  });
+
+  it("mescla via UPDATE por id quando o CNPJ já pertence a fornecedor sincronizado antes com OUTRO linhaId (reprodução do 3º bug de produção)", async () => {
+    // Reproduz o bug encontrado em 2026-08-19: uma execução anterior já
+    // gravou o CNPJ 12345678000190 sob origemPlanilhaLinhaId "26"; a leitura
+    // atual (após deduplicarPorCnpj escolher a última ocorrência) quer
+    // sincronizá-lo sob linhaId "1" — DIFERENTE do já gravado. A busca de
+    // colisão não pode filtrar por origemPlanilhaLinhaId: null, porque esse
+    // fornecedor JÁ TEM um origemPlanilhaLinhaId (só que outro).
+    //
+    // O mock reproduz a semântica real do Postgres: o fornecedor fixture tem
+    // origemPlanilhaLinhaId "26" (não null), então uma query que filtre
+    // explicitamente por `origemPlanilhaLinhaId: null` NÃO o encontra — só a
+    // ausência desse filtro no `where` encontra. Isso é o que faz este teste
+    // cair de volta se o filtro `origemPlanilhaLinhaId: null` for
+    // reintroduzido (mutação verificada manualmente).
+    mocks.db.fornecedor.findMany.mockImplementation(
+      async ({ where }: { where?: { cnpj?: unknown; origemPlanilhaLinhaId?: string | null } }) => {
+        if (!where?.cnpj) return [];
+        if ("origemPlanilhaLinhaId" in where && where.origemPlanilhaLinhaId === null) {
+          return []; // fixture tem origemPlanilhaLinhaId "26" — não bate em `= null`
+        }
+        return [{ id: "forn-linha-26-antiga", cnpj: "12.345.678/0001-90" }];
+      },
+    );
+
+    const resultado = await sincronizarFornecedores({ csv: CSV_BASICO, origem: "manual" });
+
+    // Não deve ter propagado exceção nem gravado erro.
+    expect(resultado.linhasAtualizadas).toBeGreaterThan(0);
+    expect(mocks.db.sincronizacaoFornecedores.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ erro: expect.anything() }) }),
+    );
+
+    const chamadaUpdatePorId = mocks.db.$executeRaw.mock.calls.find((call) => {
+      const sql = (call[0] as string[]).join("");
+      return sql.includes('WHERE "id" =') && sql.includes("origemPlanilhaLinhaId");
+    });
+    // A herança do linhaId novo ("1") deve acontecer via UPDATE, não via
+    // INSERT — o fornecedor da linha "26" antiga passa a responder pela
+    // linha "1" nova.
+    expect(chamadaUpdatePorId).toBeDefined();
   });
 
   it("mantém só a última ocorrência quando duas linhas têm o mesmo CNPJ, mesmo que estejam no mesmo lote", async () => {

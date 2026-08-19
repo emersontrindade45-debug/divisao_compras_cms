@@ -74,14 +74,19 @@ function deduplicarPorCnpj(linhas: FornecedorPlanilhaRow[]): FornecedorPlanilhaR
  * `cnpj` é `@unique` no schema, então `INSERT ... ON CONFLICT ("origemPlanilhaLinhaId")`
  * falha inteiro (Postgres não aceita duas cláusulas `ON CONFLICT` no mesmo
  * `INSERT` — confirmado empiricamente contra Postgres real) sempre que o CNPJ
- * de uma linha da planilha já pertence a outro `Fornecedor` sem
- * `origemPlanilhaLinhaId` — tipicamente um cadastro manual pré-existente
- * (duplicata dentro da própria planilha já foi eliminada por
- * `deduplicarPorCnpj`, chamada antes de dividir em lotes). Resolvido buscando,
- * antes do INSERT, quais CNPJs deste lote já existem em fornecedores sem
- * `origemPlanilhaLinhaId`: essas linhas são mescladas via `UPDATE` direto por
- * `id` (o registro herda o `origemPlanilhaLinhaId`, deixando de ser
- * puramente manual); o restante segue pelo `INSERT ... ON CONFLICT` normal.
+ * de uma linha da planilha já pertence a outro `Fornecedor` — cadastro manual
+ * pré-existente, ou fornecedor já sincronizado antes sob um `linhaId`
+ * diferente do que a leitura atual escolheu (duplicata dentro da própria
+ * planilha já foi eliminada por `deduplicarPorCnpj`, chamada antes de dividir
+ * em lotes; mas o `linhaId` vencedor pode mudar entre execuções — ocorreu em
+ * produção em 2026-08-19: um fornecedor já sincronizado sob `linhaId "26"`
+ * tinha, na execução seguinte, o CNPJ dedupicado apontando para `linhaId
+ * "4651"`, e a busca de colisão que filtrava por `origemPlanilhaLinhaId: null`
+ * não via esse fornecedor por já ter um `linhaId` — só que outro). Resolvido
+ * buscando, antes do INSERT, **qualquer** fornecedor com CNPJ deste lote,
+ * tenha ou não `origemPlanilhaLinhaId` hoje: essas linhas são mescladas via
+ * `UPDATE` direto por `id` (o registro herda o `origemPlanilhaLinhaId` da
+ * leitura atual); o restante segue pelo `INSERT ... ON CONFLICT` normal.
  *
  * Linhas já sincronizadas antes (mesmo `origemPlanilhaLinhaId`) têm os campos
  * vindos da planilha atualizados, sem tocar em campos que o sistema calcula
@@ -96,10 +101,19 @@ async function upsertLote(
   const agora = new Date();
 
   const cnpjsDoLote = [...new Set(linhas.map((l) => l.cnpj).filter((c): c is string => c !== null))];
+  // Busca QUALQUER fornecedor com esse CNPJ — não só os sem `origemPlanilhaLinhaId`.
+  // Uma execução anterior pode já ter gravado esse CNPJ sob um `linhaId` diferente do
+  // que a leitura atual escolheu (deduplicarPorCnpj muda de ocorrência vencedora entre
+  // execuções, se a planilha for editada, ou — como ocorreu em produção em 2026-08-19 —
+  // se a execução anterior gravou uma ocorrência e esta execução, após a correção da
+  // deduplicação, escolhe outra): `ON CONFLICT ("origemPlanilhaLinhaId")` não vê esse
+  // caso, porque o `linhaId` novo não colide com nenhum já gravado — só o `cnpj` colide,
+  // e filtrar por `origemPlanilhaLinhaId: null` escondia exatamente esse fornecedor da
+  // busca de colisão.
   const colisoesCnpj =
     cnpjsDoLote.length > 0
       ? await db.fornecedor.findMany({
-          where: { cnpj: { in: cnpjsDoLote }, origemPlanilhaLinhaId: null },
+          where: { cnpj: { in: cnpjsDoLote } },
           select: { id: true, cnpj: true },
         })
       : [];
