@@ -17,8 +17,9 @@ import { candidatoEstaNoTempo } from "@/lib/similaridade/filtroRecencia";
 import { calcularScoreFinal } from "@/lib/similaridade/scoreFinal";
 import { janelaContratacaoPublica } from "@/lib/domain/in65Rules";
 import { listarItensDaCompraPNCP } from "@/lib/integracoes/pncp";
-import { resolverUrlsAcompanhamentoPainel } from "@/lib/integracoes/comprasGov";
+import { resolverUrlsAcompanhamentoPainel, resolverUrlPublicaPorIdCompra } from "@/lib/integracoes/comprasGov";
 import {
+  idCompraDaUrlAcompanhamento,
   precisaCompletarLinkPainel,
   resolverLinkOrigem,
 } from "@/lib/similaridade/linkOrigem";
@@ -204,7 +205,9 @@ export async function completarLinksOrigemCandidatos(
 
   const passos = lerPassos(carregada.mensagem.ferramentasUsadas);
   const urls: Record<string, string> = {};
-  const pendentes: { id: string; passoIdx: number; sugestaoIdx: number }[] = [];
+  const pendentesPorCampos: { id: string; passoIdx: number; sugestaoIdx: number }[] = [];
+  const pendentesPorId: { id: string; passoIdx: number; sugestaoIdx: number; idCompra: string }[] =
+    [];
 
   passos.forEach((passo, passoIdx) => {
     passo.sugestoes?.forEach((sugestao, sugestaoIdx) => {
@@ -218,45 +221,71 @@ export async function completarLinksOrigemCandidatos(
         urls[sugestao.id] = origem.href;
         return;
       }
+      const idCompra = sugestao.fonteUrl
+        ? idCompraDaUrlAcompanhamento(sugestao.fonteUrl)
+        : null;
+      if (idCompra) {
+        pendentesPorId.push({ id: sugestao.id, passoIdx, sugestaoIdx, idCompra });
+        return;
+      }
       if (
         !precisaCompletarLinkPainel(sugestao.tipoCandidato, sugestao.fonteUrl, identidade)
       ) {
         return;
       }
-      pendentes.push({ id: sugestao.id, passoIdx, sugestaoIdx });
+      pendentesPorCampos.push({ id: sugestao.id, passoIdx, sugestaoIdx });
     });
   });
 
-  if (pendentes.length === 0) {
+  if (pendentesPorCampos.length === 0 && pendentesPorId.length === 0) {
     return { ok: true, urls };
   }
 
-  const resolvidas = await resolverUrlsAcompanhamentoPainel(
-    pendentes.map(({ passoIdx, sugestaoIdx }) => {
-      const sugestao = passos[passoIdx]!.sugestoes![sugestaoIdx]!;
-      return {
-        fonteDescricao: sugestao.fonteDescricao,
-        fonteOrgaoOuId: sugestao.fonteOrgaoOuId,
-        valorUnitario: sugestao.valorUnitario,
-        dataReferencia: sugestao.dataReferencia,
-      };
-    }),
+  const resolvidasPorCampos =
+    pendentesPorCampos.length > 0
+      ? await resolverUrlsAcompanhamentoPainel(
+          pendentesPorCampos.map(({ passoIdx, sugestaoIdx }) => {
+            const sugestao = passos[passoIdx]!.sugestoes![sugestaoIdx]!;
+            return {
+              fonteDescricao: sugestao.fonteDescricao,
+              fonteOrgaoOuId: sugestao.fonteOrgaoOuId,
+              valorUnitario: sugestao.valorUnitario,
+              dataReferencia: sugestao.dataReferencia,
+            };
+          }),
+        )
+      : [];
+
+  const resolvidasPorId = await Promise.all(
+    pendentesPorId.map((p) => resolverUrlPublicaPorIdCompra(p.idCompra)),
   );
 
   let mudou = false;
-  pendentes.forEach((pendente, i) => {
-    const href = resolvidas[i];
-    if (!href) return;
-    urls[pendente.id] = href;
+  const aplicar = (
+    pendente: { id: string; passoIdx: number; sugestaoIdx: number },
+    href: string | null | undefined,
+  ) => {
     const sugestao = passos[pendente.passoIdx]!.sugestoes![pendente.sugestaoIdx]!;
-    if (sugestao.fonteUrl !== href) {
-      sugestao.fonteUrl = href;
-      if (sugestao.tipoCandidato === "contratacao_publica") {
-        sugestao.tipoCandidato = "painel_precos";
+    if (href) {
+      urls[pendente.id] = href;
+      if (sugestao.fonteUrl !== href) {
+        sugestao.fonteUrl = href;
+        if (sugestao.tipoCandidato === "contratacao_publica") {
+          sugestao.tipoCandidato = "painel_precos";
+        }
+        mudou = true;
       }
+      return;
+    }
+    // Compra não existe no acompanhamento nem no PNCP: tira o link morto.
+    if (sugestao.fonteUrl) {
+      sugestao.fonteUrl = null;
       mudou = true;
     }
-  });
+  };
+
+  pendentesPorCampos.forEach((pendente, i) => aplicar(pendente, resolvidasPorCampos[i]));
+  pendentesPorId.forEach((pendente, i) => aplicar(pendente, resolvidasPorId[i]));
 
   if (mudou) {
     await db.mensagemAssistente.update({

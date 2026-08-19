@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   listarItensDaCompraPNCP: vi.fn(),
   resolverUrlsAcompanhamentoPainel: vi.fn(),
+  resolverUrlPublicaPorIdCompra: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
@@ -51,6 +52,7 @@ vi.mock("@/lib/integracoes/pncp", () => ({
 }));
 vi.mock("@/lib/integracoes/comprasGov", () => ({
   resolverUrlsAcompanhamentoPainel: mocks.resolverUrlsAcompanhamentoPainel,
+  resolverUrlPublicaPorIdCompra: mocks.resolverUrlPublicaPorIdCompra,
 }));
 
 import {
@@ -726,5 +728,32 @@ describe("completarLinksOrigemCandidatos", () => {
     expect(resultado.urls.c1).toBe(SUGESTAO.fonteUrl);
     expect(mocks.resolverUrlsAcompanhamentoPainel).not.toHaveBeenCalled();
     expect(mocks.db.mensagemAssistente.update).not.toHaveBeenCalled();
+  });
+
+  it("troca acompanhamento morto pelo edital do PNCP quando a fase externa não acha a compra", async () => {
+    const urlMorta =
+      "https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/compras/acompanhamento-compra?compra=92715206000082025";
+    const urlPncp = "https://pncp.gov.br/app/editais/11308894000106/2025/87";
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue({
+      id: "msg-1",
+      ferramentasUsadas: [
+        {
+          ferramenta: "buscar_pncp",
+          argumentos: "{}",
+          sugestoes: [{ ...SUGESTAO_PAINEL, id: "c2", fonteUrl: urlMorta }],
+        },
+      ],
+      conversa: { id: "conv-1", userId: "user-1", processoId: "proc-1" },
+    });
+    mocks.resolverUrlPublicaPorIdCompra.mockResolvedValue(urlPncp);
+
+    const resultado = await completarLinksOrigemCandidatos({ mensagemId: "msg-1" });
+
+    expect(resultado.urls.c2).toBe(urlPncp);
+    expect(mocks.resolverUrlPublicaPorIdCompra).toHaveBeenCalledWith("92715206000082025");
+    expect(mocks.resolverUrlsAcompanhamentoPainel).not.toHaveBeenCalled();
+    const gravado = mocks.db.mensagemAssistente.update.mock.calls[0]![0].data
+      .ferramentasUsadas as Array<{ sugestoes: Array<{ fonteUrl: string }> }>;
+    expect(gravado[0]!.sugestoes[0]!.fonteUrl).toBe(urlPncp);
   });
 });

@@ -21,7 +21,7 @@ import {
   type PeriodicidadeContrato,
   type RoteiroCalculo,
 } from "@/lib/domain/roteiroCalculo";
-import { resolverLinkOrigem } from "@/lib/similaridade/linkOrigem";
+import { ehUrlGenericaPainel, linkOrigemDeHref, resolverLinkOrigem } from "@/lib/similaridade/linkOrigem";
 
 
 /**
@@ -68,7 +68,10 @@ export function LinhaCandidatoSimilaridade({
   const temRoteiro = candidato.roteiro !== null && candidato.valorConsiderado !== null;
   const valorExibido = candidato.valorConsiderado ?? candidato.valorUnitario;
   const grandeza = candidato.roteiro ? classificarGrandeza(candidato.roteiro.passos) : null;
-  const origem = resolverLinkOrigem(candidato.tipoCandidato, candidato.fonteUrl);
+  const origem =
+    candidato.fonteUrl && !ehUrlGenericaPainel(candidato.fonteUrl)
+      ? linkOrigemDeHref(candidato.fonteUrl, candidato.tipoCandidato)
+      : resolverLinkOrigem(candidato.tipoCandidato, candidato.fonteUrl);
 
   return (
     <>

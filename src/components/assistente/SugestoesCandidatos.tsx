@@ -17,6 +17,7 @@ import { identidadeDaContratacao, type CandidatoSugerido } from "@/lib/assistent
 import {
   precisaCompletarLinkPainel,
   resolverLinkOrigem,
+  linkOrigemDeHref,
 } from "@/lib/similaridade/linkOrigem";
 
 // Cartões dos candidatos que a busca do assistente encontrou.
@@ -278,11 +279,10 @@ export function SugestoesCandidatos({
         const contratacaoExpandida = expandidos.has(sugestao.id);
         const contratacao = itensContratacao[sugestao.id];
         const identidade = identidadeDaContratacao(sugestao);
-        const origem = resolverLinkOrigem(
-          sugestao.tipoCandidato,
-          linksCompletos[sugestao.id] ?? sugestao.fonteUrl,
-          identidade,
-        );
+        const hrefConfirmado = linksCompletos[sugestao.id];
+        const origem = hrefConfirmado
+          ? linkOrigemDeHref(hrefConfirmado, sugestao.tipoCandidato)
+          : resolverLinkOrigem(sugestao.tipoCandidato, sugestao.fonteUrl, identidade);
 
         return (
           <li

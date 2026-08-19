@@ -6,6 +6,7 @@ import {
   montarUrlEditalPncp,
   precisaCompletarLinkPainel,
   resolverLinkOrigem,
+  linkOrigemDeHref,
 } from "../linkOrigem";
 
 describe("montarUrlAcompanhamentoCompra", () => {
@@ -45,9 +46,9 @@ describe("resolverLinkOrigem", () => {
     });
   });
 
-  it("Painel de Preços: usa o acompanhamento da compra e rotula Painel de Preços", () => {
-    const href = montarUrlAcompanhamentoCompra("92715206000082025");
-    expect(resolverLinkOrigem("painel_precos", href)).toEqual({
+  it("Painel de Preços confirmado: rotula pelo host da URL", () => {
+    const href = montarUrlAcompanhamentoCompra("16032805900082024");
+    expect(linkOrigemDeHref(href, "painel_precos")).toEqual({
       href,
       rotulo: "Painel de Preços",
     });
@@ -75,6 +76,12 @@ describe("resolverLinkOrigem", () => {
         { cnpjOrgao: "1", ano: "2025", numeroSequencial: "2" },
       ),
     ).toBe(false);
+  });
+
+  it("não publica o acompanhamento cnetmobile até a fase externa confirmar", () => {
+    const acomp = montarUrlAcompanhamentoCompra("92715206000082025");
+    expect(resolverLinkOrigem("painel_precos", acomp)).toBeNull();
+    expect(precisaCompletarLinkPainel("painel_precos", acomp)).toBe(true);
   });
 
   it("SINAPI sem URL gravada ainda aponta para o portal oficial", () => {

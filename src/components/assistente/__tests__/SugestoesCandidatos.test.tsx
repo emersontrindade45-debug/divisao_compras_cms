@@ -67,7 +67,9 @@ describe("SugestoesCandidatos", () => {
     expect(link.getAttribute("rel")).toContain("noopener");
   });
 
-  it("card do Painel de Preços mostra o nome da fonte com o link de origem, não o rótulo do PNCP", () => {
+  it("card do Painel cuja compra não está no cnetmobile abre o edital do PNCP", async () => {
+    const urlPncp = "https://pncp.gov.br/app/editais/11308894000106/2025/87";
+    completarLinksMock.mockResolvedValue({ ok: true, urls: { c2: urlPncp } });
     const painel: CandidatoSugerido = {
       ...SUGESTAO,
       id: "c2",
@@ -77,9 +79,9 @@ describe("SugestoesCandidatos", () => {
     };
     render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[painel]} itens={ITENS} />);
 
-    const link = screen.getByRole("link", { name: /Painel de Preços/ });
-    expect(link).toHaveAttribute("href", painel.fonteUrl);
-    expect(screen.queryByRole("link", { name: /^PNCP$/ })).not.toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: /^PNCP$/ });
+    expect(link).toHaveAttribute("href", urlPncp);
+    expect(link.getAttribute("href")).not.toContain("cnetmobile");
     expect(screen.queryByText(/Sem link direto/)).not.toBeInTheDocument();
   });
 

@@ -918,7 +918,16 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     passou a apontar para `pesquisaprecos.compras.gov.br/pesquisa-precos-frontend-semlogin/`
     (Lite) quando `fonteUrl` era nulo. O analista clicava e caía na home do portal, não na
     compra do card — o PNCP, ao lado, já abria o edital certo. A URL certa do Painel é
-    `cnetmobile…/acompanhamento-compra?compra={idCompra}` (medido na API real: o item do
+    `cnetmobile…/acompanhamento-compra?compra={idCompra}` (medido na     API real: o item do
     Comando do Exército, R$ 52.147,00, é `16032805900082024`). Sem `idCompra`, completar pela
     API (órgão + valor + CATSER) ou omitir o link; nunca substituir pela homepage. Vale para
     qualquer fonte: o href do card tem de identificar o mesmo objeto que o preço.
+75. **URL montada a partir de `idCompra` não é evidência até a página existir.** Em 2026-08-19
+    o acompanhamento `cnetmobile…/acompanhamento-compra?compra={idCompra}` abria
+    `compra-nao-encontrada` para várias compras do Painel (ex.: `92715206000082025`,
+    dispensa municipal). A SPA sempre devolve 200 no HTML; o 404 real está em
+    `GET /comprasnet-fase-externa/v1/compras/{id}/link` (`"Compra não encontrada."`). A mesma
+    compra resolve no PNCP via `1.1_consultarContratacoes_PNCP_14133_Id?tipo=idCompra`
+    (`11308894000106/2025/87`, HTTP 200 no edital). Ordem assertiva: PNCP quando houver
+    CNPJ+ano+sequencial; senão o `/link` da fase externa; senão nenhum href. Nunca publicar
+    o acompanhamento sem essa confirmação (§9.8).

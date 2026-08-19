@@ -1,7 +1,7 @@
 import "server-only";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 import { tokenizar, raizPlural, normalizar } from "@/lib/similaridade/texto";
-import { montarUrlAcompanhamentoCompra } from "@/lib/similaridade/linkOrigem";
+import { montarUrlEditalPncp } from "@/lib/similaridade/linkOrigem";
 import { db } from "@/lib/db";
 
 /**
@@ -347,6 +347,69 @@ async function emParalelo<T, R>(itens: T[], limite: number, fn: (item: T) => Pro
   return saida;
 }
 
+const FASE_EXTERNA_LINK =
+  "https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-fase-externa/v1/compras";
+const TIMEOUT_URL_PUBLICA_MS = 8_000;
+
+const cacheUrlPublica = new Map<string, Promise<string | null>>();
+
+interface ContratacaoPncpPorId {
+  orgaoEntidadeCnpj?: string | null;
+  anoCompraPncp?: number | string | null;
+  sequencialCompraPncp?: number | string | null;
+}
+
+async function consultarUrlPncpPorIdCompra(idCompra: string): Promise<string | null> {
+  const url =
+    `${BASE_URL}/modulo-contratacoes/1.1_consultarContratacoes_PNCP_14133_Id` +
+    `?tipo=idCompra&codigo=${encodeURIComponent(idCompra)}`;
+  const data = await fetchJSON<RespostaPaginada<ContratacaoPncpPorId>>(url);
+  const item = data?.resultado?.[0];
+  const cnpj = item?.orgaoEntidadeCnpj?.trim();
+  const ano = item?.anoCompraPncp != null ? String(item.anoCompraPncp).trim() : "";
+  const sequencial =
+    item?.sequencialCompraPncp != null ? String(item.sequencialCompraPncp).trim() : "";
+  if (!cnpj || !ano || !sequencial) return null;
+  return montarUrlEditalPncp({ cnpjOrgao: cnpj, ano, numeroSequencial: sequencial });
+}
+
+async function consultarLinkFaseExterna(idCompra: string): Promise<string | null> {
+  const url = `${FASE_EXTERNA_LINK}/${encodeURIComponent(idCompra)}/link`;
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "text/plain" },
+      signal: AbortSignal.timeout(TIMEOUT_URL_PUBLICA_MS),
+    });
+    if (!res.ok) return null;
+    const text = (await res.text()).trim();
+    if (!text.startsWith("https://")) return null;
+    if (text.includes("compra-nao-encontrada")) return null;
+    return text;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * URL pública conferível da compra: edital do PNCP quando a contratação está
+ * lá (medido: o acompanhamento cnetmobile 404 em várias compras do Painel
+ * que o PNCP abre — ex. `92715206000082025`). Só usa o acompanhamento se o
+ * `/link` da fase externa confirmar que a compra existe.
+ */
+export async function resolverUrlPublicaPorIdCompra(idCompra: string): Promise<string | null> {
+  const id = idCompra.trim();
+  if (!id) return null;
+  const cached = cacheUrlPublica.get(id);
+  if (cached) return cached;
+  const pendente = (async () => {
+    const pncp = await consultarUrlPncpPorIdCompra(id);
+    if (pncp) return pncp;
+    return consultarLinkFaseExterna(id);
+  })();
+  cacheUrlPublica.set(id, pendente);
+  return pendente;
+}
+
 export interface CandidatoPainelParaUrl {
   fonteDescricao: string;
   fonteOrgaoOuId: string;
@@ -403,14 +466,16 @@ export async function resolverUrlsAcompanhamentoPainel(
     precosPorCodigo.set(codigo, precos);
   }
 
-  return candidatos.map((c) => {
-    const precos: PrecoPesquisaServico[] = [];
-    for (const codigo of descToCodigos.get(chaveNome(c.fonteDescricao)) ?? []) {
-      precos.push(...(precosPorCodigo.get(codigo) ?? []));
-    }
-    const idCompra = escolherIdCompra(precos, c);
-    return idCompra ? montarUrlAcompanhamentoCompra(idCompra) : null;
-  });
+  return Promise.all(
+    candidatos.map((c) => {
+      const precos: PrecoPesquisaServico[] = [];
+      for (const codigo of descToCodigos.get(chaveNome(c.fonteDescricao)) ?? []) {
+        precos.push(...(precosPorCodigo.get(codigo) ?? []));
+      }
+      const idCompra = escolherIdCompra(precos, c);
+      return idCompra ? resolverUrlPublicaPorIdCompra(idCompra) : Promise.resolve(null);
+    }),
+  );
 }
 
 // ── Ponto de entrada público ──────────────────────────────────────────────────
@@ -442,6 +507,7 @@ export async function buscarContratosComprasGov(
     );
 
     const candidatos: CandidatoSimilaridade[] = [];
+    const idsCompra: (string | null)[] = [];
     const vistos = new Set<string>();
 
     for (const precos of precosPorServico) {
@@ -458,20 +524,26 @@ export async function buscarContratosComprasGov(
         if (vistos.has(chave)) continue;
         vistos.add(chave);
 
-        const idCompra = preco.idCompra?.trim();
+        const idCompra = preco.idCompra?.trim() || null;
+        idsCompra.push(idCompra);
         candidatos.push({
           tipoCandidato: "painel_precos",
           fonteDescricao: preco.descricaoItem,
           fonteOrgaoOuId: preco.nomeOrgao || preco.nomeUasg,
-          // Só a compra. Sem idCompra o campo fica ausente — a home do Lite
-          // não substitui evidência da contratação (CLAUDE.md §9.74).
-          ...(idCompra ? { fonteUrl: montarUrlAcompanhamentoCompra(idCompra) } : {}),
           valorUnitario: preco.precoUnitario,
           dataReferencia: dataRef,
           unidade: preco.siglaUnidadeMedida || preco.nomeUnidadeMedida || "UN",
           quantidade: preco.quantidade || 1,
         });
       }
+    }
+
+    const urls = await emParalelo(idsCompra, 3, (id) =>
+      id ? resolverUrlPublicaPorIdCompra(id) : Promise.resolve(null),
+    );
+    for (let i = 0; i < candidatos.length; i++) {
+      const href = urls[i];
+      if (href) candidatos[i]!.fonteUrl = href;
     }
 
     return candidatos;

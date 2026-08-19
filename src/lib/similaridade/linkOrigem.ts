@@ -46,6 +46,17 @@ export function ehUrlAcompanhamentoCompra(url: string): boolean {
   return url.includes("cnetmobile.estaleiro.serpro.gov.br");
 }
 
+/** Extrai o `idCompra` de `...?compra=`. Sem o parâmetro, `null`. */
+export function idCompraDaUrlAcompanhamento(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const compra = parsed.searchParams.get("compra")?.trim();
+    return compra || null;
+  } catch {
+    return null;
+  }
+}
+
 export interface LinkOrigemCandidato {
   href: string;
   rotulo: "PNCP" | "Painel de Preços" | "SINAPI";
@@ -72,20 +83,31 @@ function rotuloPeloTipo(tipoCandidato: string): LinkOrigemCandidato["rotulo"] {
   return "PNCP";
 }
 
+/** Rótulo a partir de uma URL já confirmada (não esconde o acompanhamento cnetmobile). */
+export function linkOrigemDeHref(
+  href: string,
+  tipoCandidato?: string,
+): LinkOrigemCandidato {
+  return { href, rotulo: rotuloPelaUrl(href) ?? rotuloPeloTipo(tipoCandidato ?? "") };
+}
+
 /**
  * Resolve o link de origem a exibir no card — só URL da contratação/tabela
  * específica. A home do Lite é tratada como ausência.
  *
+ * URLs do acompanhamento Compras.gov (`cnetmobile`) também ficam de fora
+ * até `completarLinksOrigemCandidatos` confirmar que a compra existe: o
+ * `/link` da fase externa devolve 404 ("Compra não encontrada") para várias
+ * compras do Painel (ex.: dispensas municipais) que no PNCP abrem normal.
+ *
  * `identidade` reconstrói o edital do PNCP quando a URL não foi gravada.
- * Sem URL específica e sem identidade, devolve `null` (o card do Painel
- * completa o `idCompra` à parte, via `completarLinksOrigemCandidatos`).
  */
 export function resolverLinkOrigem(
   tipoCandidato: string,
   fonteUrl: string | null | undefined,
   identidade?: IdentidadeUrlPncp | null,
 ): LinkOrigemCandidato | null {
-  if (fonteUrl && !ehUrlGenericaPainel(fonteUrl)) {
+  if (fonteUrl && !ehUrlGenericaPainel(fonteUrl) && !ehUrlAcompanhamentoCompra(fonteUrl)) {
     return { href: fonteUrl, rotulo: rotuloPelaUrl(fonteUrl) ?? rotuloPeloTipo(tipoCandidato) };
   }
   if (identidade?.cnpjOrgao && identidade.ano && identidade.numeroSequencial) {
@@ -98,16 +120,17 @@ export function resolverLinkOrigem(
 }
 
 /**
- * Card do Painel (rótulo novo ou o antigo `contratacao_publica` sem edital PNCP)
- * ainda sem a URL da compra — precisa consultar `idCompra` na API.
+ * Card do Painel ainda sem URL confirmada da compra: `fonteUrl` nulo/Lite,
+ * ou acompanhamento cnetmobile (precisa validar no `/link` da fase externa).
  */
 export function precisaCompletarLinkPainel(
   tipoCandidato: string,
   fonteUrl: string | null | undefined,
   identidade?: IdentidadeUrlPncp | null,
 ): boolean {
-  if (resolverLinkOrigem(tipoCandidato, fonteUrl, identidade)) return false;
-  if (tipoCandidato === "painel_precos") return true;
-  if (tipoCandidato === "contratacao_publica") return true;
+  if (tipoCandidato === "preco_referencia") return false;
+  if (fonteUrl?.includes("pncp.gov.br")) return false;
+  if (identidade?.cnpjOrgao && identidade.ano && identidade.numeroSequencial) return false;
+  if (tipoCandidato === "painel_precos" || tipoCandidato === "contratacao_publica") return true;
   return false;
 }
