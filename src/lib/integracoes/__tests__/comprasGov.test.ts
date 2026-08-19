@@ -92,7 +92,9 @@ function fetchPorRota(opts: {
   } | null;
   faseExterna: "ok" | "404";
 }) {
-  return vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+  const spy = vi.spyOn(global, "fetch");
+  spy.mockClear();
+  spy.mockImplementation(async (input) => {
     const url = String(input);
     if (url.includes("comprasnet-fase-externa") && url.includes("/link")) {
       if (opts.faseExterna === "404") {
@@ -132,6 +134,7 @@ function fetchPorRota(opts: {
       paginasRestantes: 0,
     });
   });
+  return spy;
 }
 
 const PRECO_MACAE = {
@@ -354,5 +357,32 @@ describe("buscarContratosComprasGov — só compras homologadas", () => {
     const url = await resolverUrlPublicaPorIdCompra("92715206000082025");
 
     expect(url).toBeNull();
+  });
+
+  it("não resolve URL de dezenas de idCompra — teto antes do lookup, senão estoura o timeout do assistente", async () => {
+    const precos = Array.from({ length: 12 }, (_, i) => ({
+      ...PRECO_MACAE,
+      idCompra: `927152060000${String(i).padStart(5, "0")}`,
+      precoUnitario: 21420.2 + i,
+    }));
+    const fetchSpy = fetchPorRota({
+      precos,
+      pncp: {
+        orgaoEntidadeCnpj: "11308894000106",
+        anoCompraPncp: 2025,
+        sequencialCompraPncp: 87,
+      },
+      faseExterna: "404",
+    });
+
+    const { buscarContratosComprasGov } = await import("../comprasGov");
+    const candidatos = await buscarContratosComprasGov("endoscopia digestiva");
+
+    expect(candidatos.length).toBeLessThanOrEqual(10);
+    const lookupsPncp = fetchSpy.mock.calls.filter(([url]) =>
+      String(url).includes("1.1_consultarContratacoes_PNCP_14133_Id"),
+    );
+    expect(lookupsPncp.length).toBeLessThanOrEqual(10);
+    expect(lookupsPncp.length).toBeGreaterThan(0);
   });
 });

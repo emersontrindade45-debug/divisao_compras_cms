@@ -324,7 +324,10 @@ describe("registry de ferramentas do assistente", () => {
     it("busca sem a faixa e filtra localmente o resultado mesclado", async () => {
       mocks.buscarCandidatosPublicos.mockResolvedValue([
         candidato({ valorUnitario: 20 }),
-        candidato({ valorUnitario: 999, fonteUrl: "https://pncp.gov.br/app/editais/fora-da-faixa" }),
+        candidato({
+          valorUnitario: 999,
+          fonteUrl: "https://pncp.gov.br/app/editais/fora-da-faixa",
+        }),
       ]);
       const registry = montarRegistry(CTX_PROCESSO);
 
@@ -365,6 +368,36 @@ describe("registry de ferramentas do assistente", () => {
 
       expect(resposta.total).toBe(0);
       expect(resposta.observacao).toMatch(/ampliar a faixa/i);
+    });
+  });
+
+  describe("buscar_pncp — mistura fontes no teto de 25", () => {
+    it("não deixa o PNCP ocupar sozinho o corte quando o Painel também respondeu", async () => {
+      const pncp = Array.from({ length: 25 }, (_, i) =>
+        candidato({
+          fonteUrl: `https://pncp.gov.br/app/editais/${i}`,
+          fonteOrgaoOuId: `Orgao PNCP ${i}`,
+        }),
+      );
+      const painel = candidato({
+        tipoCandidato: "painel_precos",
+        fonteUrl: "https://pncp.gov.br/app/editais/painel",
+        fonteOrgaoOuId: "COMANDO DO EXERCITO",
+      });
+      mocks.buscarCandidatosPublicos.mockResolvedValue([...pncp, painel]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resultado = await registry.executar({
+        id: "call-1",
+        nome: "buscar_pncp",
+        argumentos: JSON.stringify({ termo: "limpeza" }),
+      });
+
+      expect(resultado.sugestoes).toHaveLength(25);
+      expect(resultado.sugestoes?.some((s) => s.tipoCandidato === "painel_precos")).toBe(true);
+      expect(resultado.sugestoes?.some((s) => s.fonteOrgaoOuId === "COMANDO DO EXERCITO")).toBe(
+        true,
+      );
     });
   });
 });
