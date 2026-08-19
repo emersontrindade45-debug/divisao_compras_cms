@@ -1716,8 +1716,30 @@ após a escrita: 0 duplicatas, 0 dado fora da coluna, 100% dos CNPJs válidos co
 5.350 linhas de dados. Duas linhas com CNPJ irrecuperável automaticamente (uma com dígito a mais,
 outra com texto no lugar do CNPJ) foram deixadas como estão, por decisão do usuário.
 
-**Falta:** commit desta correção + rodar `POST /api/admin/sincronizar-fornecedores` contra a
-planilha já padronizada. Efeito esperado no primeiro sync após isso: os ~145 fornecedores hoje
+**Quarto bug de produção, achado ao chamar `POST /api/admin/sincronizar-fornecedores` de verdade
+depois da limpeza da planilha.** Falhou de novo com `duplicate key value violates unique constraint
+"fornecedores_cnpj_key"`. Causa: duas empresas ("SPACE AIR BRAZIL" e "NICMAR") tinham CNPJ com zero
+à esquerda perdido na planilha original; na 1ª sincronização (antes de qualquer correção), essas
+linhas malformadas foram gravadas com `cnpj: null` sob seu `linhaId` — um fornecedor "gêmeo" órfão,
+separado do fornecedor da OUTRA ocorrência da mesma empresa (que já tinha CNPJ correto, gravado sob
+outro `linhaId`). Ao corrigir o zero perdido na planilha (limpeza desta sessão), o `linhaId`
+vencedor da mesclagem passou a ter o CNPJ certo — que já pertencia ao gêmeo. A correção do 3º bug
+então tentava `UPDATE` no fornecedor do CNPJ colidido, mudando seu `linhaId` para o vencedor — mas
+esse `linhaId` já estava em uso pelo gêmeo órfão, violando `fornecedores_origemPlanilhaLinhaId_key`
+(sintoma observado foi o `cnpj_key` de uma execução anterior que ainda não tinha essa correção;
+achado por leitura direta do banco de produção via `PROD_READ_URL`, comparando `origemPlanilhaLinhaId`
+dos dois fornecedores envolvidos, sem escrever nada). **Correção:** antes do `UPDATE` que reatribui o
+`linhaId`, buscar se algum OUTRO fornecedor já ocupa esse `linhaId` e, se sim, liberá-lo primeiro
+(`origemPlanilhaLinhaId = NULL`). TDD com mutação (reverter a correção derruba o teste novo;
+restaurar mantém). Suíte inteira (1004 testes), `tsc --noEmit` e `eslint` limpos.
+
+Nota sobre verificação: não foi possível simular a escrita contra produção dentro de uma transação
+com `ROLLBACK` desta vez (como fizeram sessões anteriores) — o classificador de permissão do Bash
+bloqueou o comando por ser uma escrita direta em produção, mesmo com rollback garantido no código.
+A correção foi validada só por teste unitário + mutação antes de rodar a rota de verdade.
+
+**Falta:** commitar esta correção + rodar `POST /api/admin/sincronizar-fornecedores` de novo contra
+a planilha já padronizada. Efeito esperado no primeiro sync bem-sucedido: os ~145 fornecedores hoje
 gravados sob o `linhaId` das linhas removidas (duplicatas) devem virar `status: inativo` (o `#`
 deles sumiu da planilha), e o fornecedor consolidado sob o `linhaId` vencedor de cada grupo fica
 ativo com os dados mesclados — é o resultado esperado, não uma regressão. Nota separada, sem relação

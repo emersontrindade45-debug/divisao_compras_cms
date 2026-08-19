@@ -119,6 +119,31 @@ async function upsertLote(
       : [];
   const idPorCnpjColidido = new Map(colisoesCnpj.map((f) => [f.cnpj!, f.id]));
 
+  // Quarto bug de produção (2026-08-19): quando a linha colide por CNPJ (acima), o
+  // UPDATE abaixo tenta gravar `origemPlanilhaLinhaId = linha.linhaId` no fornecedor
+  // encontrado — mas esse `linhaId` pode já pertencer a OUTRO fornecedor: um "gêmeo"
+  // órfão, criado numa execução anterior quando o CNPJ desta mesma linha da planilha
+  // ainda estava malformado (parser rejeitava e gravava `cnpj: null` sob esse mesmo
+  // `linhaId`) — depois a planilha foi corrigida, o CNPJ passou a bater com outro
+  // fornecedor já existente, e o `linhaId` original ficou "para trás" no gêmeo com
+  // `cnpj: null`. Sem liberar esse `linhaId` primeiro, o UPDATE viola
+  // `fornecedores_origemPlanilhaLinhaId_key`. Reproduzido em produção com
+  // "SPACE AIR BRAZIL" (linhaId antigo com cnpj null vs. linhaId novo, mesmo CNPJ
+  // depois de corrigido o zero à esquerda perdido na planilha).
+  const linhaIdsComColisaoCnpj = linhas
+    .filter((l): l is FornecedorPlanilhaRow & { cnpj: string } => l.cnpj !== null && idPorCnpjColidido.has(l.cnpj))
+    .map((l) => l.linhaId);
+  const ocupantesAtuaisDoLinhaId =
+    linhaIdsComColisaoCnpj.length > 0
+      ? await db.fornecedor.findMany({
+          where: { origemPlanilhaLinhaId: { in: linhaIdsComColisaoCnpj } },
+          select: { id: true, origemPlanilhaLinhaId: true },
+        })
+      : [];
+  const idOcupanteAtualPorLinhaId = new Map(
+    ocupantesAtuaisDoLinhaId.map((f) => [f.origemPlanilhaLinhaId!, f.id]),
+  );
+
   let afetadas = 0;
   const paraInserir: FornecedorPlanilhaRow[] = [];
 
@@ -126,6 +151,14 @@ async function upsertLote(
     const idExistentePorCnpj = linha.cnpj ? idPorCnpjColidido.get(linha.cnpj) : undefined;
 
     if (idExistentePorCnpj) {
+      const idOcupanteAtual = idOcupanteAtualPorLinhaId.get(linha.linhaId);
+      if (idOcupanteAtual && idOcupanteAtual !== idExistentePorCnpj) {
+        await db.$executeRaw`
+          UPDATE "fornecedores" SET "origemPlanilhaLinhaId" = NULL, "updatedAt" = ${agora}
+          WHERE "id" = ${idOcupanteAtual}
+        `;
+      }
+
       await db.$executeRaw`
         UPDATE "fornecedores" SET
           "razaoSocial" = ${linha.razaoSocial},

@@ -165,6 +165,59 @@ describe("sincronizarFornecedores", () => {
     expect(chamadaUpdatePorId).toBeDefined();
   });
 
+  it("libera o linhaId de um fornecedor 'gêmeo' órfão antes de reatribuí-lo (reprodução do 4º bug de produção)", async () => {
+    // Reproduz o bug encontrado em 2026-08-19 com "SPACE AIR BRAZIL": o CNPJ da
+    // linha "3306" estava malformado numa execução anterior (13 dígitos, zero à
+    // esquerda perdido) e foi gravado como cnpj: null sob esse mesmo linhaId —
+    // um fornecedor "gêmeo" órfão. Depois a planilha foi corrigida e o CNPJ
+    // desta linha passou a bater com OUTRO fornecedor já existente
+    // (forn-cnpj-existente, sob um linhaId diferente). Sem liberar o linhaId
+    // "3306" do gêmeo órfão primeiro, o UPDATE que reatribui esse linhaId ao
+    // fornecedor do CNPJ colidido violaria fornecedores_origemPlanilhaLinhaId_key.
+    const csv = [
+      "#,Nome/Razão Social,CPF/CNPJ",
+      "3306,F.F.L/ .SPACE AIR BRAZIL,07583036000194",
+    ].join("\n");
+
+    mocks.db.fornecedor.findMany.mockImplementation(
+      async ({
+        where,
+      }: {
+        where?: { cnpj?: unknown; origemPlanilhaLinhaId?: { in: string[] } | { not: null } | null };
+      }) => {
+        if (where?.cnpj) {
+          return [{ id: "forn-cnpj-existente", cnpj: "07.583.036/0001-94" }];
+        }
+        if (where?.origemPlanilhaLinhaId && "in" in where.origemPlanilhaLinhaId) {
+          return [{ id: "forn-linhaId-orfao", origemPlanilhaLinhaId: "3306" }];
+        }
+        return [];
+      },
+    );
+
+    const resultado = await sincronizarFornecedores({ csv, origem: "manual" });
+
+    expect(resultado.linhasAtualizadas).toBeGreaterThan(0);
+    expect(mocks.db.sincronizacaoFornecedores.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ erro: expect.anything() }) }),
+    );
+
+    const chamadas = mocks.db.$executeRaw.mock.calls.map((call) => (call[0] as string[]).join(""));
+
+    const chamadaLibera = chamadas.find(
+      (sql) => sql.includes("origemPlanilhaLinhaId") && sql.includes("NULL") && sql.includes('WHERE "id" ='),
+    );
+    expect(chamadaLibera).toBeDefined();
+
+    const idxLibera = chamadas.findIndex((sql) => sql === chamadaLibera);
+    const idxReatribui = chamadas.findIndex(
+      (sql, i) => i > idxLibera && sql.includes('WHERE "id" =') && sql.includes("origemPlanilhaLinhaId"),
+    );
+    // A liberação do linhaId do gêmeo órfão precisa acontecer ANTES da
+    // reatribuição — na ordem inversa, a reatribuição ainda colidiria.
+    expect(idxReatribui).toBeGreaterThan(idxLibera);
+  });
+
   it("mantém só a última ocorrência quando duas linhas têm o mesmo CNPJ, mesmo que estejam no mesmo lote", async () => {
     const csvComCnpjDuplicado = [
       "#,Nome/Razão Social,CPF/CNPJ",
