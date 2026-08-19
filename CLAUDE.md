@@ -931,3 +931,15 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     (`11308894000106/2025/87`, HTTP 200 no edital). Ordem assertiva: PNCP quando houver
     CNPJ+ano+sequencial; senão o `/link` da fase externa; senão nenhum href. Nunca publicar
     o acompanhamento sem essa confirmação (§9.8).
+76. **Painel de Preços não é lista de homologados até filtrar `dataResultado`.** Em 2026-08-19
+    o pedido foi “só compras homologadas, filtrar antes de trazer o resultado”. O PNCP
+    (`/itens/.../resultados`) e o `modulo-contratacoes` já exigem valor homologado
+    (`§9.61`); o furo era `3_consultarServico`. O código caía de `dataResultado` para
+    `dataCompra` e o comentário chamava `dataCompra` de “homologação”. O parâmetro
+    OpenAPI `dataResultado` (boolean, default `false`, descrição vazia) **não filtra**:
+    medido no CATSER 23329, `true` e `false` devolveram o mesmo total. A garantia é no
+    cliente: sem `dataResultado` plausível a linha não entra; se a compra existir no
+    PNCP (`1.1_consultar…_Id?tipo=idCompra`), exige `existeResultado === true` e
+    `valorTotalHomologado > 0` — CNPJ+ano+sequencial sozinhos montam o edital de uma
+    contratação ainda sem julgamento. Sem registro no PNCP, `dataResultado` no Painel
+    basta (há órgãos homologados no COMPRASNET e ausentes do PNCP).

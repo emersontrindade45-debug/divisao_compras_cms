@@ -82,7 +82,14 @@ function jsonOk(body: unknown): Response {
 
 function fetchPorRota(opts: {
   precos?: unknown[];
-  pncp?: { orgaoEntidadeCnpj: string; anoCompraPncp: number; sequencialCompraPncp: number } | null;
+  pncp?: {
+    orgaoEntidadeCnpj: string;
+    anoCompraPncp: number;
+    sequencialCompraPncp: number;
+    existeResultado?: boolean;
+    valorTotalHomologado?: number;
+    contratacaoExcluida?: boolean;
+  } | null;
   faseExterna: "ok" | "404";
 }) {
   return vi.spyOn(global, "fetch").mockImplementation(async (input) => {
@@ -100,9 +107,16 @@ function fetchPorRota(opts: {
       } as Response;
     }
     if (url.includes("1.1_consultarContratacoes_PNCP_14133_Id")) {
+      const item = opts.pncp
+        ? {
+            ...opts.pncp,
+            existeResultado: opts.pncp.existeResultado ?? true,
+            valorTotalHomologado: opts.pncp.valorTotalHomologado ?? 1,
+          }
+        : null;
       return jsonOk({
-        resultado: opts.pncp ? [opts.pncp] : [],
-        totalRegistros: opts.pncp ? 1 : 0,
+        resultado: item ? [item] : [],
+        totalRegistros: item ? 1 : 0,
         totalPaginas: 1,
         paginasRestantes: 0,
       });
@@ -144,7 +158,7 @@ describe("URL pública da compra do Painel", () => {
     mocks.db.itemCatalogoReferencia.findMany.mockResolvedValue([
       { codigo: 7250, descricao: "ENDOSCOPIA DIGESTIVA" },
     ]);
-    fetchPorRota({
+    const fetchSpy = fetchPorRota({
       precos: [PRECO_MACAE],
       pncp: {
         orgaoEntidadeCnpj: "11308894000106",
@@ -162,6 +176,10 @@ describe("URL pública da compra do Painel", () => {
       tipoCandidato: "painel_precos",
       fonteUrl: "https://pncp.gov.br/app/editais/11308894000106/2025/87",
     });
+    const consultaPrecos = fetchSpy.mock.calls
+      .map(([url]) => String(url))
+      .find((url) => url.includes("3_consultarServico"));
+    expect(consultaPrecos).toContain("dataResultado=true");
   });
 
   it("não grava o acompanhamento quando a fase externa responde compra não encontrada e não há PNCP", async () => {
@@ -227,3 +245,113 @@ describe("URL pública da compra do Painel", () => {
     expect(urls).toEqual(["https://pncp.gov.br/app/editais/00394452000103/2024/23323"]);
   });
 });
+
+describe("buscarContratosComprasGov — só compras homologadas", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mocks.db.itemCatalogoReferencia.findMany.mockReset();
+    mocks.db.itemCatalogoReferencia.findMany.mockResolvedValue([
+      { codigo: 7250, descricao: "ENDOSCOPIA DIGESTIVA" },
+    ]);
+  });
+
+  it("omite compra sem dataResultado, mesmo com dataCompra e preço", async () => {
+    fetchPorRota({
+      precos: [
+        {
+          ...PRECO_MACAE,
+          idCompra: "99999999999999999",
+          dataResultado: null,
+          precoUnitario: 1,
+        },
+        PRECO_MACAE,
+      ],
+      pncp: {
+        orgaoEntidadeCnpj: "11308894000106",
+        anoCompraPncp: 2025,
+        sequencialCompraPncp: 87,
+      },
+      faseExterna: "ok",
+    });
+
+    const { buscarContratosComprasGov } = await import("../comprasGov");
+    const candidatos = await buscarContratosComprasGov("endoscopia digestiva");
+
+    expect(candidatos).toHaveLength(1);
+    expect(candidatos[0]!.valorUnitario).toBe(21420.2);
+    expect(candidatos[0]!.fonteUrl).toBe(
+      "https://pncp.gov.br/app/editais/11308894000106/2025/87",
+    );
+  });
+
+  it("omite dataResultado sentinela (0001-01-01)", async () => {
+    fetchPorRota({
+      precos: [{ ...PRECO_MACAE, dataResultado: "0001-01-01" }],
+      pncp: null,
+      faseExterna: "ok",
+    });
+
+    const { buscarContratosComprasGov } = await import("../comprasGov");
+    const candidatos = await buscarContratosComprasGov("endoscopia digestiva");
+
+    expect(candidatos).toEqual([]);
+  });
+
+  it("omite compra que o PNCP tem sem resultado homologado, mesmo com dataResultado no Painel", async () => {
+    fetchPorRota({
+      precos: [PRECO_MACAE],
+      pncp: {
+        orgaoEntidadeCnpj: "11308894000106",
+        anoCompraPncp: 2025,
+        sequencialCompraPncp: 87,
+        existeResultado: false,
+        valorTotalHomologado: 0,
+      },
+      faseExterna: "ok",
+    });
+
+    const { buscarContratosComprasGov } = await import("../comprasGov");
+    const candidatos = await buscarContratosComprasGov("endoscopia digestiva");
+
+    expect(candidatos).toEqual([]);
+  });
+
+  it("omite compra com valorTotalHomologado zerado no PNCP", async () => {
+    fetchPorRota({
+      precos: [PRECO_MACAE],
+      pncp: {
+        orgaoEntidadeCnpj: "11308894000106",
+        anoCompraPncp: 2025,
+        sequencialCompraPncp: 87,
+        existeResultado: true,
+        valorTotalHomologado: 0,
+      },
+      faseExterna: "ok",
+    });
+
+    const { buscarContratosComprasGov } = await import("../comprasGov");
+    const candidatos = await buscarContratosComprasGov("endoscopia digestiva");
+
+    expect(candidatos).toEqual([]);
+  });
+
+  it("não publica o acompanhamento cnetmobile de compra não homologada no PNCP", async () => {
+    fetchPorRota({
+      precos: [],
+      pncp: {
+        orgaoEntidadeCnpj: "11308894000106",
+        anoCompraPncp: 2025,
+        sequencialCompraPncp: 87,
+        existeResultado: false,
+        valorTotalHomologado: 0,
+      },
+      faseExterna: "ok",
+    });
+
+    const { resolverUrlPublicaPorIdCompra } = await import("../comprasGov");
+    const url = await resolverUrlPublicaPorIdCompra("92715206000082025");
+
+    expect(url).toBeNull();
+  });
+});
+
