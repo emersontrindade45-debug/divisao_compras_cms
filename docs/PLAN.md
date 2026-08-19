@@ -1808,3 +1808,62 @@ processo "2026/002 — Serviço de manutenção predial preventiva", clique em "
 a OpenAI de verdade — identificou "Manutenção predial" e "Serviços gerais", marcou o fornecedor
 correto (Construtora e Manutenção Predial Litoral S.A.), e "Copiar e-mails" colocou o e-mail certo na
 área de transferência (confirmado lendo `navigator.clipboard` de volta).
+
+## M26 — Enriquecimento de Fornecedor por CNPJ (BrasilAPI) + correção de bug de UA na BrasilAPI (2026-08-19)
+
+**Motivação.** Usuário trouxe repositórios do GitHub (ETL completo da Receita, OpenCNPJ, rede-cnpj)
+perguntando se davam pra enriquecer a planilha achando CNPJ de quem só tem nome + gerando Tags a
+partir de CNAE/histórico de licitação. Medido antes de propor qualquer coisa (CLAUDE.md §9.69):
+nenhuma fonte gratuita faz busca por **nome** — todas exigem CNPJ já conhecido (limitação estrutural
+dos dados abertos da Receita, não escolha de ferramenta). Autohospedar o dump completo (dezenas de
+GB) pra resolver isso foi descartado como desproporcional; usuário decidiu não perseguir a Parte 2
+(achar CNPJ a partir só do nome) por ora.
+
+**Escopo fechado:** só enriquecer quem **já tem CNPJ** (chave exata, sem risco de correspondência
+ambígua). Medido contra produção: 2.254 fornecedores ativos com CNPJ; 1.125 sem Cidade/Estado (por
+isso nunca apareciam na expansão de camada geográfica do M25, mesmo com a Tag certa); 321 sem
+nenhuma Tag.
+
+**Entrega.** `consultarDadosCadastraisCnpj` (`src/lib/integracoes/situacaoCadastralCnpj.ts`) —
+extraída a chamada HTTP crua (`buscarCnpjNaBrasilApi`, com retry/backoff) do `consultarSituacaoCadastral`
+já existente (M19) pra reuso; a nova função lê `municipio`/`uf`/`cnae_fiscal_descricao`/
+`cnaes_secundarios`/`email` do mesmo endpoint. `enriquecerFornecedoresPorCnpj`
+(`src/lib/ingestao/enriquecerFornecedoresPorCnpj.ts`) orquestra em lote (concorrência limitada via
+`processarComConcorrencia`, CLAUDE.md §9.11): só preenche campo **vazio** — nunca sobrescreve
+Cidade/Estado/Tag já cadastrados manualmente; cidade é normalizada contra a grafia canônica de
+`CAMADAS_GEOGRAFICAS` (a BrasilAPI devolve município sem acento e maiúsculo, ex. "SAO VICENTE" —
+sem normalizar, nunca bateria na camada Baixada Santista); Tag é sugerida reusando
+`sugerirCategoriasParaObjeto` (M25) sobre a descrição do CNAE, escolhendo só entre as Tags que já
+existem no cadastro (mesmo filtro anti-alucinação). Script administrativo
+`scripts/enriquecer-fornecedores-cnpj.ts` (`--dry-run`, `--limite=N`) — mesmo padrão de
+`ingerir-catalogo-compras-gov.ts`: não cabe numa rota serverless de 60s (~1.400 candidatos, 1 chamada
+HTTP + eventualmente 1 chamada de IA cada).
+
+**Bug de produção achado testando o script de verdade (não hipotético): a BrasilAPI devolve HTTP 403
+pra requisição sem header `User-Agent`.** O `fetch` nativo do Node não injeta esse header sozinho
+(diferente do `curl`, testado lado a lado com o mesmo CNPJ: `curl` → 200, `fetch` sem UA → 200 do
+WSL mas **403** rodando via Node no Windows). Como 403 não está na faixa retryável do cliente
+(`429`/`5xx`), a falha era silenciosa: toda consulta virava "não encontrado" sem nenhum aviso de
+retry no log. **Isso afeta também `consultarSituacaoCadastral` (M19), em produção desde julho** — a
+checagem de situação cadastral na qualificação de fornecedor pode estar falhando silenciosamente
+sempre que o runtime não injeta `User-Agent` por padrão (mesmo `fetch` nativo do Node/undici usado
+em toda a Vercel; não confirmado se o runtime de produção se comporta igual ao Node local do
+Windows, mas o header agora é sempre explícito, então deixa de depender disso). Corrigido
+adicionando `"User-Agent": "divisao-compras-cms"` explícito na chamada compartilhada — corrige as
+duas funções de uma vez. Regressão coberta por teste (mutação: remover o header derruba o teste).
+
+**Verificação.** 21 testes novos/alterados (8 do enriquecimento + 4 novos de `consultarDadosCadastraisCnpj`
++ 1 de regressão do User-Agent, mais os 5 blocos com asserção reforçada). Suíte inteira (1030 testes),
+`tsc --noEmit` e `eslint` limpos. `import "server-only"` removido de 5 módulos na cadeia de import do
+script (`enriquecerFornecedoresPorCnpj.ts`, `situacaoCadastralCnpj.ts`, `categorizarObjeto.ts`,
+`openaiClient.ts`, `openaiProvider.ts`) — mesmo motivo do CLAUDE.md §9.62 (script `tsx` não declara a
+condição `react-server`); confirmado por `grep` que nenhum desses módulos é importado por
+`components/`, então a remoção não abre brecha nenhuma. Dry-run real contra produção
+(`--dry-run --limite=15`, `DATABASE_URL` sobrescrita só na sessão do processo, sem tocar `.env`
+compartilhado com outras sessões): 15 processados, 10 Cidade/Estado preenchidos, 5 Tag sugerida,
+0 erros, 0 não encontrados — confirmou o fix do 403 e o mecanismo inteiro contra dado real.
+
+**Falta:** rodar o script sem `--dry-run`/`--limite` contra produção pra aplicar nos ~1.400
+fornecedores candidatos (aguardando decisão do usuário sobre como executar, já que `DATABASE_URL`
+local aponta pro Postgres de dev — precisa de `DATABASE_URL` de produção só para esse processo, sem
+alterar `.env`).

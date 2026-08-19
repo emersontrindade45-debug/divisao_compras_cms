@@ -1,4 +1,6 @@
-import "server-only";
+// Sem `import "server-only"` deliberadamente (CLAUDE.md §9.62): scripts/enriquecer-fornecedores-cnpj.ts
+// (M26) precisa chamar este módulo fora do bundler do Next, onde `server-only` sempre lança. Nunca
+// importado por `components/` — só por Server Actions/scripts, que já isolam o servidor sozinhas.
 import OpenAI from "openai";
 
 let client: OpenAI | null = null;

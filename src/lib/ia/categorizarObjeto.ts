@@ -1,4 +1,4 @@
-import "server-only";
+// Sem `import "server-only"` deliberadamente (CLAUDE.md §9.62) — mesmo motivo de `openaiClient.ts`.
 import { z } from "zod";
 import { getOpenAIClient, OPENAI_MODEL } from "./openaiClient";
 import { parseJsonResponse } from "./openaiProvider";
