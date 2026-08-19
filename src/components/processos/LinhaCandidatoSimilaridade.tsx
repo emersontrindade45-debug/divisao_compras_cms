@@ -21,6 +21,7 @@ import {
   type PeriodicidadeContrato,
   type RoteiroCalculo,
 } from "@/lib/domain/roteiroCalculo";
+import { resolverLinkOrigem } from "@/lib/similaridade/linkOrigem";
 
 
 /**
@@ -67,6 +68,7 @@ export function LinhaCandidatoSimilaridade({
   const temRoteiro = candidato.roteiro !== null && candidato.valorConsiderado !== null;
   const valorExibido = candidato.valorConsiderado ?? candidato.valorUnitario;
   const grandeza = candidato.roteiro ? classificarGrandeza(candidato.roteiro.passos) : null;
+  const origem = resolverLinkOrigem(candidato.tipoCandidato, candidato.fonteUrl);
 
   return (
     <>
@@ -123,14 +125,14 @@ export function LinhaCandidatoSimilaridade({
           </Badge>
         </TableCell>
         <TableCell>
-          {candidato.fonteUrl ? (
+          {origem ? (
             <a
-              href={candidato.fonteUrl}
+              href={origem.href}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-primary hover:underline"
             >
-              Abrir <ExternalLink className="size-3" aria-hidden />
+              {origem.rotulo} <ExternalLink className="size-3" aria-hidden />
             </a>
           ) : (
             <span className="text-muted-foreground">—</span>

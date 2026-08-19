@@ -1,6 +1,7 @@
 import "server-only";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 import { tokenizar, raizPlural } from "@/lib/similaridade/texto";
+import { montarUrlAcompanhamentoCompra, URL_PAINEL_PRECOS_LITE } from "@/lib/similaridade/linkOrigem";
 import { db } from "@/lib/db";
 
 /**
@@ -70,6 +71,8 @@ interface RespostaPaginada<T> {
 }
 
 interface PrecoPesquisaServico {
+  /** Identificador da compra no Compras.gov.br — presente na API real (OpenAPI + amostra 2026-08-19). */
+  idCompra?: string;
   descricaoItem: string;
   codigoItemCatalogo: number;
   nomeUnidadeMedida: string;
@@ -281,7 +284,8 @@ async function buscarPrecosServico(
   const { dataInicio, dataFim } = dataRange();
   const url =
     `${BASE_URL}/modulo-pesquisa-preco/3_consultarServico` +
-    `?codigoItemCatalogo=${codigoItemCatalogo}` +
+    `?pagina=1` +
+    `&codigoItemCatalogo=${codigoItemCatalogo}` +
     `&tamanhoPagina=${PRECOS_POR_PAGINA}` +
     `&dataCompraInicio=${dataInicio}` +
     `&dataCompraFim=${dataFim}`;
@@ -335,12 +339,14 @@ export async function buscarContratosComprasGov(
         if (vistos.has(chave)) continue;
         vistos.add(chave);
 
+        const idCompra = preco.idCompra?.trim();
         candidatos.push({
           tipoCandidato: "painel_precos",
           fonteDescricao: preco.descricaoItem,
           fonteOrgaoOuId: preco.nomeOrgao || preco.nomeUasg,
-          // Sem URL direta: Compras.gov.br não expõe link por idCompra de forma
-          // pública e estável. O usuário pode verificar pelo órgão + data.
+          // Página pública da compra (`?compra={idCompra}`). Sem idCompra, o
+          // Lite — origem da série no Compras.gov.br — ainda é conferível.
+          fonteUrl: idCompra ? montarUrlAcompanhamentoCompra(idCompra) : URL_PAINEL_PRECOS_LITE,
           valorUnitario: preco.precoUnitario,
           dataReferencia: dataRef,
           unidade: preco.siglaUnidadeMedida || preco.nomeUnidadeMedida || "UN",

@@ -69,4 +69,47 @@ describe("buscarContratosComprasGov — fonte do catálogo CATSER", () => {
     expect(chamouCatalogoPorRequest).toBe(true);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ItemCatalogoReferencia vazia"));
   });
+
+  it("grava fonteUrl com o acompanhamento da compra quando a API traz idCompra", async () => {
+    mocks.db.itemCatalogoReferencia.findMany.mockResolvedValue([
+      { codigo: 7250, descricao: "ENDOSCOPIA DIGESTIVA" },
+    ]);
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        resultado: [
+          {
+            idCompra: "92715206000082025",
+            descricaoItem: "ENDOSCOPIA DIGESTIVA CIRURGICA",
+            codigoItemCatalogo: 7250,
+            nomeUnidadeMedida: "UNIDADE",
+            siglaUnidadeMedida: "UN",
+            quantidade: 1,
+            precoUnitario: 21420.2,
+            niFornecedor: "35830868000446",
+            nomeFornecedor: "UNIMED",
+            codigoUasg: "927152",
+            nomeUasg: "FUNDO MUNICIPAL DE SAUDE DE MACAE - RJ",
+            codigoOrgao: 99008,
+            nomeOrgao: "FUNDO MUNICIPAL DE SAUDE DE MACAE",
+            dataCompra: "2025-09-08",
+            dataResultado: "2025-09-09",
+          },
+        ],
+        totalRegistros: 1,
+        totalPaginas: 1,
+        paginasRestantes: 0,
+      }),
+    } as Response);
+
+    const { buscarContratosComprasGov } = await import("../comprasGov");
+    const candidatos = await buscarContratosComprasGov("endoscopia digestiva");
+
+    expect(candidatos).toHaveLength(1);
+    expect(candidatos[0]).toMatchObject({
+      tipoCandidato: "painel_precos",
+      fonteUrl:
+        "https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/compras/acompanhamento-compra?compra=92715206000082025",
+    });
+  });
 });

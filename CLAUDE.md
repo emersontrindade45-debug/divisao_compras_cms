@@ -903,3 +903,14 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     Postgres **local**, sem latência de rede) e `INSERT ... ON CONFLICT DO UPDATE` em lote (1
     round-trip por página, ~igual ao `createMany`) têm custo e semântica diferentes; a escolha entre
     eles se mede, não se presume (§9.69).
+73. **Campo omitido na interface TypeScript não é campo ausente na API.** Em 2026-08-19 o card
+    do assistente para "COMANDO DO EXERCITO" saiu sem link. A leitura do tipo local
+    `PrecoPesquisaServico` (sem `idCompra`) levou à conclusão de que o Compras.gov "nunca teve
+    URL estável" — e o card passou a dizer "Sem link direto", com o texto do link hardcoded
+    como "Abrir no PNCP" para qualquer `fonteUrl`. O OpenAPI e uma chamada real a
+    `3_consultarServico` devolvem `idCompra` (ex.: `92715206000082025`); a página pública é
+    `cnetmobile…/acompanhamento-compra?compra={idCompra}`. A interface era um recorte, não o
+    contrato. Antes de afirmar que uma API "não expõe" identificador de evidência, amostrar o
+    JSON real (e o OpenAPI), não o tipo que nós mesmos escrevemos (§9.63, §9.69). Corolário de
+    UI: o rótulo do link segue o tipo/host da fonte (PNCP, Painel de Preços, SINAPI), nunca um
+    nome de portal só porque foi o primeiro a ter URL.

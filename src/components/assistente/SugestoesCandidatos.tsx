@@ -13,11 +13,13 @@ import {
   type ItemIrmaoDaContratacao,
 } from "@/lib/actions/assistente";
 import { identidadeDaContratacao, type CandidatoSugerido } from "@/lib/assistente/sugestoes";
+import { resolverLinkOrigem } from "@/lib/similaridade/linkOrigem";
 
 // Cartões dos candidatos que a busca do assistente encontrou.
 //
 // O assistente não registra mais nada por conta própria: ele acha, comenta, e
-// cada contratação aparece aqui com o link do PNCP para conferência e um botão
+// cada contratação aparece aqui com o link da fonte de origem (PNCP, Painel de
+// Preços, SINAPI) para conferência e um botão de adicionar. Só o clique grava
 // de adicionar. Só o clique grava — decisão tomada com o usuário, que quer abrir
 // o edital antes de a contratação entrar na lista do processo.
 //
@@ -246,6 +248,7 @@ export function SugestoesCandidatos({
 
         const contratacaoExpandida = expandidos.has(sugestao.id);
         const contratacao = itensContratacao[sugestao.id];
+        const origem = resolverLinkOrigem(sugestao.tipoCandidato, sugestao.fonteUrl);
 
         return (
           <li
@@ -276,25 +279,16 @@ export function SugestoesCandidatos({
               <span className="text-muted-foreground">
                 {formatarData(sugestao.dataReferencia)}
               </span>
-              {sugestao.fonteUrl ? (
+              {origem && (
                 <a
-                  href={sugestao.fonteUrl}
+                  href={origem.href}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-primary hover:underline"
                 >
-                  Abrir no PNCP
+                  {origem.rotulo}
                   <ExternalLink className="size-3" aria-hidden />
                 </a>
-              ) : (
-                // Painel de Preços/Compras.gov (CandidatoSimilaridade.tipoCandidato
-                // "painel_precos") não expõe link estável por compra — sem este
-                // aviso o cartão parecia igual ao de uma contratação do PNCP com
-                // link "sumido" (confuso: pareceria regressão em vez de fonte sem
-                // link por natureza). Conferência aqui é por órgão + data mesmo.
-                <span className="text-muted-foreground italic">
-                  Sem link direto — confira pelo órgão e data
-                </span>
               )}
               {identidadeDaContratacao(sugestao) && mensagemId && (
                 <button

@@ -55,10 +55,42 @@ describe("SugestoesCandidatos", () => {
     expect(screen.getByText("06/11/2025")).toBeInTheDocument();
 
     // O link é o ponto do fluxo: o servidor abre o edital antes de aprovar.
-    const link = screen.getByRole("link", { name: /Abrir no PNCP/ });
+    const link = screen.getByRole("link", { name: /^PNCP$/ });
     expect(link).toHaveAttribute("href", SUGESTAO.fonteUrl);
     expect(link).toHaveAttribute("target", "_blank");
     expect(link.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("card do Painel de Preços mostra o nome da fonte com o link de origem, não o rótulo do PNCP", () => {
+    const painel: CandidatoSugerido = {
+      ...SUGESTAO,
+      id: "c2",
+      tipoCandidato: "painel_precos",
+      fonteUrl:
+        "https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/compras/acompanhamento-compra?compra=92715206000082025",
+    };
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[painel]} itens={ITENS} />);
+
+    const link = screen.getByRole("link", { name: /Painel de Preços/ });
+    expect(link).toHaveAttribute("href", painel.fonteUrl);
+    expect(screen.queryByRole("link", { name: /^PNCP$/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sem link direto/)).not.toBeInTheDocument();
+  });
+
+  it("card antigo do Painel (fonteUrl null) ainda oferece o Lite, em vez de omitir o link", () => {
+    const legado: CandidatoSugerido = {
+      ...SUGESTAO,
+      id: "c3",
+      tipoCandidato: "contratacao_publica",
+      fonteUrl: null,
+    };
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[legado]} itens={ITENS} />);
+
+    const link = screen.getByRole("link", { name: /Painel de Preços/ });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://pesquisaprecos.compras.gov.br/pesquisa-precos-frontend-semlogin/",
+    );
   });
 
   it("adiciona à lista pelo clique, mandando só identificadores", async () => {
