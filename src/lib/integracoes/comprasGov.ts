@@ -17,7 +17,11 @@ import { db } from "@/lib/db";
  * 2. Usa sobreposição de tokens para encontrar os serviços mais similares ao
  *    termo pesquisado.
  * 3. Consulta `modulo-pesquisa-preco/3_consultarServico` para cada código
- *    encontrado e devolve os preços homologados como `CandidatoSimilaridade`.
+ *    encontrado e devolve **somente** preços homologados como
+ *    `CandidatoSimilaridade`. O parâmetro OpenAPI `dataResultado=true` é
+ *    enviado, mas a garantia é no cliente: sem `dataResultado` plausível a
+ *    linha não entra (não há fallback para `dataCompra`). Se a compra existir
+ *    no PNCP, exige `existeResultado` e `valorTotalHomologado > 0`.
  *
  * Limitação conhecida: a API não oferece busca por texto livre. A matching é
  * feita localmente contra os nomes do catálogo CATSER. Para serviços de
@@ -49,6 +53,11 @@ const SCORE_MINIMO_CATALOGO = 0.15;
 
 // Resultados por página na consulta de preços.
 const PRECOS_POR_PAGINA = 100;
+
+// Mesma janela do PNCP (CLAUDE.md §9.65): a API devolve data-sentinela no lugar
+// de nulo. Preço sem data verdadeira de julgamento não entra na estimativa.
+const DATA_REFERENCIA_MINIMA = new Date("2000-01-01T00:00:00Z");
+const DATA_REFERENCIA_MAXIMA = new Date("2100-01-01T00:00:00Z");
 
 const MAX_TENTATIVAS = 3;
 const BACKOFF_BASE_MS = 800;
@@ -253,10 +262,7 @@ function scoreServico(tokensTermo: Set<string>, servico: ServicosCatalogo): numb
   return overlap / tokensTermo.size;
 }
 
-function encontrarServicos(
-  termo: string,
-  catalogo: ServicosCatalogo[],
-): ServicosCatalogo[] {
+function encontrarServicos(termo: string, catalogo: ServicosCatalogo[]): ServicosCatalogo[] {
   const tokensTermo = new Set(tokenizar(termo).map(raizPlural));
 
   return catalogo
@@ -278,31 +284,47 @@ function dataRange(): { dataInicio: string; dataFim: string } {
   };
 }
 
+function dataResultadoPlausivel(bruta: string | null | undefined): Date | null {
+  if (!bruta?.trim()) return null;
+  const data = new Date(bruta);
+  if (Number.isNaN(data.getTime())) return null;
+  if (data < DATA_REFERENCIA_MINIMA || data >= DATA_REFERENCIA_MAXIMA) return null;
+  return data;
+}
+
+/** Compra já julgada/homologada no Painel: tem data de resultado e preço > 0. */
+function precoHomologadoNoPainel(preco: PrecoPesquisaServico): boolean {
+  if (typeof preco.precoUnitario !== "number" || preco.precoUnitario <= 0) return false;
+  return dataResultadoPlausivel(preco.dataResultado) !== null;
+}
+
 async function buscarPrecosServico(
   codigoItemCatalogo: number,
   janela?: { dataInicio: string; dataFim: string },
 ): Promise<PrecoPesquisaServico[]> {
   const { dataInicio, dataFim } = janela ?? dataRange();
-  const url =
-    `${BASE_URL}/modulo-pesquisa-preco/3_consultarServico` +
-    `?pagina=1` +
-    `&codigoItemCatalogo=${codigoItemCatalogo}` +
-    `&tamanhoPagina=${PRECOS_POR_PAGINA}` +
-    `&dataCompraInicio=${dataInicio}` +
-    `&dataCompraFim=${dataFim}`;
+  const params = new URLSearchParams({
+    pagina: "1",
+    codigoItemCatalogo: String(codigoItemCatalogo),
+    tamanhoPagina: String(PRECOS_POR_PAGINA),
+    dataCompraInicio: dataInicio,
+    dataCompraFim: dataFim,
+    // OpenAPI: boolean, default false, descrição vazia. Medido em 2026-08-19
+    // (CATSER 23329): true e false devolveram o mesmo total — o filtro real é
+    // `precoHomologadoNoPainel` abaixo. Enviar true documenta a intenção.
+    dataResultado: "true",
+  });
+  const url = `${BASE_URL}/modulo-pesquisa-preco/3_consultarServico?${params}`;
 
   const data = await fetchJSON<RespostaPaginada<PrecoPesquisaServico>>(url);
-  return data?.resultado ?? [];
+  return (data?.resultado ?? []).filter(precoHomologadoNoPainel);
 }
 
 function chaveNome(texto: string): string {
   return normalizar(texto).replace(/\s+/g, " ").trim();
 }
 
-function acharCodigosPorDescricao(
-  catalogo: ServicosCatalogo[],
-  descricao: string,
-): number[] {
+function acharCodigosPorDescricao(catalogo: ServicosCatalogo[], descricao: string): number[] {
   const alvo = chaveNome(descricao);
   const exatos = [
     ...new Set(
@@ -327,14 +349,18 @@ function escolherIdCompra(
   if (casados.length === 0) return null;
   if (casados.length === 1 || Number.isNaN(alvoMs)) return casados[0]!.idCompra!.trim();
   casados.sort((a, b) => {
-    const da = Date.parse(a.dataResultado ?? a.dataCompra);
-    const db = Date.parse(b.dataResultado ?? b.dataCompra);
+    const da = Date.parse(a.dataResultado ?? "");
+    const db = Date.parse(b.dataResultado ?? "");
     return Math.abs(da - alvoMs) - Math.abs(db - alvoMs);
   });
   return casados[0]!.idCompra!.trim();
 }
 
-async function emParalelo<T, R>(itens: T[], limite: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function emParalelo<T, R>(
+  itens: T[],
+  limite: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
   const saida: R[] = new Array(itens.length);
   let proximo = 0;
   async function worker() {
@@ -351,26 +377,53 @@ const FASE_EXTERNA_LINK =
   "https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-fase-externa/v1/compras";
 const TIMEOUT_URL_PUBLICA_MS = 8_000;
 
-const cacheUrlPublica = new Map<string, Promise<string | null>>();
+interface OrigemPublicaHomologada {
+  /** false = a compra está no PNCP sem homologação — não entra na lista. */
+  incluir: boolean;
+  url: string | null;
+}
+
+const cacheOrigemPublica = new Map<string, Promise<OrigemPublicaHomologada>>();
 
 interface ContratacaoPncpPorId {
   orgaoEntidadeCnpj?: string | null;
   anoCompraPncp?: number | string | null;
   sequencialCompraPncp?: number | string | null;
+  existeResultado?: boolean | null;
+  valorTotalHomologado?: number | null;
+  contratacaoExcluida?: boolean | null;
 }
 
-async function consultarUrlPncpPorIdCompra(idCompra: string): Promise<string | null> {
+type StatusPncpPorId =
+  | { kind: "ausente" }
+  | { kind: "nao_homologada" }
+  | { kind: "homologada"; url: string | null };
+
+function statusHomologacaoPncp(item: ContratacaoPncpPorId): StatusPncpPorId {
+  if (item.contratacaoExcluida === true) return { kind: "nao_homologada" };
+  if (item.existeResultado !== true) return { kind: "nao_homologada" };
+  const valor = Number(item.valorTotalHomologado);
+  if (!Number.isFinite(valor) || valor <= 0) return { kind: "nao_homologada" };
+
+  const cnpj = item.orgaoEntidadeCnpj?.trim();
+  const ano = item.anoCompraPncp != null ? String(item.anoCompraPncp).trim() : "";
+  const sequencial =
+    item.sequencialCompraPncp != null ? String(item.sequencialCompraPncp).trim() : "";
+  const url =
+    cnpj && ano && sequencial
+      ? montarUrlEditalPncp({ cnpjOrgao: cnpj, ano, numeroSequencial: sequencial })
+      : null;
+  return { kind: "homologada", url };
+}
+
+async function consultarStatusPncpPorIdCompra(idCompra: string): Promise<StatusPncpPorId> {
   const url =
     `${BASE_URL}/modulo-contratacoes/1.1_consultarContratacoes_PNCP_14133_Id` +
     `?tipo=idCompra&codigo=${encodeURIComponent(idCompra)}`;
   const data = await fetchJSON<RespostaPaginada<ContratacaoPncpPorId>>(url);
   const item = data?.resultado?.[0];
-  const cnpj = item?.orgaoEntidadeCnpj?.trim();
-  const ano = item?.anoCompraPncp != null ? String(item.anoCompraPncp).trim() : "";
-  const sequencial =
-    item?.sequencialCompraPncp != null ? String(item.sequencialCompraPncp).trim() : "";
-  if (!cnpj || !ano || !sequencial) return null;
-  return montarUrlEditalPncp({ cnpjOrgao: cnpj, ano, numeroSequencial: sequencial });
+  if (!item) return { kind: "ausente" };
+  return statusHomologacaoPncp(item);
 }
 
 async function consultarLinkFaseExterna(idCompra: string): Promise<string | null> {
@@ -390,24 +443,33 @@ async function consultarLinkFaseExterna(idCompra: string): Promise<string | null
   }
 }
 
+async function resolverOrigemHomologada(idCompra: string): Promise<OrigemPublicaHomologada> {
+  const id = idCompra.trim();
+  if (!id) return { incluir: true, url: null };
+  const cached = cacheOrigemPublica.get(id);
+  if (cached) return cached;
+  const pendente = (async (): Promise<OrigemPublicaHomologada> => {
+    const status = await consultarStatusPncpPorIdCompra(id);
+    if (status.kind === "nao_homologada") return { incluir: false, url: null };
+    if (status.kind === "homologada" && status.url) {
+      return { incluir: true, url: status.url };
+    }
+    return { incluir: true, url: await consultarLinkFaseExterna(id) };
+  })();
+  cacheOrigemPublica.set(id, pendente);
+  return pendente;
+}
+
 /**
- * URL pública conferível da compra: edital do PNCP quando a contratação está
- * lá (medido: o acompanhamento cnetmobile 404 em várias compras do Painel
- * que o PNCP abre — ex. `92715206000082025`). Só usa o acompanhamento se o
- * `/link` da fase externa confirmar que a compra existe.
+ * URL pública conferível da compra homologada: edital do PNCP quando a
+ * contratação está lá **e** tem resultado (`existeResultado` + valor
+ * homologado > 0). Compra no PNCP sem homologação não recebe href. Sem
+ * registro no PNCP, usa o `/link` da fase externa se ele confirmar que a
+ * página existe.
  */
 export async function resolverUrlPublicaPorIdCompra(idCompra: string): Promise<string | null> {
-  const id = idCompra.trim();
-  if (!id) return null;
-  const cached = cacheUrlPublica.get(id);
-  if (cached) return cached;
-  const pendente = (async () => {
-    const pncp = await consultarUrlPncpPorIdCompra(id);
-    if (pncp) return pncp;
-    return consultarLinkFaseExterna(id);
-  })();
-  cacheUrlPublica.set(id, pendente);
-  return pendente;
+  const origem = await resolverOrigemHomologada(idCompra);
+  return origem.incluir ? origem.url : null;
 }
 
 export interface CandidatoPainelParaUrl {
@@ -457,7 +519,9 @@ export async function resolverUrlsAcompanhamentoPainel(
       timestamps.length === 0
         ? dataRange()
         : {
-            dataInicio: new Date(Math.min(...timestamps) - 4 * 86_400_000).toISOString().slice(0, 10),
+            dataInicio: new Date(Math.min(...timestamps) - 4 * 86_400_000)
+              .toISOString()
+              .slice(0, 10),
             dataFim: new Date(Math.max(...timestamps) + 4 * 86_400_000).toISOString().slice(0, 10),
           };
     return { codigo, precos: await buscarPrecosServico(codigo, janela) };
@@ -491,9 +555,7 @@ export async function resolverUrlsAcompanhamentoPainel(
  * Devolve array vazio (silenciosamente) quando não há serviços catalogados
  * com sobreposição suficiente — não interrompe o pipeline principal.
  */
-export async function buscarContratosComprasGov(
-  termo: string,
-): Promise<CandidatoSimilaridade[]> {
+export async function buscarContratosComprasGov(termo: string): Promise<CandidatoSimilaridade[]> {
   if (!termo.trim()) return [];
 
   try {
@@ -512,12 +574,8 @@ export async function buscarContratosComprasGov(
 
     for (const precos of precosPorServico) {
       for (const preco of precos) {
-        if (!preco.precoUnitario || preco.precoUnitario <= 0) continue;
-
-        // Usa dataResultado quando disponível (data do julgamento); fallback
-        // para dataCompra (data de homologação registrada no COMPRASNET).
-        const dataRef = new Date(preco.dataResultado ?? preco.dataCompra);
-        if (isNaN(dataRef.getTime())) continue;
+        const dataRef = dataResultadoPlausivel(preco.dataResultado);
+        if (!dataRef) continue;
 
         // Deduplicação simples: mesma descrição + mesmo preço = mesmo resultado.
         const chave = `${preco.descricaoItem.slice(0, 80)}|${preco.precoUnitario}`;
@@ -538,15 +596,18 @@ export async function buscarContratosComprasGov(
       }
     }
 
-    const urls = await emParalelo(idsCompra, 3, (id) =>
-      id ? resolverUrlPublicaPorIdCompra(id) : Promise.resolve(null),
+    const origens = await emParalelo(idsCompra, 3, (id) =>
+      id ? resolverOrigemHomologada(id) : Promise.resolve({ incluir: true, url: null }),
     );
+    const homologados: CandidatoSimilaridade[] = [];
     for (let i = 0; i < candidatos.length; i++) {
-      const href = urls[i];
-      if (href) candidatos[i]!.fonteUrl = href;
+      const origem = origens[i]!;
+      if (!origem.incluir) continue;
+      if (origem.url) candidatos[i]!.fonteUrl = origem.url;
+      homologados.push(candidatos[i]!);
     }
 
-    return candidatos;
+    return homologados;
   } catch (err) {
     console.error(`[ComprasGov] Erro ao buscar para "${termo}":`, err);
     return [];
