@@ -1889,7 +1889,31 @@ razão social divergente. Mudanças em `situacaoCadastralCnpj.ts`/`enriquecerFor
   `situacaoCadastralCnpj.test.ts`, mais os já existentes reforçados com os campos novos). Suíte
   inteira (1.056 testes), `tsc --noEmit` e `eslint` limpos.
 
-**Falta:** rodar o script sem `--dry-run`/`--limite` contra produção com o código ampliado, pra
-aplicar telefone/e-mail/correção de razão social e reprocessar naturalmente os 688 que provavelmente
-eram falha temporária (o filtro agora cobre todo mundo, então isso acontece na mesma rodagem, sem
-modo especial de retry).
+**Rodagem real contra produção com o código ampliado (2026-08-19), 3 execuções seguidas do script
+sem `--dry-run`/`--limite` (idempotente — cada rodagem só toca quem ainda está incompleto/divergente):
+
+| Rodagem | Cidade/Estado | Tag | Telefone | Razão social | Falha temporária |
+|---|---|---|---|---|---|
+| 1ª | 483 | 112 | 1.179 | 673 | 479 |
+| 2ª | 74 | 19 | 215 | 119 | 519 |
+| 3ª | 9 | 1 | 76 | 26 | 664 |
+| **Total aplicado** | **566** | **132** | **1.470** | **818** | — |
+
+E-mail preenchido: 0 nas 3 rodagens — confirmado contra CNPJs reais sem e-mail cadastrado
+(ex. `05.703.808/0001-59`) que a BrasilAPI devolve `email: null`; a Receita Federal simplesmente
+não coleta e-mail para a maior parte dos CNPJs. Não é bug do cliente, é limitação da fonte.
+Correção de razão social validada como útil em casos reais, ex.:
+`"BUSO COM.DE BRINQ."` → `"BUSO COMERCIO DE BRINQUEDOS EDUCATIVOS LTDA"` e um caso onde a razão
+social tinha o próprio CNPJ colado no início do nome (herdado de importação antiga da planilha).
+0 "não encontrado" real (404) nas 3 rodagens — a totalidade das falhas foi rate limit/rede.
+
+**Falta:** a contagem de falha temporária **subiu** a cada rodagem (479 → 519 → 664) em vez de
+cair — sinal de que deixou de ser rate limit da BrasilAPI (que reduziria com `MAX_TENTATIVAS`/menor
+concorrência) e passou a ser instabilidade da rede de saída do ambiente no momento (`fetch failed`,
+`ConnectTimeoutError`, `ECONNRESET` no log da 2ª/3ª rodagem — timeout de conexão em endereço IPv6
+da Cloudflare, que hospeda a BrasilAPI). Rodar de novo mais tarde/de outra rede tende a resolver o
+residual (~664 fornecedores, a maioria provavelmente com sobreposição entre as 3 listas de falha —
+não medido). Mesmo comando de sempre, sem parâmetro novo:
+```
+$env:DATABASE_URL="<connection string de produção>"; node_modules\.bin\tsx.CMD scripts/enriquecer-fornecedores-cnpj.ts
+```
