@@ -559,6 +559,73 @@ model SincronizacaoFornecedores {
   @@map("sincronizacoes_fornecedores")
 }
 
+/// Candidato a Fornecedor descoberto no cadastro CNPJ da Receita Federal (M27), filtrado para o
+/// estado de São Paulo e situação cadastral ativa, via pipeline externo (cnpj-data-pipeline +
+/// DuckDB — ver docs/PLAN.md M27). Não é Fornecedor: é o universo bruto de candidatos a partir do
+/// qual o usuário descobre quem ainda não está cadastrado, filtrando por cidade/CNAE. Sem FK para
+/// `Fornecedor` — a exclusão de quem já é fornecedor é feita em tempo de leitura (NOT EXISTS por
+/// cnpj), nunca no import, porque um Fornecedor pode nascer por outro caminho (UI manual, sync da
+/// planilha M24) sem esta tabela saber.
+model EmpresaCandidataFornecedor {
+  id                     String    @id @default(cuid())
+  cnpj                   String    @unique
+  razaoSocial            String
+  nomeFantasia           String?
+  situacaoCadastral      String // código RFB bruto; só "02" (ativa) é importado nesta entrega
+  situacaoCadastralData  DateTime?
+  municipio              String // normalizado (grafia canônica de CAMADAS_GEOGRAFICAS quando aplicável)
+  estado                 String
+  cnaePrincipalCodigo    String
+  cnaePrincipalDescricao String
+  categoriaSugerida      String[]  @default([])
+  email                  String?
+  telefone               String?
+  logradouro             String?
+  numero                 String?
+  bairro                 String?
+  cep                    String?
+  competenciaRfb         String // "AAAA-MM" do dump processado
+  importadoEm            DateTime  @default(now())
+  atualizadoEm           DateTime  @updatedAt
+
+  @@index([estado, municipio])
+  @@index([categoriaSugerida], type: Gin)
+  @@map("empresas_candidatas_fornecedor")
+}
+
+/// Log de cada execução do script de importação de candidatos CNPJ/SP (M27) — mesmo shape de
+/// SincronizacaoFornecedores (M24), adaptado ao CSV externo filtrado em vez da planilha Google.
+model ImportacaoCandidatosCnpj {
+  id               String    @id @default(cuid())
+  competenciaRfb   String
+  arquivoOrigem    String
+  linhasLidas      Int       @default(0)
+  linhasImportadas Int       @default(0)
+  linhasRejeitadas Int       @default(0)
+  detalhes         Json?
+  iniciadoEm       DateTime  @default(now())
+  concluidoEm      DateTime?
+  erro             String?
+
+  @@index([competenciaRfb, iniciadoEm])
+  @@map("importacoes_candidatos_cnpj")
+}
+
+/// Cache CNAE (subclasse, ~1.300 códigos possíveis no Brasil) → categoria(s) de Fornecedor
+/// sugeridas pela IA (M27). Pré-computado uma vez por código distinto encontrado nos dados
+/// importados — nunca por empresa, porque uma chamada de IA por uma das milhões de linhas de SP é
+/// inviável em custo/tempo. Reaproveita o mesmo filtro anti-alucinação de
+/// `sugerirCategoriasParaObjeto` (M25): só escolhe entre categorias já cadastradas em
+/// `Fornecedor.categoria`.
+model CategoriaSugeridaPorCnae {
+  cnaeCodigo    String   @id
+  cnaeDescricao String
+  categorias    String[] @default([])
+  calculadoEm   DateTime @default(now())
+
+  @@map("categorias_sugeridas_por_cnae")
+}
+
 /**
  * Histórico de consultas de qualificação de um fornecedor (M19): situação
  * cadastral de CNPJ (Receita Federal via BrasilAPI). Um registro por consulta

@@ -4,7 +4,7 @@
 import { db } from "@/lib/db";
 import { consultarDadosCadastraisCnpj } from "@/lib/integracoes/situacaoCadastralCnpj";
 import { sugerirCategoriasParaObjeto } from "@/lib/ia/categorizarObjeto";
-import { CAMADAS_GEOGRAFICAS } from "@/lib/domain/camadaGeografica";
+import { normalizarMunicipio, normalizarTexto } from "@/lib/domain/normalizarMunicipio";
 import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorrencia";
 
 /**
@@ -34,32 +34,6 @@ import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorr
  * ativo com CNPJ, não só quem está com campo vazio — só olhando o CNPJ é possível saber se a razão
  * social está errada.
  */
-
-function normalizarTexto(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .trim()
-    .toUpperCase();
-}
-
-const CIDADES_CANONICAS = new Map(
-  CAMADAS_GEOGRAFICAS.flatMap((c) => c.cidades ?? []).map((cidade) => [normalizarTexto(cidade), cidade]),
-);
-
-function tituloCase(s: string): string {
-  return s
-    .toLowerCase()
-    .split(" ")
-    .map((p) => (p.length > 2 ? p[0]!.toUpperCase() + p.slice(1) : p))
-    .join(" ");
-}
-
-/** Prefere a grafia canônica de `CAMADAS_GEOGRAFICAS` quando o município é uma das cidades da Baixada Santista. */
-function normalizarMunicipio(municipioBruto: string): string {
-  const canonica = CIDADES_CANONICAS.get(normalizarTexto(municipioBruto));
-  return canonica ?? tituloCase(municipioBruto);
-}
 
 /** Compara razão social ignorando acento/caixa/espaçamento — mesma base de `normalizarTexto`. */
 function normalizarRazaoSocial(s: string): string {
