@@ -1953,10 +1953,15 @@ arquivo baixado trazia o literal `[SENSITIVE]` em vez do valor, causando um P100
 "Can't reach database server at base" — que parecia problema de rede e era só o placeholder não
 sendo um host).
 
-**Falta:** ~120 fornecedores ainda em falha temporária — resíduo esperado de rate-limit/rede da
-BrasilAPI que uma rodagem futura resolve sozinha (o campo continua vazio/divergente até conseguir).
-Comando (concorrência 1 confirmada eficaz; usar `PROD_READ_URL`, não `DATABASE_URL`, ao rodar fora
-da Vercel):
+**8ª rodagem (2026-08-19, imediatamente em seguida à 7ª, sem intervalo):** falha temporária **subiu**
+de 120 para 225 — reincidência do padrão já visto nas rodagens 1ª–3ª e 6ª: repetir em sequência sem
+esperar aumenta o rate-limit/throttle da BrasilAPI em vez de reduzir o resíduo. 0 erros, 0 campo novo
+preenchido (esperado — universo enriquecível já estava praticamente esgotado desde a 7ª).
+
+**Falta:** ~225 fornecedores em falha temporária no momento — número inflado pela 8ª rodagem
+imediata; resíduo real provavelmente mais próximo dos ~120 da 7ª. **Esperar um intervalo (algumas
+horas) antes de rodar de novo** — mesma lição já registrada acima (6ª rodagem). Comando (concorrência
+1 confirmada eficaz; usar `PROD_READ_URL`, não `DATABASE_URL`, ao rodar fora da Vercel):
 ```
 $env:DATABASE_URL="<valor de PROD_READ_URL do .env>"; pnpm exec tsx scripts/enriquecer-fornecedores-cnpj.ts --concorrencia=1
 ```
