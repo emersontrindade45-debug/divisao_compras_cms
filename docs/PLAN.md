@@ -1937,14 +1937,28 @@ processo, não o app publicado) + flag nova `--concorrencia=N`. Resultado:
 | 6ª (concorrência 1, sem intervalo) | 0 | 0 | 0 | 0 | 264 (piorou) |
 | **Total aplicado (1ª–5ª)** | **577** | **137** | **1.495** | **837** | — |
 
-**Falta:** ~168–264 fornecedores ainda pendentes (o número exato da 6ª rodagem não é confiável,
-porque ela não teve nenhum sucesso — sinal de limite temporário, não de universo maior de
-candidatos). Antes de tentar de novo, **esperar um intervalo** (algumas horas, não minutos) em vez
-de repetir em sequência — a 6ª rodagem sugere que o `429` pode escalar para bloqueio mais agressivo
-sob uso contínuo. Comando (concorrência 1 já confirmada eficaz; sem `--concorrencia` volta ao
-padrão 3, mais rápido mas com mais 429):
+**7ª rodagem (2026-08-19, sessão seguinte, `--concorrencia=1`, após intervalo desde a 6ª):**
+2.254 processados, **0 erros**, 120 falha temporária, 2.134 "sem nada para fazer" — confirma que o
+universo enriquecível está praticamente esgotado (2.134/2.254 = 94,7% já completos) e que o
+intervalo dissolveu o bloqueio temporário observado na 6ª rodagem (0 sucessos → 0 erros). Nenhum
+campo novo preenchido nesta passada porque quase tudo que podia ser preenchido já tinha sido nas
+rodagens 1ª–5ª.
+
+**Nota de execução:** a credencial de produção para rodar o script fora do Vercel foi localizada em
+`PROD_READ_URL` no `.env` local (Session pooler do Supabase, porta 5432, `sslmode=no-verify`) — não
+em `DATABASE_URL`/`DIRECT_URL` do `.env`, que apontam para `localhost` (ambiente de dev). O
+`vercel env pull` **não serve** para obter esta credencial: todas as variáveis de produção estão
+marcadas como Sensitive no painel e a Vercel nunca as reexibe (confirma CLAUDE.md §9.32/§9.59; o
+arquivo baixado trazia o literal `[SENSITIVE]` em vez do valor, causando um P1001 enganoso —
+"Can't reach database server at base" — que parecia problema de rede e era só o placeholder não
+sendo um host).
+
+**Falta:** ~120 fornecedores ainda em falha temporária — resíduo esperado de rate-limit/rede da
+BrasilAPI que uma rodagem futura resolve sozinha (o campo continua vazio/divergente até conseguir).
+Comando (concorrência 1 confirmada eficaz; usar `PROD_READ_URL`, não `DATABASE_URL`, ao rodar fora
+da Vercel):
 ```
-$env:DATABASE_URL="<connection string de produção>"; node_modules\.bin\tsx.CMD scripts/enriquecer-fornecedores-cnpj.ts --concorrencia=1
+$env:DATABASE_URL="<valor de PROD_READ_URL do .env>"; pnpm exec tsx scripts/enriquecer-fornecedores-cnpj.ts --concorrencia=1
 ```
 
 ## M27 — Descoberta de candidatos a Fornecedor por CNPJ/SP (em andamento, iniciado 2026-08-19)
