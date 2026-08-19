@@ -1542,7 +1542,12 @@ todo dia 1º) caso não aceite, então isto deixou de ser bloqueante, só não f
 dado em produção — exige upload manual do `.xlsx` (WAF da Caixa bloqueia download automatizado, ver
 M17), fora do escopo desta entrada.
 
-## M24.2 — Extração do TR: texto integral (sem IA) em vez de 3 campos fixos (2026-08-18)
+## Correção pontual — Extração do TR: texto integral (sem IA) em vez de 3 campos fixos (2026-08-18)
+
+> Numeração deliberadamente fora da série M24 (Fornecedor sincronizável): esta entrada não tem
+> relação com fornecedores. O comentário de `src/lib/sheets/fornecedoresPlanilha.ts` já reserva
+> "M24.2/M24.3" para reconciliação em lote e webhook de 1 linha — ver a entrada "M24 — Fornecedor
+> sincronizável" abaixo para o desenho real dessa numeração.
 
 Origem: usuário reportou que o assistente não conseguia resumir o TR do processo 908/2022 — "tabela
 de itens" e "modelo de execução" vinham vazios. Causa raiz confirmada lendo o PDF real anexado pelo
@@ -1587,3 +1592,54 @@ registrado em §9.70 (docstring promete tratar "1.000" como milhar sem vírgula,
 não tocado nesta entrega, fora de escopo. (2) Nenhum teste automatizado cobre o texto extraído contra
 um PDF real de TR — a verificação foi manual (usuário exercitando em produção); um teste de regressão
 com fixture de PDF real ficaria mais forte que os testes atuais (que mockam `extrairTextoPdf`).
+
+## M24 — Sincronização de fornecedores com a planilha Google (2026-08-18)
+
+Fecha o M24 (Fornecedor sincronizável): M24.0 (schema, já migrado em produção) e M24.1 (parser puro,
+`src/lib/sheets/fornecedoresPlanilha.ts`, 15 testes) estavam prontos mas **sem nenhum fio ligando a
+planilha real ao banco** — nenhuma Server Action/rota/UI chamava o parser, e `SincronizacaoFornecedores`
+existia no schema sem nada escrever nele (levantamento via subagente `Explore`, antes de codificar
+qualquer coisa).
+
+**Fonte confirmada com o usuário:** planilha Google pública única
+(`https://docs.google.com/spreadsheets/d/1MM6cq_OGUwwpzgzUT1eyG03O65rm-2GHK8kn8km9WcI`), ~5.595 linhas,
+acessível sem autenticação via `gviz/tq?tqx=out:csv` (mesmo endpoint de `googleSheets.ts`) — confirmado
+por `curl` direto antes de escrever qualquer código, batendo com a estrutura de colunas que o parser
+já esperava. Nova env var `FORNECEDORES_SHEETS_URL` em `.env.example`.
+
+**Entrega:** `src/lib/ingestao/sincronizarFornecedores.ts` — lê o CSV, chama `parseFornecedoresPlanilha`,
+faz upsert em lotes de 500 linhas (SQL bruto, mesmo padrão de `catalogoComprasGov.ts`/M23: `createMany`
+não tem `onConflict: update`, e `upsert` do Prisma por linha não escala para ~5.600 linhas dentro do
+teto de `maxDuration`), marca `status: inativo` (nunca exclui) fornecedor cujo `linhaId` sumiu da
+leitura atual, e grava início/fim/contadores/erro em `SincronizacaoFornecedores`. Rota administrativa
+`POST /api/admin/sincronizar-fornecedores` (mesmo padrão fail-closed com `ADMIN_MIGRATE_SECRET` de
+`/api/admin/ingerir-catalogo`) — **só disparo manual nesta entrega**, decisão do usuário; UI e cron
+semanal (o comentário do parser já reserva a numeração "M24.2/M24.3" para reconciliação em lote e
+webhook de 1 linha — não confundir com esta entrada, renomeada por causa disso) ficam para depois.
+
+**Bug de conformidade encontrado testando contra Postgres real, antes do deploy.** `cnpj` é `@unique`
+no schema; a primeira versão fazia `INSERT ... ON CONFLICT ("origemPlanilhaLinhaId")`, mas Postgres só
+repara a constraint especificada no `ON CONFLICT` — se o CNPJ de uma linha da planilha já pertencer a
+outro `Fornecedor` (cadastro manual pré-existente, ou duas linhas da própria planilha com o mesmo
+CNPJ), o `INSERT` inteiro do lote falha por violar `fornecedores_cnpj_key`, e Postgres **não aceita
+duas cláusulas `ON CONFLICT` no mesmo `INSERT`** (confirmado empiricamente, não documentação). Só
+apareceria em produção com a planilha real — nenhum teste mockado pegaria isso (mesmo modo de falha do
+§9.63: fixture que replica a premissa não verificada, não a testa). Corrigido em duas etapas dentro de
+`upsertLote`: busca prévia de CNPJs do lote que já existem em fornecedor sem `origemPlanilhaLinhaId`
+→ essas linhas viram `UPDATE` direto por `id` (mesclagem, herdando o `linhaId`); CNPJ duplicado dentro
+do próprio lote mantém só a primeira ocorrência. Validado com script `pg` direto contra o Postgres
+local, dentro de transação com `ROLLBACK` (nunca persistido) — cenário completo: colisão com fornecedor
+manual → mesclagem → desativação quando a linha some da planilha, todas as etapas confirmadas.
+
+**Verificação.** TDD com mutação: teste de "não desativa presente" derrubado deliberadamente (removendo
+o filtro de presença) para confirmar que protege a regra antes de aceitar como válido (§9.39). 1000
+testes (12 novos: 7 do módulo + 5 da rota), typecheck e lint limpos, `pnpm build` verde, e o SQL exato
+de upsert/mesclagem/desativação exercitado contra Postgres real (não só mock) antes de fechar.
+
+**Pendências.** (1) UI de disparo manual e cron semanal (análogo ao M23) ficam para uma entrada
+futura — hoje só existe a rota administrativa, sem botão nem agendamento. (2) `linhasCriadas` sempre
+sai `0` no log — Postgres não distingue INSERT de UPDATE no total de `$executeRaw` de um
+`ON CONFLICT DO UPDATE`, e separar exigiria uma query extra só para o dado informativo; todo upsert
+conta como `linhasAtualizadas`. (3) Nenhuma execução real contra a planilha de produção rodou ainda —
+a rota nunca foi chamada com `ADMIN_MIGRATE_SECRET` real; a primeira chamada deve ser tratada como
+verificação, não como certeza de que vai funcionar com o volume total de ~5.600 linhas.
