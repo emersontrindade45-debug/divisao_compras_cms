@@ -262,10 +262,7 @@ function scoreServico(tokensTermo: Set<string>, servico: ServicosCatalogo): numb
   return overlap / tokensTermo.size;
 }
 
-function encontrarServicos(
-  termo: string,
-  catalogo: ServicosCatalogo[],
-): ServicosCatalogo[] {
+function encontrarServicos(termo: string, catalogo: ServicosCatalogo[]): ServicosCatalogo[] {
   const tokensTermo = new Set(tokenizar(termo).map(raizPlural));
 
   return catalogo
@@ -327,10 +324,7 @@ function chaveNome(texto: string): string {
   return normalizar(texto).replace(/\s+/g, " ").trim();
 }
 
-function acharCodigosPorDescricao(
-  catalogo: ServicosCatalogo[],
-  descricao: string,
-): number[] {
+function acharCodigosPorDescricao(catalogo: ServicosCatalogo[], descricao: string): number[] {
   const alvo = chaveNome(descricao);
   const exatos = [
     ...new Set(
@@ -362,7 +356,11 @@ function escolherIdCompra(
   return casados[0]!.idCompra!.trim();
 }
 
-async function emParalelo<T, R>(itens: T[], limite: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function emParalelo<T, R>(
+  itens: T[],
+  limite: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
   const saida: R[] = new Array(itens.length);
   let proximo = 0;
   async function worker() {
@@ -521,7 +519,9 @@ export async function resolverUrlsAcompanhamentoPainel(
       timestamps.length === 0
         ? dataRange()
         : {
-            dataInicio: new Date(Math.min(...timestamps) - 4 * 86_400_000).toISOString().slice(0, 10),
+            dataInicio: new Date(Math.min(...timestamps) - 4 * 86_400_000)
+              .toISOString()
+              .slice(0, 10),
             dataFim: new Date(Math.max(...timestamps) + 4 * 86_400_000).toISOString().slice(0, 10),
           };
     return { codigo, precos: await buscarPrecosServico(codigo, janela) };
@@ -555,9 +555,7 @@ export async function resolverUrlsAcompanhamentoPainel(
  * Devolve array vazio (silenciosamente) quando não há serviços catalogados
  * com sobreposição suficiente — não interrompe o pipeline principal.
  */
-export async function buscarContratosComprasGov(
-  termo: string,
-): Promise<CandidatoSimilaridade[]> {
+export async function buscarContratosComprasGov(termo: string): Promise<CandidatoSimilaridade[]> {
   if (!termo.trim()) return [];
 
   try {
@@ -599,9 +597,7 @@ export async function buscarContratosComprasGov(
     }
 
     const origens = await emParalelo(idsCompra, 3, (id) =>
-      id
-        ? resolverOrigemHomologada(id)
-        : Promise.resolve({ incluir: true, url: null }),
+      id ? resolverOrigemHomologada(id) : Promise.resolve({ incluir: true, url: null }),
     );
     const homologados: CandidatoSimilaridade[] = [];
     for (let i = 0; i < candidatos.length; i++) {

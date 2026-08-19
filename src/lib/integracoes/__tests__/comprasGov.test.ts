@@ -96,7 +96,11 @@ function fetchPorRota(opts: {
     const url = String(input);
     if (url.includes("comprasnet-fase-externa") && url.includes("/link")) {
       if (opts.faseExterna === "404") {
-        return { ok: false, status: 404, text: async () => '{"message":"Compra não encontrada."}' } as Response;
+        return {
+          ok: false,
+          status: 404,
+          text: async () => '{"message":"Compra não encontrada."}',
+        } as Response;
       }
       const id = url.split("/compras/")[1]?.split("/")[0] ?? "";
       return {
@@ -279,9 +283,7 @@ describe("buscarContratosComprasGov — só compras homologadas", () => {
 
     expect(candidatos).toHaveLength(1);
     expect(candidatos[0]!.valorUnitario).toBe(21420.2);
-    expect(candidatos[0]!.fonteUrl).toBe(
-      "https://pncp.gov.br/app/editais/11308894000106/2025/87",
-    );
+    expect(candidatos[0]!.fonteUrl).toBe("https://pncp.gov.br/app/editais/11308894000106/2025/87");
   });
 
   it("omite dataResultado sentinela (0001-01-01)", async () => {
@@ -354,4 +356,3 @@ describe("buscarContratosComprasGov — só compras homologadas", () => {
     expect(url).toBeNull();
   });
 });
-
