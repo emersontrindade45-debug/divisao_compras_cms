@@ -239,14 +239,14 @@ export function SelecaoFornecedoresForm({
           </CardContent>
         )}
         <CardContent className="p-0">
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10 pl-6" />
-                <TableHead>Fornecedor</TableHead>
-                <TableHead>Categorias</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead className="tabular-nums">Taxa de resposta</TableHead>
+                <TableHead className="w-[38%]">Fornecedor</TableHead>
+                <TableHead className="w-[27%]">Categorias</TableHead>
+                <TableHead className="w-[15%]">Score</TableHead>
+                <TableHead className="w-[20%] tabular-nums">Taxa de resposta</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -267,19 +267,19 @@ export function SelecaoFornecedoresForm({
                         aria-label={`Selecionar ${f.razaoSocial}`}
                       />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-normal">
                       <div>
-                        <p className="text-sm font-medium">{f.razaoSocial}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-sm font-medium break-words">{f.razaoSocial}</p>
+                        <p className="text-xs text-muted-foreground break-words">
                           {f.cidade}/{f.estado} · {f.responsavelContato}
                         </p>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-normal">
                       <div className="flex flex-wrap gap-1">
                         {f.categoria.slice(0, 2).map((c) => (
-                          <Badge key={c} variant="secondary" className="text-xs">
-                            {c}
+                          <Badge key={c} variant="secondary" className="max-w-full text-xs">
+                            <span className="min-w-0 truncate">{c}</span>
                           </Badge>
                         ))}
                         {f.categoria.length > 2 && (
