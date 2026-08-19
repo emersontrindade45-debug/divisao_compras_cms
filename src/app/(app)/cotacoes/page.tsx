@@ -22,6 +22,7 @@ export default async function CotacoesPage() {
       select: {
         id: true,
         razaoSocial: true,
+        email: true,
         cidade: true,
         estado: true,
         responsavelContato: true,

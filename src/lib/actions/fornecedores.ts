@@ -6,6 +6,7 @@ import { registrarAuditoria } from "@/lib/auth/audit";
 import { createFornecedorSchema, updateFornecedorSchema } from "@/lib/validations/fornecedor";
 import { calcularScore } from "@/lib/domain/supplierScore";
 import { buscarFornecedorPorCamada } from "@/lib/domain/buscarFornecedorPorCamada";
+import { sugerirCategoriasParaObjeto } from "@/lib/ia/categorizarObjeto";
 import type { ActionResult } from "./processos";
 
 export async function criarFornecedor(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -152,5 +153,69 @@ export async function buscarOuQualificarFornecedor(
       score: f.score,
     })),
     precisaBuscarNovo: camadaEncontrada === null,
+  };
+}
+
+export interface FornecedorSugerido {
+  id: string;
+  razaoSocial: string;
+  email: string;
+  cidade: string;
+  estado: string;
+  categoria: string[];
+  score: number;
+}
+
+export interface ResultadoSugestaoFornecedores {
+  categoriasSugeridas: string[];
+  fornecedores: FornecedorSugerido[];
+}
+
+/**
+ * Sugere, via IA, fornecedores para consultar por e-mail a partir do texto livre do objeto de um
+ * processo — sem isso, o usuário tinha que abrir a lista inteira de fornecedores ativos e adivinhar
+ * a categoria certa na mão (a lógica de categoria + camada geográfica já existia em
+ * `buscarOuQualificarFornecedor`, mas não tinha ligação nenhuma com o texto do objeto).
+ *
+ * A IA só escolhe entre as categorias que já existem no cadastro real (`sugerirCategoriasParaObjeto`
+ * filtra qualquer alucinação) — nunca inventa fornecedor nem envia e-mail; isto é seleção, o registro
+ * e envio continuam manuais (CLAUDE.md §9.3).
+ */
+export async function sugerirFornecedoresPorObjeto(objeto: string): Promise<ResultadoSugestaoFornecedores> {
+  await requireAuth();
+
+  const objetoTrim = objeto.trim();
+  if (!objetoTrim) return { categoriasSugeridas: [], fornecedores: [] };
+
+  const fornecedoresAtivos = await db.fornecedor.findMany({
+    where: { status: "ativo" },
+    select: {
+      id: true,
+      razaoSocial: true,
+      email: true,
+      cidade: true,
+      estado: true,
+      categoria: true,
+      score: true,
+    },
+  });
+
+  const categoriasDisponiveis = [...new Set(fornecedoresAtivos.flatMap((f) => f.categoria))];
+  const categoriasSugeridas = await sugerirCategoriasParaObjeto(objetoTrim, categoriasDisponiveis);
+  if (categoriasSugeridas.length === 0) {
+    return { categoriasSugeridas: [], fornecedores: [] };
+  }
+
+  // Uma camada (cidade/região/estado) por categoria sugerida — união dos fornecedores achados,
+  // deduplicados por id (o mesmo fornecedor pode ter mais de uma das categorias sugeridas).
+  const encontrados = new Map<string, FornecedorSugerido>();
+  for (const nicho of categoriasSugeridas) {
+    const { fornecedores } = buscarFornecedorPorCamada(fornecedoresAtivos, nicho);
+    for (const f of fornecedores) encontrados.set(f.id, f);
+  }
+
+  return {
+    categoriasSugeridas,
+    fornecedores: [...encontrados.values()].sort((a, b) => b.score - a.score),
   };
 }

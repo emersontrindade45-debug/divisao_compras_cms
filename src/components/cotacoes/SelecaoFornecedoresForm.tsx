@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Mail, Users } from "lucide-react";
+import { Send, Mail, Users, Sparkles, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ScoreBadge } from "@/components/fornecedores/ScoreBadge";
 import { criarCotacao } from "@/lib/actions/cotacoes";
+import { sugerirFornecedoresPorObjeto } from "@/lib/actions/fornecedores";
 import { cn } from "@/lib/utils";
 
 const TEMPLATE_EMAIL = `Prezado(a) {responsavel},
@@ -42,6 +43,7 @@ const SELECT_CLASS = cn(SELECT_BASE, "w-full max-w-md");
 export interface FornecedorOption {
   id: string;
   razaoSocial: string;
+  email: string;
   cidade: string;
   estado: string;
   responsavelContato: string;
@@ -75,6 +77,8 @@ export function SelecaoFornecedoresForm({
     return d.toISOString().slice(0, 10);
   });
   const [registrando, setRegistrando] = useState(false);
+  const [sugerindo, setSugerindo] = useState(false);
+  const [categoriasSugeridas, setCategoriasSugeridas] = useState<string[] | null>(null);
 
   const toggle = (id: string) => {
     setSelecionados((prev) => {
@@ -84,6 +88,45 @@ export function SelecaoFornecedoresForm({
       return next;
     });
   };
+
+  async function handleSugerirPorIA() {
+    const processo = processos.find((p) => p.id === processoId);
+    if (!processo) {
+      toast.error("Selecione o processo primeiro — a sugestão usa o objeto dele.");
+      return;
+    }
+    setSugerindo(true);
+    try {
+      const resultado = await sugerirFornecedoresPorObjeto(processo.objeto);
+      setCategoriasSugeridas(resultado.categoriasSugeridas);
+      if (resultado.fornecedores.length === 0) {
+        toast.warning("Nenhum fornecedor cadastrado casou com o objeto deste processo.");
+      } else {
+        setSelecionados((prev) => {
+          const next = new Set(prev);
+          for (const f of resultado.fornecedores) next.add(f.id);
+          return next;
+        });
+        toast.success(`${resultado.fornecedores.length} fornecedor(es) sugerido(s) e marcado(s) abaixo.`);
+      }
+    } catch {
+      toast.error("Não foi possível sugerir fornecedores agora. Tente de novo.");
+    } finally {
+      setSugerindo(false);
+    }
+  }
+
+  async function handleCopiarEmails() {
+    const emails = fornecedores
+      .filter((f) => selecionados.has(f.id) && f.email)
+      .map((f) => f.email);
+    if (emails.length === 0) {
+      toast.warning("Nenhum dos fornecedores selecionados tem e-mail cadastrado.");
+      return;
+    }
+    await navigator.clipboard.writeText(emails.join("; "));
+    toast.success(`${emails.length} e-mail(s) copiado(s).`);
+  }
 
   async function handleRegistrar() {
     if (!processoId) {
@@ -160,10 +203,41 @@ export function SelecaoFornecedoresForm({
             <Users className="size-4 text-muted-foreground" />
             Seleção de Fornecedores
           </CardTitle>
-          <Badge variant="secondary" className="tabular-nums">
-            {selecionados.size} selecionados
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleSugerirPorIA}
+              disabled={sugerindo || !processoId}
+            >
+              <Sparkles className="size-3.5" />
+              {sugerindo ? "Sugerindo…" : "Sugerir por IA"}
+            </Button>
+            <Badge variant="secondary" className="tabular-nums">
+              {selecionados.size} selecionados
+            </Badge>
+          </div>
         </CardHeader>
+        {categoriasSugeridas !== null && (
+          <CardContent className="pt-0 pb-3">
+            <p className="text-xs text-muted-foreground">
+              {categoriasSugeridas.length > 0 ? (
+                <>
+                  Categorias identificadas no objeto:{" "}
+                  {categoriasSugeridas.map((c) => (
+                    <Badge key={c} variant="outline" className="mr-1 text-xs">
+                      {c}
+                    </Badge>
+                  ))}
+                </>
+              ) : (
+                "Nenhuma categoria do cadastro casou com o objeto deste processo."
+              )}
+            </p>
+          </CardContent>
+        )}
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -258,10 +332,22 @@ export function SelecaoFornecedoresForm({
               {selecionados.size > 1 ? "ão" : ""} registrada{selecionados.size > 1 ? "s" : ""} com
               controle de SLA e lembretes.
             </p>
-            <Button size="sm" className="gap-2" onClick={handleRegistrar} disabled={registrando}>
-              <Send className="size-3.5" />
-              {registrando ? "Registrando…" : "Registrar cotações"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleCopiarEmails}
+              >
+                <Copy className="size-3.5" />
+                Copiar e-mails
+              </Button>
+              <Button size="sm" className="gap-2" onClick={handleRegistrar} disabled={registrando}>
+                <Send className="size-3.5" />
+                {registrando ? "Registrando…" : "Registrar cotações"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

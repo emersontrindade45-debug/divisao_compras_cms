@@ -1763,9 +1763,48 @@ só apareceu contra o Postgres de produção de verdade, através do pooler, com
 serverless. Medir o número de round-trips por lote antes de aceitar uma correção de "colisão" como
 pronta é a lição geral aqui — ver §9 do CLAUDE.md ao formalizar isso.
 
-**Falta:** commitar esta correção, fazer deploy, e rodar `POST /api/admin/sincronizar-fornecedores`
-de novo contra a planilha já padronizada. Efeito esperado no primeiro sync bem-sucedido: os ~145
-fornecedores hoje gravados sob o `linhaId` das linhas removidas (duplicatas) devem virar
-`status: inativo` (o `#` deles sumiu da planilha), e o fornecedor consolidado sob o `linhaId`
-vencedor de cada grupo fica ativo com os dados mesclados — é o resultado esperado, não uma
-regressão.
+**Concluído.** Deploy feito (`git push` + confirmação manual do usuário, já que o gatilho automático
+Git↔Vercel se mostrou instável nesta sessão), e `POST /api/admin/sincronizar-fornecedores` rodou com
+sucesso: `linhasLidas: 5351, linhasAtualizadas: 5350, linhasDesativadas: 1`. Verificado direto no
+banco: 0 CNPJs duplicados, 5.358 fornecedores ativos / 2 inativos. A maioria dos ~145 fornecedores
+das linhas removidas foi **absorvida por `UPDATE`** no registro que já tinha o CNPJ certo (não virou
+`status: inativo` como a previsão inicial supunha — o próprio mecanismo do 4º bug faz o registro
+"herdar" o `linhaId` vencedor, preservando `Cotacao`/histórico já vinculado). Só 1 caso (NICMAR) que
+não passou pelo caminho de colisão de CNPJ foi desativado pelo `desativarAusentes` normal. Restou 1
+registro órfão "ativo mas desconectado" (o gêmeo antigo da SPACE AIR, cujo `linhaId` foi liberado
+pelo 4º bug mas nunca mais é candidato a desativação por não ter mais `origemPlanilhaLinhaId`) —
+corrigido manualmente (`UPDATE ... SET status = 'inativo'`), com autorização do usuário, direto no
+Postgres de produção via `PROD_READ_URL`.
+
+## M25 — Sugestão de fornecedores por IA a partir do objeto do processo (2026-08-19)
+
+**Motivação.** Usuário perguntou se, ao pedir e-mails de fornecedores para um objeto, o sistema (ou o
+assistente) já trazia isso pronto. Não trazia: a tela de Cotações (`SelecaoFornecedoresForm`) listava
+todos os fornecedores ativos sem filtro nenhum por objeto/categoria, e o assistente (M13) não tem
+nenhuma ferramenta de acesso a `Fornecedor`. A lógica de categoria + expansão geográfica
+(`buscarFornecedorPorCamada`, M-anterior) existia mas não estava ligada a nada — código órfão.
+
+**Entrega.** `sugerirCategoriasParaObjeto` (`src/lib/ia/categorizarObjeto.ts`) — chamada OpenAI
+(`chat.completions`, `response_format: json_object`, mesmo padrão de `openaiProvider.ts`, cujo
+`parseJsonResponse` foi exportado para reuso) que recebe o texto livre do objeto + a lista real de
+categorias já cadastradas em `Fornecedor.categoria` (69 valores distintos hoje) e devolve só as
+pertinentes — **nunca inventa categoria nova**: filtra defensivamente qualquer valor que a IA
+retorne fora da lista dada (CLAUDE.md §9.12), validado por teste + mutação. `sugerirFornecedoresPorObjeto`
+(`src/lib/actions/fornecedores.ts`) orquestra: busca fornecedores ativos, chama a IA, roda
+`buscarFornecedorPorCamada` para cada categoria sugerida e une os resultados (dedup por id — um
+fornecedor pode ter mais de uma categoria sugerida).
+
+**UI.** Botão "Sugerir por IA" em `SelecaoFornecedoresForm` (tela de Cotações → aba "Nova"): usa o
+objeto do processo selecionado, marca os fornecedores sugeridos nos checkboxes já existentes (não
+troca a lista, só pré-seleciona — o usuário ainda pode ajustar manualmente) e mostra as categorias
+identificadas. Botão "Copiar e-mails" copia para a área de transferência os e-mails dos fornecedores
+atualmente selecionados, separados por `;` — pronto para colar no cliente de e-mail (o envio
+continua manual, feito pela Câmara, CLAUDE.md §9.3; o sistema só monta a lista).
+
+**Verificação.** 12 testes novos (parse/filtro defensivo da IA + orquestração da action), ambos com
+mutação confirmada. `tsc --noEmit`, `eslint` e suíte inteira (1017 testes) limpos. Testado num
+navegador real (Playwright, fora da suíte de CI — spec temporário, removido depois): login local,
+processo "2026/002 — Serviço de manutenção predial preventiva", clique em "Sugerir por IA" chamando
+a OpenAI de verdade — identificou "Manutenção predial" e "Serviços gerais", marcou o fornecedor
+correto (Construtora e Manutenção Predial Litoral S.A.), e "Copiar e-mails" colocou o e-mail certo na
+área de transferência (confirmado lendo `navigator.clipboard` de volta).

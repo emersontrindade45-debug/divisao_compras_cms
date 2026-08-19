@@ -93,7 +93,7 @@ relevante e sua porcentagem — isso será usado como justificativa formal num p
 Responda com um objeto JSON no formato { "avaliacoes": [...] }.`;
 }
 
-function parseJsonResponse<T>(texto: string, schema: z.ZodType<T>, contexto: string): T {
+export function parseJsonResponse<T>(texto: string, schema: z.ZodType<T>, contexto: string): T {
   let bruto: unknown;
   try {
     bruto = JSON.parse(texto);
