@@ -1946,3 +1946,56 @@ padrão 3, mais rápido mas com mais 429):
 ```
 $env:DATABASE_URL="<connection string de produção>"; node_modules\.bin\tsx.CMD scripts/enriquecer-fornecedores-cnpj.ts --concorrencia=1
 ```
+
+## M27 — Descoberta de candidatos a Fornecedor por CNPJ/SP (em andamento, iniciado 2026-08-19)
+
+**Motivação.** Retomada da Parte 2 descartada no M26 ("achar CNPJ a partir só do nome"), em outra
+forma: em vez de buscar por nome (sem fonte gratuita que suporte isso — limitação estrutural dos
+dados abertos da Receita, não de ferramenta), importar um recorte filtrado do dump completo de
+Estabelecimentos da Receita Federal (SP + situação ativa) processado externamente via DuckDB, e
+usar isso como base de candidatos a Fornecedor pesquisável por Cidade/CNAE — sem tentar casar nome
+nenhum. Autohospedar o dump inteiro (dezenas de GB) segue fora de escopo; o que entra no banco é só
+o recorte já filtrado, como CSV.
+
+**Escopo.** Etapas planejadas:
+1. ✅ Schema Prisma — `EmpresaCandidataFornecedor` (chave `cnpj` única, índice `[estado, municipio]`
+   e índice GIN em `categoriaSugerida` para suportar filtro por array numa tabela de potencialmente
+   milhões de linhas), `ImportacaoCandidatosCnpj` (log de cada execução do import, mesmo shape de
+   `SincronizacaoFornecedores` do M24) e `CategoriaSugeridaPorCnae` (cache código CNAE → categoria,
+   ~1.300 códigos possíveis no Brasil — evita rechamar a IA por empresa quando o CNAE se repete).
+   Migration `20260819162330_m27_candidatos_cnpj_sp`.
+2. ✅ Parser + normalização + validação da linha do CSV: `parseLinhaCsv` (parser streaming
+   linha-a-linha, tolerante a aspas/campo escapado, devolve `null` em aspas não fechadas — sinal de
+   linha rejeitada, nunca corrompe o parse em silêncio); `normalizarMunicipio`/`normalizarTexto`
+   extraídos do M26 para módulo compartilhado em `lib/domain`; `linhaCandidatoCnpjSchema` (Zod) —
+   CNPJ 14 dígitos sem máscara, `situacaoCadastral === "02"` como defesa em profundidade (mesmo o
+   CSV já vindo filtrado a montante, fora deste repo).
+3. ✅ Import streaming (`importarCandidatosCnpj.ts`): lê o CSV via `readline` (nunca o arquivo
+   inteiro em memória — arquivo é potencialmente de milhões de linhas), mapeia colunas **por nome**
+   do header (não por posição — tolerante a reordenação/coluna extra da query DuckDB que gera o
+   CSV, mas falha explicitamente se faltar coluna obrigatória, porque nesse caso toda linha seria
+   rejeitada e um contador não distinguiria isso de arquivo ruim). Linha malformada (aspas não
+   fechadas, contagem de campos divergente, Zod reprovou) incrementa `linhasRejeitadas` sem derrubar
+   o processo. Escrita em lote via `INSERT ... ON CONFLICT ("cnpj") DO UPDATE` (`$executeRaw` +
+   `Prisma.sql`/`Prisma.join`, nunca `createMany`/`skipDuplicates` — CLAUDE.md §9.72: reimportação de
+   competência nova precisa refletir mudança de situação/endereço/razão social em CNPJ já
+   importado, o que `skipDuplicates` ignoraria em silêncio). `situacaoCadastralData` (AAAAMMDD)
+   convertida com janela de plausibilidade fixa (1950–2100, CLAUDE.md §9.65) — data-sentinela da
+   fonte externa vira `null`, nunca uma `Date` inválida. `categoriaSugerida` fica de fora do
+   `UPDATE`: é calculada à parte (etapa 4) e uma reimportação não pode zerá-la. 15 testes
+   (`importarCandidatosCnpj.test.ts`), incluindo mutação confirmada no ON CONFLICT (trocar por
+   `DO NOTHING` derruba o teste de garantia).
+4. ⬜ Cálculo de `CategoriaSugeridaPorCnae` (reuso de `sugerirCategoriasParaObjeto` do M25, cache por
+   código CNAE em vez de por empresa) + aplicação de `categoriaSugerida` em `EmpresaCandidataFornecedor`.
+5. ⬜ Geração real do CSV via DuckDB (dump de Estabelecimentos da Receita, filtro SP + ativa,
+   export com header nomeado) — **não feito ainda**; o dump não está na máquina desta sessão. Sem
+   isso, etapas 1–3 estão testadas só contra fixture, não contra o formato real de saída do DuckDB.
+6. ⬜ Script administrativo (`scripts/importar-candidatos-cnpj.ts`, mesmo padrão de
+   `scripts/enriquecer-fornecedores-cnpj.ts`) + UI de busca/promoção de candidato a `Fornecedor`
+   real (a decidir: tela dedicada em `fornecedores/` ou extensão do fluxo de cadastro existente).
+
+**Risco em aberto:** a etapa 3 valida o *shape* da linha (Zod) mas não foi exercitada contra uma
+amostra real do CSV gerado pelo DuckDB — CLAUDE.md §9.63/§9.69 (spike que confirma o formato
+assumido, não o real, é dívida bloqueante, não achado de rodapé). Antes de considerar o import
+"pronto" para rodar contra o dump de verdade, gerar uma amostra pequena real e confirmar nomes de
+coluna, formato de data e encoding.
