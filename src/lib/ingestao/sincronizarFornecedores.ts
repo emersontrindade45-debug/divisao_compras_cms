@@ -114,10 +114,10 @@ async function upsertLote(
     cnpjsDoLote.length > 0
       ? await db.fornecedor.findMany({
           where: { cnpj: { in: cnpjsDoLote } },
-          select: { id: true, cnpj: true },
+          select: { id: true, cnpj: true, origemPlanilhaLinhaId: true },
         })
       : [];
-  const idPorCnpjColidido = new Map(colisoesCnpj.map((f) => [f.cnpj!, f.id]));
+  const fornecedorPorCnpjColidido = new Map(colisoesCnpj.map((f) => [f.cnpj!, f]));
 
   // Quarto bug de produção (2026-08-19): quando a linha colide por CNPJ (acima), o
   // UPDATE abaixo tenta gravar `origemPlanilhaLinhaId = linha.linhaId` no fornecedor
@@ -130,13 +130,33 @@ async function upsertLote(
   // `fornecedores_origemPlanilhaLinhaId_key`. Reproduzido em produção com
   // "SPACE AIR BRAZIL" (linhaId antigo com cnpj null vs. linhaId novo, mesmo CNPJ
   // depois de corrigido o zero à esquerda perdido na planilha).
-  const linhaIdsComColisaoCnpj = linhas
-    .filter((l): l is FornecedorPlanilhaRow & { cnpj: string } => l.cnpj !== null && idPorCnpjColidido.has(l.cnpj))
-    .map((l) => l.linhaId);
+  //
+  // Quinto bug de produção (2026-08-19, mesma sessão): sem checar se o fornecedor
+  // achado por CNPJ já está sob o MESMO `linhaId` desta linha, toda re-sincronização
+  // de uma linha inalterada (o caso comum — ~3.500 das ~5.350 linhas já foram
+  // sincronizadas antes) também "colidia" com ela mesma e caía no UPDATE individual
+  // abaixo (1 round-trip por linha) em vez do INSERT ... ON CONFLICT em lote (1
+  // round-trip por lote inteiro) — estourava os 60s da rota já no 1º lote de 500,
+  // sem gravar nada (`FUNCTION_INVOCATION_TIMEOUT`, medido em produção). Só é
+  // colisão de verdade quando o `linhaId` do fornecedor achado é DIFERENTE do
+  // `linhaId` desta linha.
+  let afetadas = 0;
+  const paraInserir: FornecedorPlanilhaRow[] = [];
+  const linhasComColisaoReal: { linha: FornecedorPlanilhaRow; idExistente: string }[] = [];
+
+  for (const linha of linhas) {
+    const colisao = linha.cnpj ? fornecedorPorCnpjColidido.get(linha.cnpj) : undefined;
+    if (colisao && colisao.origemPlanilhaLinhaId !== linha.linhaId) {
+      linhasComColisaoReal.push({ linha, idExistente: colisao.id });
+    } else {
+      paraInserir.push(linha);
+    }
+  }
+
   const ocupantesAtuaisDoLinhaId =
-    linhaIdsComColisaoCnpj.length > 0
+    linhasComColisaoReal.length > 0
       ? await db.fornecedor.findMany({
-          where: { origemPlanilhaLinhaId: { in: linhaIdsComColisaoCnpj } },
+          where: { origemPlanilhaLinhaId: { in: linhasComColisaoReal.map((c) => c.linha.linhaId) } },
           select: { id: true, origemPlanilhaLinhaId: true },
         })
       : [];
@@ -144,42 +164,32 @@ async function upsertLote(
     ocupantesAtuaisDoLinhaId.map((f) => [f.origemPlanilhaLinhaId!, f.id]),
   );
 
-  let afetadas = 0;
-  const paraInserir: FornecedorPlanilhaRow[] = [];
-
-  for (const linha of linhas) {
-    const idExistentePorCnpj = linha.cnpj ? idPorCnpjColidido.get(linha.cnpj) : undefined;
-
-    if (idExistentePorCnpj) {
-      const idOcupanteAtual = idOcupanteAtualPorLinhaId.get(linha.linhaId);
-      if (idOcupanteAtual && idOcupanteAtual !== idExistentePorCnpj) {
-        await db.$executeRaw`
-          UPDATE "fornecedores" SET "origemPlanilhaLinhaId" = NULL, "updatedAt" = ${agora}
-          WHERE "id" = ${idOcupanteAtual}
-        `;
-      }
-
+  for (const { linha, idExistente: idExistentePorCnpj } of linhasComColisaoReal) {
+    const idOcupanteAtual = idOcupanteAtualPorLinhaId.get(linha.linhaId);
+    if (idOcupanteAtual && idOcupanteAtual !== idExistentePorCnpj) {
       await db.$executeRaw`
-        UPDATE "fornecedores" SET
-          "razaoSocial" = ${linha.razaoSocial},
-          "categoria" = ${categoriaSqlArray(linha.categoria)},
-          "cidade" = ${linha.cidade},
-          "estado" = ${linha.estado},
-          "responsavelContato" = ${linha.responsavelContato},
-          "email" = ${linha.email},
-          "emailsAdicionais" = ${emailsAdicionaisSqlArray(linha.emailsAdicionais)},
-          "telefone" = ${linha.telefone ?? null},
-          "origemPlanilhaLinhaId" = ${linha.linhaId},
-          "origemPlanilhaFonte" = ${fonteOrigem},
-          "origemPlanilhaAtualizadoEm" = ${agora},
-          "updatedAt" = ${agora}
-        WHERE "id" = ${idExistentePorCnpj}
+        UPDATE "fornecedores" SET "origemPlanilhaLinhaId" = NULL, "updatedAt" = ${agora}
+        WHERE "id" = ${idOcupanteAtual}
       `;
-      afetadas += 1;
-      continue;
     }
 
-    paraInserir.push(linha);
+    await db.$executeRaw`
+      UPDATE "fornecedores" SET
+        "razaoSocial" = ${linha.razaoSocial},
+        "categoria" = ${categoriaSqlArray(linha.categoria)},
+        "cidade" = ${linha.cidade},
+        "estado" = ${linha.estado},
+        "responsavelContato" = ${linha.responsavelContato},
+        "email" = ${linha.email},
+        "emailsAdicionais" = ${emailsAdicionaisSqlArray(linha.emailsAdicionais)},
+        "telefone" = ${linha.telefone ?? null},
+        "origemPlanilhaLinhaId" = ${linha.linhaId},
+        "origemPlanilhaFonte" = ${fonteOrigem},
+        "origemPlanilhaAtualizadoEm" = ${agora},
+        "updatedAt" = ${agora}
+      WHERE "id" = ${idExistentePorCnpj}
+    `;
+    afetadas += 1;
   }
 
   if (paraInserir.length > 0) {

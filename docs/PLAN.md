@@ -1738,14 +1738,34 @@ com `ROLLBACK` desta vez (como fizeram sessões anteriores) — o classificador 
 bloqueou o comando por ser uma escrita direta em produção, mesmo com rollback garantido no código.
 A correção foi validada só por teste unitário + mutação antes de rodar a rota de verdade.
 
-**Falta:** commitar esta correção + rodar `POST /api/admin/sincronizar-fornecedores` de novo contra
-a planilha já padronizada. Efeito esperado no primeiro sync bem-sucedido: os ~145 fornecedores hoje
-gravados sob o `linhaId` das linhas removidas (duplicatas) devem virar `status: inativo` (o `#`
-deles sumiu da planilha), e o fornecedor consolidado sob o `linhaId` vencedor de cada grupo fica
-ativo com os dados mesclados — é o resultado esperado, não uma regressão. Nota separada, sem relação
-com o M24: **o deploy automático via GitHub não estava dando gatilho** na sessão anterior (`gh api
-repos/emersontrindade45-debug/divisao_compras_cms/hooks` retornou `[]`) — os deploys precisaram de
-`vercel deploy --prod --yes` manual, que esbarra num bug conhecido do CLI (`EACCES` no `lstat` do
-symlink `.claude/skills/find-skills`); contorno usado foi mover o symlink para fora do diretório
-antes do deploy. Considerar investigar a integração Git↔Vercel antes de depender do deploy manual
-de novo.
+Commitado (`15a5922`) e deployado — o deploy automático via GitHub voltou a funcionar nesta sessão
+(o problema registrado abaixo, de webhook ausente, parece ter sido resolvido ou era intermitente).
+
+**Quinto bug de produção, achado ao chamar a rota de verdade já com o 4º bug corrigido.** A resposta
+foi `504 FUNCTION_INVOCATION_TIMEOUT` — não mais um erro de constraint, e nada foi persistido
+(`linhasLidas: 0` nos dois registros de `SincronizacaoFornecedores` criados). Causa:
+a correção do 4º bug fez `fornecedorPorCnpjColidido` guardar `origemPlanilhaLinhaId` mas a correção
+do 3º bug nunca comparava esse valor com o `linhaId` da própria linha — então **toda linha já
+sincronizada antes, sem nada mudado (o caso comum: ~3.500 das ~5.350 linhas), "colidia" com ela
+mesma** e caía no `UPDATE` individual (1 round-trip por linha, `await` sequencial) em vez do
+`INSERT ... ON CONFLICT` em lote (1 round-trip por lote inteiro de 500). Isso estourou os 60s da
+rota já no 1º lote, sem gravar nada. **Correção:** só tratar como colisão de verdade quando
+`origemPlanilhaLinhaId` do fornecedor achado por CNPJ é DIFERENTE do `linhaId` da linha atual —
+linha inalterada volta a seguir pelo caminho rápido do INSERT em lote, e só as poucas colisões reais
+(os ~125 grupos de duplicata + os 2 "gêmeos órfãos" do 4º bug) passam pelo caminho lento. TDD com
+mutação (reverter a checagem de `linhaId` faz o teste novo cair). Suíte inteira (1005 testes),
+`tsc --noEmit` e `eslint` limpos.
+
+Nota sobre verificação: de novo não foi possível simular a escrita contra produção com `ROLLBACK`
+(classificador de permissão bloqueou) — mas desta vez o problema real (latência de rede em produção
+sob 500 round-trips sequenciais) não é algo que uma simulação local reproduziria de qualquer forma;
+só apareceu contra o Postgres de produção de verdade, através do pooler, com o teto de 60s da rota
+serverless. Medir o número de round-trips por lote antes de aceitar uma correção de "colisão" como
+pronta é a lição geral aqui — ver §9 do CLAUDE.md ao formalizar isso.
+
+**Falta:** commitar esta correção, fazer deploy, e rodar `POST /api/admin/sincronizar-fornecedores`
+de novo contra a planilha já padronizada. Efeito esperado no primeiro sync bem-sucedido: os ~145
+fornecedores hoje gravados sob o `linhaId` das linhas removidas (duplicatas) devem virar
+`status: inativo` (o `#` deles sumiu da planilha), e o fornecedor consolidado sob o `linhaId`
+vencedor de cada grupo fica ativo com os dados mesclados — é o resultado esperado, não uma
+regressão.

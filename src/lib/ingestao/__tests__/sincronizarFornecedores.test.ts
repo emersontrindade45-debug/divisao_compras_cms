@@ -218,6 +218,43 @@ describe("sincronizarFornecedores", () => {
     expect(idxReatribui).toBeGreaterThan(idxLibera);
   });
 
+  it("usa o INSERT em lote (não UPDATE individual) quando o fornecedor achado por CNPJ já é a própria linha sendo ressincronizada (reprodução do 5º bug de produção — timeout)", async () => {
+    // Reproduz o bug encontrado em 2026-08-19 ao rodar a sincronização real
+    // depois do 3º/4º bug corrigidos: a busca de colisão por CNPJ acha o
+    // fornecedor DA PRÓPRIA LINHA (já sincronizada antes, sem nada mudado) e,
+    // sem checar se o linhaId já é o mesmo, tratava isso como colisão —
+    // desviando quase todo lote (as ~3.500 linhas já sincronizadas antes) do
+    // INSERT em lote (1 round-trip) para um UPDATE individual por linha (1
+    // round-trip cada). Contra o banco de produção real, isso estourou os 60s
+    // da rota já no 1º lote de 500 linhas, sem gravar nada
+    // (FUNCTION_INVOCATION_TIMEOUT). Só é colisão de verdade quando o linhaId
+    // do fornecedor achado é DIFERENTE do linhaId desta linha.
+    const csv = ["#,Nome/Razão Social,CPF/CNPJ", "1,ACME LTDA,12345678000190"].join("\n");
+
+    mocks.db.fornecedor.findMany.mockImplementation(
+      async ({ where }: { where?: { cnpj?: unknown } }) => {
+        if (where?.cnpj) {
+          // O fornecedor achado por CNPJ é a própria linha "1" — mesmo linhaId.
+          return [{ id: "forn-propria-linha", cnpj: "12.345.678/0001-90", origemPlanilhaLinhaId: "1" }];
+        }
+        return [];
+      },
+    );
+
+    await sincronizarFornecedores({ csv, origem: "manual" });
+
+    // Nenhum UPDATE individual por id deve ter acontecido — só o INSERT em lote.
+    const chamadaUpdatePorId = mocks.db.$executeRaw.mock.calls.find((call) => {
+      const sql = (call[0] as string[]).join("");
+      return sql.includes('WHERE "id" =');
+    });
+    expect(chamadaUpdatePorId).toBeUndefined();
+
+    expect(mocks.db.$executeRaw).toHaveBeenCalledTimes(1);
+    const sqlDoLote = (mocks.db.$executeRaw.mock.calls[0]![0] as string[]).join("");
+    expect(sqlDoLote).toContain('ON CONFLICT ("origemPlanilhaLinhaId")');
+  });
+
   it("mantém só a última ocorrência quando duas linhas têm o mesmo CNPJ, mesmo que estejam no mesmo lote", async () => {
     const csvComCnpjDuplicado = [
       "#,Nome/Razão Social,CPF/CNPJ",
