@@ -25,8 +25,10 @@ import { z } from "zod";
  *   (ex.: `"ATIVA"`), `situacao_cadastral` (código numérico),
  *   `motivo_situacao_cadastral`, `data_situacao_cadastral`, `razao_social`,
  *   e também `municipio`, `uf`, `cnae_fiscal_descricao`, `cnaes_secundarios`
- *   (array de `{codigo, descricao}`) e `email`. Testado com o CNPJ público
- *   00.000.000/0001-91 (Banco do Brasil).
+ *   (array de `{codigo, descricao}`), `email` e `ddd_telefone_1`/
+ *   `ddd_telefone_2` (dígitos crus, DDD+número concatenados, sem formatação —
+ *   ex. `"6134939002"`; vazio quando a Receita não tem o telefone). Testado
+ *   com o CNPJ público 00.000.000/0001-91 (Banco do Brasil).
  * - CNPJ inexistente: HTTP 404, corpo
  *   `{"message": "...", "type": "not_found", "name": "NotFoundError"}`.
  *
@@ -37,7 +39,10 @@ import { z } from "zod";
 
 const BASE_URL = "https://brasilapi.com.br/api/cnpj/v1";
 
-const MAX_TENTATIVAS = 3;
+// MAX_TENTATIVAS subiu de 3 para 4 em 2026-08-19 (M26): rodagem em lote contra produção teve 688/1273
+// candidatos bucketados como "não encontrado" — número incompatível com a base real de CNPJs válidos,
+// consistente com 429 esgotando as tentativas sob concorrência (ver enriquecerFornecedoresPorCnpj.ts).
+const MAX_TENTATIVAS = 4;
 const BACKOFF_BASE_MS = 500;
 
 function esperar(ms: number): Promise<void> {
@@ -63,6 +68,8 @@ const cnpjApiSchema = z.object({
   cnae_fiscal_descricao: z.string().nullish(),
   cnaes_secundarios: z.array(cnaeSecundarioSchema).nullish(),
   email: z.string().nullish(),
+  ddd_telefone_1: z.string().nullish(),
+  ddd_telefone_2: z.string().nullish(),
 });
 
 type DadosCnpjApi = z.infer<typeof cnpjApiSchema>;
@@ -163,6 +170,10 @@ export interface DadosCadastraisCnpj {
   /** CNAE fiscal principal + secundários, descrições concatenadas — usado como texto-fonte para sugerir Tag (M26). */
   atividadesEconomicas: string[];
   email: string | null;
+  /** Dígitos crus (DDD+número), sem formatação — quem grava formata. `ddd_telefone_1`, com fallback para `ddd_telefone_2`. */
+  telefone: string | null;
+  /** Razão social oficial da Receita para este CNPJ — fonte de verdade para corrigir cadastro divergente (M26). */
+  razaoSocial: string | null;
 }
 
 export type ResultadoDadosCadastraisCnpj =
@@ -170,10 +181,11 @@ export type ResultadoDadosCadastraisCnpj =
   | { encontrado: false; motivo: string };
 
 /**
- * Consulta município/UF/atividade econômica (CNAE)/e-mail de um CNPJ na
- * BrasilAPI — usado pelo enriquecimento em lote de `Fornecedor` (M26): a
- * chave de busca é o CNPJ (exata), nunca nome de empresa, então não há
- * ambiguidade de correspondência como haveria numa busca por razão social.
+ * Consulta município/UF/atividade econômica (CNAE)/e-mail/telefone/razão
+ * social de um CNPJ na BrasilAPI — usado pelo enriquecimento em lote de
+ * `Fornecedor` (M26): a chave de busca é o CNPJ (exata), nunca nome de
+ * empresa, então não há ambiguidade de correspondência como haveria numa
+ * busca por razão social.
  */
 export async function consultarDadosCadastraisCnpj(
   cnpj: string,
@@ -186,6 +198,8 @@ export async function consultarDadosCadastraisCnpj(
     ...(resultado.dados.cnaes_secundarios ?? []).map((c) => c.descricao),
   ].filter((d): d is string => !!d?.trim());
 
+  const telefone = resultado.dados.ddd_telefone_1?.trim() || resultado.dados.ddd_telefone_2?.trim() || null;
+
   return {
     encontrado: true,
     dados: {
@@ -193,6 +207,8 @@ export async function consultarDadosCadastraisCnpj(
       uf: resultado.dados.uf ?? null,
       atividadesEconomicas,
       email: resultado.dados.email ?? null,
+      telefone,
+      razaoSocial: resultado.dados.razao_social?.trim() || null,
     },
   };
 }

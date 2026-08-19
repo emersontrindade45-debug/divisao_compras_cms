@@ -6,8 +6,10 @@ import { enriquecerFornecedoresPorCnpj } from "../src/lib/ingestao/enriquecerFor
 
 /**
  * Enriquecimento administrativo manual de `Fornecedor` a partir do CNPJ já cadastrado (M26): preenche
- * Cidade/Estado e sugere Tag (via CNAE) só para quem está com esses campos vazios — nunca sobrescreve
- * dado já preenchido. Uso:
+ * Cidade/Estado/E-mail/Telefone e sugere Tag (via CNAE) só para quem está com esses campos vazios —
+ * nunca sobrescreve dado já preenchido. Exceção: Razão social É corrigida quando diverge da Receita
+ * (CNPJ é chave exata, então a Receita é fonte de verdade — ver docstring de
+ * `enriquecerFornecedoresPorCnpj.ts`). Uso:
  *
  *   npx tsx scripts/enriquecer-fornecedores-cnpj.ts --dry-run           (não grava, só reporta)
  *   npx tsx scripts/enriquecer-fornecedores-cnpj.ts --dry-run --limite=20   (amostra local)
@@ -41,7 +43,11 @@ async function main() {
   console.log(`  Processados: ${resumo.processados}`);
   console.log(`  Cidade/Estado preenchidos: ${resumo.cidadeEstadoPreenchidos}`);
   console.log(`  Tag sugerida: ${resumo.categoriaSugerida}`);
-  console.log(`  Não encontrados na BrasilAPI: ${resumo.naoEncontradosNaApi}`);
+  console.log(`  E-mail preenchido: ${resumo.emailPreenchido}`);
+  console.log(`  Telefone preenchido: ${resumo.telefonePreenchido}`);
+  console.log(`  Razão social corrigida: ${resumo.razaoSocialCorrigida}`);
+  console.log(`  Não encontrados na BrasilAPI (CNPJ inexistente na Receita): ${resumo.naoEncontradosNaApi}`);
+  console.log(`  Falha temporária (429/5xx/rede — reprocessa numa próxima rodagem): ${resumo.falhaTemporaria}`);
   console.log(`  Sem nada para fazer: ${resumo.semNadaParaFazer}`);
   console.log(`  Erros: ${resumo.erros.length}`);
   if (resumo.erros.length > 0) {

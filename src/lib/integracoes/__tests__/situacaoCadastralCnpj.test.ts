@@ -108,10 +108,12 @@ const CNPJ_COM_DADOS_CADASTRAIS = {
     { codigo: 6499999, descricao: "Outras atividades de serviços financeiros não especificadas anteriormente" },
   ],
   email: null,
+  ddd_telefone_1: "6134939002",
+  ddd_telefone_2: "",
 };
 
 describe("consultarDadosCadastraisCnpj", () => {
-  it("retorna município, UF e atividades econômicas (CNAE principal + secundários)", async () => {
+  it("retorna município, UF, atividades econômicas (CNAE principal + secundários), telefone e razão social", async () => {
     vi.spyOn(global, "fetch").mockResolvedValue(mockResposta(CNPJ_COM_DADOS_CADASTRAIS));
 
     const resultado = await consultarDadosCadastraisCnpj("00.000.000/0001-91");
@@ -126,8 +128,30 @@ describe("consultarDadosCadastraisCnpj", () => {
           "Outras atividades de serviços financeiros não especificadas anteriormente",
         ],
         email: null,
+        telefone: "6134939002",
+        razaoSocial: "BANCO DO BRASIL SA",
       },
     });
+  });
+
+  it("cai para ddd_telefone_2 quando ddd_telefone_1 vem vazio", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      mockResposta({ ...CNPJ_COM_DADOS_CADASTRAIS, ddd_telefone_1: "", ddd_telefone_2: "1140028922" }),
+    );
+
+    const resultado = await consultarDadosCadastraisCnpj("00000000000191");
+
+    expect(resultado.encontrado && resultado.dados.telefone).toBe("1140028922");
+  });
+
+  it("telefone fica nulo quando a Receita não tem nenhum dos dois", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      mockResposta({ ...CNPJ_COM_DADOS_CADASTRAIS, ddd_telefone_1: "", ddd_telefone_2: "" }),
+    );
+
+    const resultado = await consultarDadosCadastraisCnpj("00000000000191");
+
+    expect(resultado.encontrado && resultado.dados.telefone).toBeNull();
   });
 
   it("descarta CNAE secundário sem descrição, sem quebrar os demais", async () => {

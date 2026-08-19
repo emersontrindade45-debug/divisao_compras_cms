@@ -1863,7 +1863,33 @@ condição `react-server`); confirmado por `grep` que nenhum desses módulos é 
 compartilhado com outras sessões): 15 processados, 10 Cidade/Estado preenchidos, 5 Tag sugerida,
 0 erros, 0 não encontrados — confirmou o fix do 403 e o mecanismo inteiro contra dado real.
 
-**Falta:** rodar o script sem `--dry-run`/`--limite` contra produção pra aplicar nos ~1.400
-fornecedores candidatos (aguardando decisão do usuário sobre como executar, já que `DATABASE_URL`
-local aponta pro Postgres de dev — precisa de `DATABASE_URL` de produção só para esse processo, sem
-alterar `.env`).
+**Rodagem real contra produção (2026-08-19):** 1.273 processados, 494 com Cidade/Estado
+preenchidos, 156 com Tag sugerida, 688 "não encontrados". 688/1.273 é incompatível com a base real
+de CNPJs válidos — consistente com 429 (rate limit da BrasilAPI) esgotando as 3 tentativas de
+`buscarCnpjNaBrasilApi` sob concorrência 5, não com CNPJ genuinamente inexistente na Receita.
+
+**Ampliação (2026-08-19, mesmo dia):** usuário pediu telefone, e-mail (importante) e correção de
+razão social divergente. Mudanças em `situacaoCadastralCnpj.ts`/`enriquecerFornecedoresPorCnpj.ts`:
+- `consultarDadosCadastraisCnpj` passou a extrair `ddd_telefone_1`/`_2` (fallback entre os dois,
+  dígitos crus) e `razao_social`, confirmados contra a API real (`00.000.000/0001-91` → telefone
+  `"6134939002"`).
+- E-mail e telefone seguem a mesma regra das demais colunas: só preenche quando vazio, nunca
+  sobrescreve (telefone formatado em `(DD) NNNN(N)-NNNN` na hora de gravar).
+- Razão social é a única exceção deliberada à regra "nunca sobrescreve": é comparada normalizada
+  (acento/caixa/espaço) contra a Receita e corrigida quando diverge — seguro porque o CNPJ é chave
+  exata (sem a ambiguidade de busca por nome que motivou não perseguir a Parte 2). Por isso o
+  universo do enriquecimento deixou de ser só quem tem campo vazio e passou a ser **todo**
+  fornecedor ativo com CNPJ (2.254 candidatos) — só chamando a Receita dá pra saber se a razão
+  social está errada.
+- Diagnóstico de falha diferenciado: `naoEncontradosNaApi` (404 real, não adianta repetir) separado
+  de `falhaTemporaria` (429/5xx/rede — uma rodagem futura reprocessa sozinha, porque o campo
+  continua vazio/divergente). `MAX_TENTATIVAS` subiu de 3 para 4 e a concorrência padrão do lote
+  caiu de 5 para 3, para reduzir a taxa de 429 na origem.
+- 15 testes novos/alterados (9 em `enriquecerFornecedoresPorCnpj.test.ts`, 3 em
+  `situacaoCadastralCnpj.test.ts`, mais os já existentes reforçados com os campos novos). Suíte
+  inteira (1.056 testes), `tsc --noEmit` e `eslint` limpos.
+
+**Falta:** rodar o script sem `--dry-run`/`--limite` contra produção com o código ampliado, pra
+aplicar telefone/e-mail/correção de razão social e reprocessar naturalmente os 688 que provavelmente
+eram falha temporária (o filtro agora cobre todo mundo, então isso acontece na mesma rodagem, sem
+modo especial de retry).
