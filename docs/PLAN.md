@@ -1640,6 +1640,40 @@ de upsert/mesclagem/desativação exercitado contra Postgres real (não só mock
 futura — hoje só existe a rota administrativa, sem botão nem agendamento. (2) `linhasCriadas` sempre
 sai `0` no log — Postgres não distingue INSERT de UPDATE no total de `$executeRaw` de um
 `ON CONFLICT DO UPDATE`, e separar exigiria uma query extra só para o dado informativo; todo upsert
-conta como `linhasAtualizadas`. (3) Nenhuma execução real contra a planilha de produção rodou ainda —
-a rota nunca foi chamada com `ADMIN_MIGRATE_SECRET` real; a primeira chamada deve ser tratada como
-verificação, não como certeza de que vai funcionar com o volume total de ~5.600 linhas.
+conta como `linhasAtualizadas`.
+
+### Incidente em produção na primeira execução real (2026-08-19) — dois bugs que só apareciam com o dado real
+
+A primeira chamada real de `POST /api/admin/sincronizar-fornecedores` (com `FORNECEDORES_SHEETS_URL`
+recém-configurada na Vercel, redeploy via `vercel redeploy --target production` para carregar a env
+var nova — §9.32) falhou com `duplicate key value violates unique constraint "fornecedores_cnpj_key"`.
+A resolução de colisão de CNPJ descrita acima só cobria duplicata **dentro do mesmo lote de 500**.
+Medido contra o CSV real: **125 CNPJs se repetem em linhas distantes** (ex.: linha 26 e linha 4433,
+~4.400 linhas de distância — muito além de qualquer lote). Quando a 2ª ocorrência cai num lote
+posterior, ela colide com o registro que a 1ª já criou, porque depois de inserido esse registro deixa
+de aparecer na busca por "sem `origemPlanilhaLinhaId`" que `upsertLote` usa para detectar colisão.
+Corrigido com `deduplicarPorCnpj`: remove duplicata de CNPJ na leitura **inteira** antes de dividir em
+lotes (última ocorrência da planilha vence), não por lote.
+
+**Segundo bug, achado ao investigar o alcance do primeiro antes de rodar de novo (não presumido —
+verificado por leitura direta do banco de produção via `PROD_READ_URL`, só leitura): o log de
+`SincronizacaoFornecedores` mentia sobre o que já tinha sido persistido.** 7 lotes (linhas 1–3500)
+tinham gravado com sucesso antes do 8º lote falhar — `SELECT count(*) FROM fornecedores WHERE
+"origemPlanilhaLinhaId" IS NOT NULL` confirmou **3.500** registros reais, todos `status: ativo` — mas
+o registro em `SincronizacaoFornecedores` tinha `linhasCriadas/linhasAtualizadas/linhasLidas: 0` e só
+o `erro` preenchido. Causa: `resultado` só era calculado depois que o laço de lotes terminava
+inteiro; cada `$executeRaw` de `upsertLote` já persiste no banco assim que roda (sem transação
+envolvendo todos os lotes), então o progresso real e o que o log reportava divergiam completamente —
+contraria diretamente a exigência de rastreabilidade do CLAUDE.md §1. Corrigido: `linhasLidas`/
+`linhasAtualizadas` agora são gravados via `sincronizacaoFornecedores.update` a cada lote concluído,
+não só ao fim; o `catch` (que só grava `erro`/`concluidoEm`) não sobrescreve mais o progresso já
+registrado.
+
+Ambas as correções passaram por TDD com mutação (remover a correção faz o teste correspondente
+falhar) e validação contra Postgres real (dedup + upsert reproduzindo o cenário exato de produção,
+incluindo CNPJs em lotes diferentes). 1002 testes, typecheck e lint limpos. Nenhum dos dois bugs
+apareceria num teste com fixture pequena ou mockado sem cuidado — só o volume e a estrutura reais da
+planilha de produção os expuseram; a rota ainda precisa ser executada de novo em produção (código
+corrigido, mas não re-exercitado) para confirmar que completa as ~5.595 linhas sem erro — os 3.500
+fornecedores já gravados não são afetados: o upsert por `linhaId` é idempotente e vai só atualizá-los
+ao reprocessar as mesmas linhas.

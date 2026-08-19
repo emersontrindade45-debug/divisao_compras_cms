@@ -123,7 +123,7 @@ describe("sincronizarFornecedores", () => {
     expect(chamadaInsert).toBeDefined();
   });
 
-  it("mantém só a primeira ocorrência quando duas linhas do mesmo lote têm o mesmo CNPJ", async () => {
+  it("mantém só a última ocorrência quando duas linhas têm o mesmo CNPJ, mesmo que estejam no mesmo lote", async () => {
     const csvComCnpjDuplicado = [
       "#,Nome/Razão Social,CPF/CNPJ",
       "1,PRIMEIRA LTDA,12345678000190",
@@ -137,11 +137,50 @@ describe("sincronizarFornecedores", () => {
       return sql.includes("INSERT INTO");
     });
     expect(chamadaInsert).toBeDefined();
-    // Só uma linha (a primeira) deve ir para o INSERT: Prisma.join agrupa as
+    // Só uma linha (a última) deve ir para o INSERT: Prisma.join agrupa as
     // linhas do VALUES num único valor posicional aninhado ({ strings, values }).
     const valuesJoin = chamadaInsert![1] as { values: unknown[] };
-    expect(valuesJoin.values).toContain("PRIMEIRA LTDA");
-    expect(valuesJoin.values).not.toContain("SEGUNDA LTDA");
+    expect(valuesJoin.values).toContain("SEGUNDA LTDA");
+    expect(valuesJoin.values).not.toContain("PRIMEIRA LTDA");
+  });
+
+  it("resolve CNPJ duplicado mesmo quando as duas ocorrências caem em lotes diferentes (reprodução do bug de produção)", async () => {
+    // Reproduz o cenário real que quebrou em produção em 2026-08-19: o mesmo
+    // CNPJ aparece na linha 1 e na linha 501 (lotes diferentes, teto de 500 do
+    // TAMANHO_LOTE). Sem deduplicação global antes de dividir em lotes, a 2ª
+    // ocorrência colidiria com o registro que a 1ª já tinha criado no lote
+    // anterior — a query de colisão de upsertLote só busca fornecedor "sem
+    // origemPlanilhaLinhaId", e a 1ª ocorrência já teria um.
+    const linhasCsv = ["#,Nome/Razão Social,CPF/CNPJ"];
+    linhasCsv.push("1,PRIMEIRA OCORRENCIA,12345678000190");
+    for (let i = 2; i <= 500; i++) {
+      linhasCsv.push(`${i},OUTRA EMPRESA ${i},`);
+    }
+    linhasCsv.push("501,ULTIMA OCORRENCIA,12345678000190");
+
+    const resultado = await sincronizarFornecedores({
+      csv: linhasCsv.join("\n"),
+      origem: "manual",
+    });
+
+    // Não deve ter propagado exceção (o que aconteceria com a constraint
+    // violada); e o registro de sincronização não deve ter erro gravado.
+    expect(resultado.linhasLidas).toBeGreaterThan(0);
+    expect(mocks.db.sincronizacaoFornecedores.update).toHaveBeenCalledWith({
+      where: { id: "sync-1" },
+      data: expect.not.objectContaining({ erro: expect.anything() }),
+    });
+
+    // A chamada de colisão de CNPJ do 2º lote (linha 501) não deve encontrar
+    // "PRIMEIRA OCORRENCIA" como colisão, porque ela já foi removida pela
+    // deduplicação global antes de formar os lotes.
+    const insertsComPrimeiraOcorrencia = mocks.db.$executeRaw.mock.calls.filter((call) => {
+      const sql = (call[0] as string[]).join("");
+      if (!sql.includes("INSERT INTO")) return false;
+      const valuesJoin = call[1] as { values: unknown[] };
+      return valuesJoin.values.includes("PRIMEIRA OCORRENCIA");
+    });
+    expect(insertsComPrimeiraOcorrencia).toHaveLength(0);
   });
 
   it("grava erro e concluidoEm no registro quando o upsert falha, sem propagar exceção silenciosamente", async () => {
@@ -158,5 +197,40 @@ describe("sincronizarFornecedores", () => {
         concluidoEm: expect.any(Date),
       }),
     });
+  });
+
+  it("atualiza linhasAtualizadas incrementalmente a cada lote — não só ao fim (reprodução do bug de log mentiroso em produção)", async () => {
+    // Reproduz o achado em produção (2026-08-19): 3.500 fornecedores foram
+    // criados com sucesso em 7 lotes antes do 8º falhar, mas o registro de
+    // SincronizacaoFornecedores ficou com linhasAtualizadas: 0 porque o
+    // contador só era calculado depois do laço inteiro terminar. Simula 2
+    // lotes bem-sucedidos (afetadas > 0 cada) seguidos de uma falha.
+    let chamadasExecuteRaw = 0;
+    mocks.db.$executeRaw.mockImplementation(async () => {
+      chamadasExecuteRaw += 1;
+      if (chamadasExecuteRaw > 2) throw new Error("colisão no 3º lote");
+      return 1; // 1 linha afetada por lote bem-sucedido
+    });
+
+    const linhasCsv = ["#,Nome/Razão Social,CPF/CNPJ"];
+    for (let i = 1; i <= 1200; i++) linhasCsv.push(`${i},EMPRESA ${i},`);
+
+    await expect(
+      sincronizarFornecedores({ csv: linhasCsv.join("\n"), origem: "manual" }),
+    ).rejects.toThrow();
+
+    // Antes da correção, só a chamada final (que nunca acontece, pois lança
+    // exceção) atualizaria linhasAtualizadas — o update do catch só grava
+    // erro/concluidoEm. Com a correção, cada lote bem-sucedido já persiste
+    // seu progresso via update incremental.
+    const updatesComProgresso = mocks.db.sincronizacaoFornecedores.update.mock.calls.filter(
+      (call) => (call[0] as { data: { linhasAtualizadas?: number } }).data.linhasAtualizadas,
+    );
+    expect(updatesComProgresso.length).toBeGreaterThan(0);
+    expect(
+      updatesComProgresso.some(
+        (call) => (call[0] as { data: { linhasAtualizadas: number } }).data.linhasAtualizadas > 0,
+      ),
+    ).toBe(true);
   });
 });

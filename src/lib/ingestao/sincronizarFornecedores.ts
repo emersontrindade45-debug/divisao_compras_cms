@@ -40,22 +40,48 @@ function emailsAdicionaisSqlArray(emails: string[]): Prisma.Sql {
 }
 
 /**
- * Upsert em lote, com resolução de colisão de CNPJ em duas etapas.
+ * Remove duplicata de CNPJ na leitura inteira da planilha (antes de dividir em
+ * lotes) — mantém só a última ocorrência de cada CNPJ (linha mais recente
+ * vence). ~125 CNPJs da planilha real de fornecedores se repetem em linhas
+ * distantes (ex.: linha 26 e linha 4433) — resolver por lote (500 linhas) não
+ * bastava: a 2ª ocorrência caindo num lote posterior colidia com o registro
+ * que a 1ª ocorrência já tinha criado, porque depois de inserida ela deixa de
+ * aparecer como "sem origemPlanilhaLinhaId" na busca de colisão. Confirmado em
+ * produção (2026-08-19): a primeira execução real falhou com
+ * `duplicate key value violates unique constraint "fornecedores_cnpj_key"`
+ * antes desta correção. Linhas sem CNPJ (`null`) nunca colidem entre si —
+ * Postgres permite múltiplos `NULL` num índice único.
+ */
+function deduplicarPorCnpj(linhas: FornecedorPlanilhaRow[]): FornecedorPlanilhaRow[] {
+  const porCnpj = new Map<string, FornecedorPlanilhaRow>();
+  const semCnpj: FornecedorPlanilhaRow[] = [];
+
+  for (const linha of linhas) {
+    if (linha.cnpj === null) {
+      semCnpj.push(linha);
+      continue;
+    }
+    porCnpj.set(linha.cnpj, linha); // sobrescreve — última ocorrência vence
+  }
+
+  return [...porCnpj.values(), ...semCnpj];
+}
+
+/**
+ * Upsert em lote, com resolução de colisão de CNPJ contra fornecedores
+ * já existentes no banco.
  *
  * `cnpj` é `@unique` no schema, então `INSERT ... ON CONFLICT ("origemPlanilhaLinhaId")`
  * falha inteiro (Postgres não aceita duas cláusulas `ON CONFLICT` no mesmo
  * `INSERT` — confirmado empiricamente contra Postgres real) sempre que o CNPJ
- * de uma linha da planilha já pertence a outro `Fornecedor` — seja um cadastro
- * manual pré-existente, seja outra linha da própria planilha com CNPJ
- * duplicado. Resolvido buscando, antes do INSERT, quais CNPJs deste lote já
- * existem em fornecedores sem `origemPlanilhaLinhaId` (ainda não
- * sincronizados): essas linhas são mescladas via `UPDATE` direto por `id`
- * (o registro herda o `origemPlanilhaLinhaId`, deixando de ser puramente
- * manual); o restante segue pelo `INSERT ... ON CONFLICT` normal. CNPJ
- * duplicado *dentro* do próprio lote (duas linhas da planilha com o mesmo
- * CNPJ) é resolvido mantendo só a primeira ocorrência no INSERT — a segunda
- * seria rejeitada pelo Postgres do mesmo jeito (`ON CONFLICT` não repara
- * duplicata dentro do mesmo `VALUES`).
+ * de uma linha da planilha já pertence a outro `Fornecedor` sem
+ * `origemPlanilhaLinhaId` — tipicamente um cadastro manual pré-existente
+ * (duplicata dentro da própria planilha já foi eliminada por
+ * `deduplicarPorCnpj`, chamada antes de dividir em lotes). Resolvido buscando,
+ * antes do INSERT, quais CNPJs deste lote já existem em fornecedores sem
+ * `origemPlanilhaLinhaId`: essas linhas são mescladas via `UPDATE` direto por
+ * `id` (o registro herda o `origemPlanilhaLinhaId`, deixando de ser
+ * puramente manual); o restante segue pelo `INSERT ... ON CONFLICT` normal.
  *
  * Linhas já sincronizadas antes (mesmo `origemPlanilhaLinhaId`) têm os campos
  * vindos da planilha atualizados, sem tocar em campos que o sistema calcula
@@ -80,12 +106,10 @@ async function upsertLote(
   const idPorCnpjColidido = new Map(colisoesCnpj.map((f) => [f.cnpj!, f.id]));
 
   let afetadas = 0;
-  const cnpjsJaVistosNoLote = new Set<string>();
   const paraInserir: FornecedorPlanilhaRow[] = [];
 
   for (const linha of linhas) {
     const idExistentePorCnpj = linha.cnpj ? idPorCnpjColidido.get(linha.cnpj) : undefined;
-    const duplicadoDentroDoLote = linha.cnpj !== null && cnpjsJaVistosNoLote.has(linha.cnpj);
 
     if (idExistentePorCnpj) {
       await db.$executeRaw`
@@ -105,17 +129,9 @@ async function upsertLote(
         WHERE "id" = ${idExistentePorCnpj}
       `;
       afetadas += 1;
-      if (linha.cnpj) cnpjsJaVistosNoLote.add(linha.cnpj);
       continue;
     }
 
-    if (duplicadoDentroDoLote) {
-      // Mesmo CNPJ já processado nesta mesma leitura da planilha — mantém só a
-      // primeira ocorrência; a linha atual seria rejeitada pela constraint.
-      continue;
-    }
-
-    if (linha.cnpj) cnpjsJaVistosNoLote.add(linha.cnpj);
     paraInserir.push(linha);
   }
 
@@ -181,19 +197,43 @@ export async function sincronizarFornecedores(opcoes: {
 
   try {
     const rows = parseCsv(opcoes.csv);
-    const { linhas, rejeitadas } = parseFornecedoresPlanilha(rows);
+    const { linhas: linhasBrutas, rejeitadas } = parseFornecedoresPlanilha(rows);
+    const linhas = deduplicarPorCnpj(linhasBrutas);
+    const duplicatasCnpjRemovidas = linhasBrutas.length - linhas.length;
 
     // Upsert em lotes de 500 linhas: uma única query com ~5.600 linhas (VALUES)
     // arrisca estourar o limite de parâmetros do driver; medido no M23 que o
     // gargalo real é rede/round-trip, não tamanho de lote — 500 é generoso.
+    //
+    // O log é atualizado A CADA LOTE, não só ao fim: cada `$executeRaw` de
+    // `upsertLote` já é persistido no banco assim que roda (sem transação
+    // envolvendo todos os lotes), então uma falha no meio do laço (ex.: erro
+    // de rede, ou o bug de colisão de CNPJ do M24) já deixa fornecedores
+    // gravados de verdade. Calcular o resultado só depois do laço inteiro
+    // terminar mentia sobre isso: em produção (2026-08-19), 3.500
+    // fornecedores foram criados com sucesso antes do 8º lote falhar, e o
+    // registro de `SincronizacaoFornecedores` ficou com todos os contadores
+    // em zero e o erro anexado — dado real no banco, log dizendo que nada
+    // aconteceu. Rastreabilidade (CLAUDE.md §1) exige o inverso: o log tem
+    // que refletir o que de fato foi persistido, mesmo numa execução que
+    // termina em erro no meio.
     const TAMANHO_LOTE = 500;
     let totalAfetadas = 0;
     for (let i = 0; i < linhas.length; i += TAMANHO_LOTE) {
       const lote = linhas.slice(i, i + TAMANHO_LOTE);
       const { afetadas } = await upsertLote(lote, opcoes.origem);
       totalAfetadas += afetadas;
+      await db.sincronizacaoFornecedores.update({
+        where: { id: sync.id },
+        data: { linhasLidas: rows.length, linhasAtualizadas: totalAfetadas },
+      });
     }
 
+    // Linhas removidas por deduplicarPorCnpj (linhaId de uma ocorrência mais
+    // antiga do mesmo CNPJ) não são "presentes" nesta leitura — só a última
+    // ocorrência sincronizou; sem isso o Fornecedor da ocorrência descartada
+    // ficaria com origemPlanilhaLinhaId de uma linha que "nunca mais aparece",
+    // e desativarAusentes o marcaria inativo por engano na próxima rodada.
     const linhaIdsPresentes = new Set(linhas.map((l) => l.linhaId));
     const linhasDesativadas = await desativarAusentes(linhaIdsPresentes);
 
@@ -220,11 +260,12 @@ export async function sincronizarFornecedores(opcoes: {
         linhasDesativadas: resultado.linhasDesativadas,
         linhasRejeitadas: resultado.linhasRejeitadas,
         detalhes:
-          rejeitadas.length > 0
+          rejeitadas.length > 0 || duplicatasCnpjRemovidas > 0
             ? ({
                 rejeitadas: rejeitadas
                   .slice(0, 100)
                   .map((r) => ({ linha: r.linha, motivo: r.motivo })),
+                duplicatasCnpjRemovidas,
               } satisfies Prisma.InputJsonObject)
             : undefined,
       },
