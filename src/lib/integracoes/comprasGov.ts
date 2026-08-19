@@ -54,6 +54,12 @@ const SCORE_MINIMO_CATALOGO = 0.15;
 // Resultados por página na consulta de preços.
 const PRECOS_POR_PAGINA = 100;
 
+// Teto ANTES de resolver URL por idCompra. Cada id custa um GET ao PNCP
+// (~0,7s; conc. 3). Sem este corte, 4 códigos CATSER × dezenas de compras
+// estouram os 12s do assistente e o provedor inteiro é descartado — o
+// analista só vê PNCP. 10 cabe no orçamento e no round-robin da tela.
+const MAX_CANDIDATOS_PAINEL = 10;
+
 // Mesma janela do PNCP (CLAUDE.md §9.65): a API devolve data-sentinela no lugar
 // de nulo. Preço sem data verdadeira de julgamento não entra na estimativa.
 const DATA_REFERENCIA_MINIMA = new Date("2000-01-01T00:00:00Z");
@@ -596,15 +602,18 @@ export async function buscarContratosComprasGov(termo: string): Promise<Candidat
       }
     }
 
-    const origens = await emParalelo(idsCompra, 3, (id) =>
+    const idsCortados = idsCompra.slice(0, MAX_CANDIDATOS_PAINEL);
+    const candidatosCortados = candidatos.slice(0, MAX_CANDIDATOS_PAINEL);
+
+    const origens = await emParalelo(idsCortados, 3, (id) =>
       id ? resolverOrigemHomologada(id) : Promise.resolve({ incluir: true, url: null }),
     );
     const homologados: CandidatoSimilaridade[] = [];
-    for (let i = 0; i < candidatos.length; i++) {
+    for (let i = 0; i < candidatosCortados.length; i++) {
       const origem = origens[i]!;
       if (!origem.incluir) continue;
-      if (origem.url) candidatos[i]!.fonteUrl = origem.url;
-      homologados.push(candidatos[i]!);
+      if (origem.url) candidatosCortados[i]!.fonteUrl = origem.url;
+      homologados.push(candidatosCortados[i]!);
     }
 
     return homologados;

@@ -943,3 +943,14 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     `valorTotalHomologado > 0` — CNPJ+ano+sequencial sozinhos montam o edital de uma
     contratação ainda sem julgamento. Sem registro no PNCP, `dataResultado` no Painel
     basta (há órgãos homologados no COMPRASNET e ausentes do PNCP).
+77. **Painel “funcionando” e sumindo dos cards são duas falhas diferentes.** Em 2026-08-19
+    uma busca nova no assistente veio só com PNCP (links certos) e os cards antigos do
+    Painel ficaram sem href. Medido: (a) `buscar_pncp` concatenava PNCP→Painel e fazia
+    `slice(0, 25)` — o PNCP sozinho já enche o teto, então o Painel nunca vira card;
+    (b) cada `idCompra` do Painel gerava um GET ao PNCP (~0,7s, conc. 3) **antes** de
+    devolver a lista; 4 códigos CATSER × dezenas de compras passam dos 12s do
+    assistente e o provedor inteiro é descartado (`comTimeout`). Filtrar homologado
+    (`dataResultado`) é barato; resolver URL de dezenas de ids não é. Cortar o Painel
+    a um teto pequeno **antes** do lookup e fatiar o 25 por fonte (round-robin).
+    Cards antigos continuam dependendo de `completarLinksOrigemCandidatos` — não
+    reescrevem sozinhos; uma busca nova é que prova o Painel.

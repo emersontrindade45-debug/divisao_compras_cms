@@ -6,6 +6,7 @@ import { MIN_FORNECEDORES_PESQUISA_DIRETA } from "@/lib/domain/in65Rules";
 import { CV_ANALISE_CRITICA } from "@/lib/domain/priceStats";
 import { filtrarPorValor } from "@/lib/integracoes/pncp";
 import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPublicos";
+import { fatiarCandidatosPorFonte } from "@/lib/similaridade/fatiarPorFonte";
 import {
   buscarWebPerplexity,
   perplexityConfigurada,
@@ -14,11 +15,7 @@ import {
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 import { filtrarResultadosWeb, resumirDescartes } from "./guardas";
 import type { ChamadaFerramenta, ExecutorFerramenta, ResultadoFerramenta } from "./laco";
-import {
-  MAX_SUGESTOES_POR_BUSCA,
-  paraSugestao,
-  type CandidatoSugerido,
-} from "./sugestoes";
+import { MAX_SUGESTOES_POR_BUSCA, paraSugestao, type CandidatoSugerido } from "./sugestoes";
 
 // Registry de ferramentas do assistente (M13).
 //
@@ -104,7 +101,8 @@ const buscarPncpSchema = z
     valorMaximo: z.number().positive().optional(),
   })
   .refine(
-    (v) => v.valorMinimo === undefined || v.valorMaximo === undefined || v.valorMinimo <= v.valorMaximo,
+    (v) =>
+      v.valorMinimo === undefined || v.valorMaximo === undefined || v.valorMinimo <= v.valorMaximo,
     { message: "valorMinimo não pode ser maior que valorMaximo.", path: ["valorMinimo"] },
   );
 
@@ -115,8 +113,7 @@ const buscarWebSchema = z.object({
 
 const rascunharSchema = z.object({
   tipo: z.enum(["aderencia_fonte", "metodologia_serie", "rota_fornecedores"], {
-    message:
-      "tipo deve ser um de: aderencia_fonte, metodologia_serie, rota_fornecedores.",
+    message: "tipo deve ser um de: aderencia_fonte, metodologia_serie, rota_fornecedores.",
   }),
   processoId: z.string().min(1).optional(),
 });
@@ -188,8 +185,14 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       }
     };
     listasSite = {
-      permitidos: sites.filter((s) => s.lista === "branca").map((s) => dominio(s.url)).filter((d): d is string => Boolean(d)),
-      bloqueados: sites.filter((s) => s.lista === "vermelha").map((s) => dominio(s.url)).filter((d): d is string => Boolean(d)),
+      permitidos: sites
+        .filter((s) => s.lista === "branca")
+        .map((s) => dominio(s.url))
+        .filter((d): d is string => Boolean(d)),
+      bloqueados: sites
+        .filter((s) => s.lista === "vermelha")
+        .map((s) => dominio(s.url))
+        .filter((d): d is string => Boolean(d)),
     };
     return listasSite;
   }
@@ -509,8 +512,10 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
 
     // O mesmo corte vale para o que o modelo lê e para o que vira cartão: se o
     // modelo enxergasse mais do que a tela mostra, ele citaria um candidato sem
-    // botão para aprovar.
-    const candidatos = encontrados.slice(0, MAX_SUGESTOES_POR_BUSCA);
+    // botão para aprovar. Round-robin por fonte: `slice(0, 25)` na concatenação
+    // (PNCP primeiro) engolia o Painel de Preços mesmo quando ele tinha
+    // respondido — o PNCP sozinho já enche o teto.
+    const candidatos = fatiarCandidatosPorFonte(encontrados, MAX_SUGESTOES_POR_BUSCA);
     const catalogados = catalogar(candidatos);
 
     return {
@@ -955,7 +960,8 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           if (!ctx.processoId) {
             return ok({
               disponivel: false,
-              mensagem: "ler_tr só funciona dentro de um processo. Abra o processo e use o assistente de lá.",
+              mensagem:
+                "ler_tr só funciona dentro de um processo. Abra o processo e use o assistente de lá.",
             });
           }
           return ok(await lerTR(ctx.processoId));
