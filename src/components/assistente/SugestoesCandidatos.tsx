@@ -276,7 +276,7 @@ export function SugestoesCandidatos({
               <span className="text-muted-foreground">
                 {formatarData(sugestao.dataReferencia)}
               </span>
-              {sugestao.fonteUrl && (
+              {sugestao.fonteUrl ? (
                 <a
                   href={sugestao.fonteUrl}
                   target="_blank"
@@ -286,6 +286,15 @@ export function SugestoesCandidatos({
                   Abrir no PNCP
                   <ExternalLink className="size-3" aria-hidden />
                 </a>
+              ) : (
+                // Painel de Preços/Compras.gov (CandidatoSimilaridade.tipoCandidato
+                // "painel_precos") não expõe link estável por compra — sem este
+                // aviso o cartão parecia igual ao de uma contratação do PNCP com
+                // link "sumido" (confuso: pareceria regressão em vez de fonte sem
+                // link por natureza). Conferência aqui é por órgão + data mesmo.
+                <span className="text-muted-foreground italic">
+                  Sem link direto — confira pelo órgão e data
+                </span>
               )}
               {identidadeDaContratacao(sugestao) && mensagemId && (
                 <button

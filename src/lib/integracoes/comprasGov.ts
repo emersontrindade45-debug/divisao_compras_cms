@@ -336,7 +336,7 @@ export async function buscarContratosComprasGov(
         vistos.add(chave);
 
         candidatos.push({
-          tipoCandidato: "contratacao_publica",
+          tipoCandidato: "painel_precos",
           fonteDescricao: preco.descricaoItem,
           fonteOrgaoOuId: preco.nomeOrgao || preco.nomeUasg,
           // Sem URL direta: Compras.gov.br não expõe link por idCompra de forma
