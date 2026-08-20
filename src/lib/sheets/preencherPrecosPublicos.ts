@@ -1,4 +1,5 @@
 import "server-only";
+import { letraColuna } from "./colunaA1";
 import { getSheetsClient } from "./googleAuth";
 
 const MAX_PRECOS_POR_ITEM = 5;
@@ -38,16 +39,23 @@ export interface PreenchimentoResultado {
 }
 
 function normalizar(texto: string): string {
-  return texto
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "");
+  return texto.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
 const ALGARISMOS_ROMANOS: [number, string][] = [
-  [1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"],
-  [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"],
+  [1000, "M"],
+  [900, "CM"],
+  [500, "D"],
+  [400, "CD"],
+  [100, "C"],
+  [90, "XC"],
+  [50, "L"],
+  [40, "XL"],
+  [10, "X"],
+  [9, "IX"],
+  [5, "V"],
+  [4, "IV"],
+  [1, "I"],
 ];
 
 function paraRomano(numero: number): string {
@@ -60,18 +68,6 @@ function paraRomano(numero: number): string {
     }
   }
   return saida;
-}
-
-/** 0-based → letra de coluna A1 (0 → A, 25 → Z, 26 → AA...). */
-function letraColuna(indice: number): string {
-  let n = indice + 1;
-  let letra = "";
-  while (n > 0) {
-    const resto = (n - 1) % 26;
-    letra = String.fromCharCode(65 + resto) + letra;
-    n = Math.floor((n - 1) / 26);
-  }
-  return letra;
 }
 
 // O PNCP devolve razão social em CAIXA ALTA ("CAMARA MUNICIPAL DE AMERICO
@@ -268,7 +264,10 @@ export async function preencherPrecosPublicos(
       const posicao = colunasPrecoPublico.indexOf(colIdx) + 1;
       const numeralExistente = REGEX_NUMERAL.exec(headerRow[colIdx] ?? "")?.[1];
       const numeral = numeralExistente ?? paraRomano(posicao);
-      cabecalhosParaAtualizar.set(colIdx, `Preço Público ${numeral} - ${abreviarOrgao(preco.orgao)}`);
+      cabecalhosParaAtualizar.set(
+        colIdx,
+        `Preço Público ${numeral} - ${abreviarOrgao(preco.orgao)}`,
+      );
     });
     linhasPreenchidas += 1;
   }

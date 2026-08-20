@@ -958,3 +958,15 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     explícito, `findMany`/`count` nem são chamados); a UI vazia é só o caminho feliz. Teste
     que prova a garantia: filtro ausente/em branco ⇒ query não foi invocada. Corolário: não
     carregar essa tabela no client para filtrar em memória.
+79. **Sincronização que trata a planilha como fonte de verdade apaga enriquecimento
+    posterior no banco se a planilha não for atualizada antes.** O M24 faz upsert
+    copiando cidade/UF/telefone/e-mail/tags/razão social da planilha — inclusive
+    célula vazia. O M26 preenche esses campos no `Fornecedor` a partir da Receita e
+    **não escreve de volta**. A próxima sync M24 devolve o vazio. Corolário: depois
+    de enriquecer o banco a partir de uma origem que o sistema também sincroniza no
+    sentido contrário, a escrita de volta (célula vazia só, mesma regra do
+    enriquecimento) tem de existir e ser rodada **antes** da próxima sync — senão o
+    trabalho some sem erro aparente, só com campos vazios de novo. O teste que
+    protege a regra de célula é o de mutação: planilha com Município preenchido +
+    banco com outra cidade ⇒ zero `atualizacoes` daquele campo; remover o
+    `celulaVazia` derruba o teste.

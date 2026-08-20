@@ -1,4 +1,8 @@
-import "server-only";
+// Sem `import "server-only"` deliberadamente (CLAUDE.md §9.62): o script
+// `scripts/escrever-fornecedores-planilha.ts` autentica a service account fora
+// do bundler do Next, onde `server-only` sempre lança. Não é alcançável a
+// partir de `components/` — só por `preencherPrecosPublicos` (que mantém o
+// marcador) e pelo script administrativo.
 import { google } from "googleapis";
 
 let authClient: InstanceType<typeof google.auth.JWT> | null = null;

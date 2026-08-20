@@ -1640,7 +1640,10 @@ de upsert/mesclagem/desativação exercitado contra Postgres real (não só mock
 futura — hoje só existe a rota administrativa, sem botão nem agendamento. (2) `linhasCriadas` sempre
 sai `0` no log — Postgres não distingue INSERT de UPDATE no total de `$executeRaw` de um
 `ON CONFLICT DO UPDATE`, e separar exigiria uma query extra só para o dado informativo; todo upsert
-conta como `linhasAtualizadas`.
+conta como `linhasAtualizadas`. (3) A sync **sobrescreve** cidade/UF/telefone/e-mail/tags/razão
+social com o valor da planilha, inclusive célula vazia — um M24 depois do M26 apaga o enriquecimento
+no banco. Escrita de volta banco → planilha: ver entrada "M24/M26 — Escrita de volta…" (2026-08-20);
+rodar o script **antes** da próxima sync.
 
 ### Incidente em produção na primeira execução real (2026-08-19) — dois bugs que só apareciam com o dado real
 
@@ -1970,6 +1973,41 @@ confirmada eficaz; usar `PROD_READ_URL`, não `DATABASE_URL`, ao rodar fora da V
 ```
 $env:DATABASE_URL="<valor de PROD_READ_URL do .env>"; node node_modules\tsx\dist\cli.mjs scripts\enriquecer-fornecedores-cnpj.ts --concorrencia=1
 ```
+
+**Risco até a escrita de volta (2026-08-20).** O M26 grava só no banco. A sync M24 trata a planilha
+como fonte de verdade e copia célula vazia para o banco — então a próxima sync apaga cidade/UF/
+telefone/tags/razão social enriquecidos. Ver a entrada seguinte.
+
+## M24/M26 — Escrita de volta do enriquecimento para a planilha Google (2026-08-20)
+
+Fecha o buraco em que o M26 enriquece `Fornecedor` e o M24, na sync seguinte, devolve o vazio da
+planilha para o mesmo campo. Casa pelo `#` (`Fornecedor.origemPlanilhaLinhaId`). Mesmas regras do
+M26, com destino invertido: preenche **célula vazia** de Município, UF, Telefone, E-mail e Tags;
+razão social é a única exceção (escreve quando diverge após `normalizarTexto`). Telefone: a
+planilha tem duas colunas e o banco uma — só preenche "Telefone" quando **as duas** estão vazias.
+Não escreve CNPJ (o M26 não inventa; a limpeza de 2026-08-19 já mascarou os válidos).
+
+**Entrega.** Planejador puro `src/lib/sheets/planejarEscritaFornecedoresPlanilha.ts` (sem I/O, TDD
+com mutação da regra "célula preenchida não muda"). I/O em
+`src/lib/sheets/escreverFornecedoresPlanilha.ts`: lê a aba via Sheets API (`values.get` A:Z, gid 0
+como o CSV do M24), `findMany` com `select` explícito só de quem tem `origemPlanilhaLinhaId`,
+`values.batchUpdate` em lotes de 400 com `USER_ENTERED` — o mesmo caminho da limpeza de 571
+células. Script `scripts/escrever-fornecedores-planilha.ts` (`--dry-run`, `--limite=N`).
+`letraColuna` extraído para `colunaA1.ts`. `import "server-only"` removido de `googleAuth.ts`
+(CLAUDE.md §9.62 — o script tsx não declara `react-server`); `preencherPrecosPublicos` mantém o
+marcador. Confirmado por `grep` que `googleAuth` não é importado por `components/`.
+
+Uso, no PC com a service account de Editor e `PROD_READ_URL` (não desta VM — aqui não há
+`.env`/chave):
+
+```
+npx tsx scripts/escrever-fornecedores-planilha.ts --dry-run
+npx tsx scripts/escrever-fornecedores-planilha.ts --dry-run --limite=20
+npx tsx scripts/escrever-fornecedores-planilha.ts
+```
+
+Rodar o dry-run **antes** de gravar e **antes** da próxima sync M24. A escrita ao vivo não foi
+executada neste ambiente (sem `GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY` nem `PROD_READ_URL`).
 
 ## M27 — Descoberta de candidatos a Fornecedor por CNPJ/SP (em andamento, iniciado 2026-08-19)
 
