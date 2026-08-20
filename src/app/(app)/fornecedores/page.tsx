@@ -1,7 +1,10 @@
+import Link from "next/link";
+import { Search } from "lucide-react";
 import { FornecedoresPageClient } from "@/components/fornecedores/FornecedoresPageClient";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { PageHeader } from "@/components/common/PageHeader";
+import { Button } from "@/components/ui/button";
 import type {
   FornecedorFixture,
   HistoricoCotacaoFixture,
@@ -108,6 +111,12 @@ export default async function FornecedoresPage() {
       <PageHeader
         title="Fornecedores"
         description="Cadastro vivo, score operacional e histórico de resposta por processo."
+        actions={
+          <Button size="sm" variant="outline" render={<Link href="/fornecedores/descobrir" />}>
+            <Search className="size-3.5" aria-hidden />
+            Descobrir candidatos
+          </Button>
+        }
       />
       <FornecedoresPageClient fornecedores={fornecedores} historico={historico} />
     </div>
