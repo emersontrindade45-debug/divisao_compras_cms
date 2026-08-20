@@ -2009,8 +2009,25 @@ o recorte já filtrado, como CSV.
    `UPDATE`: é calculada à parte (etapa 4) e uma reimportação não pode zerá-la. 15 testes
    (`importarCandidatosCnpj.test.ts`), incluindo mutação confirmada no ON CONFLICT (trocar por
    `DO NOTHING` derruba o teste de garantia).
-4. ⬜ Cálculo de `CategoriaSugeridaPorCnae` (reuso de `sugerirCategoriasParaObjeto` do M25, cache por
-   código CNAE em vez de por empresa) + aplicação de `categoriaSugerida` em `EmpresaCandidataFornecedor`.
+4. ✅ Cálculo de `CategoriaSugeridaPorCnae` (`categorizarCandidatosCnae.ts`, reuso de
+   `sugerirCategoriasParaObjeto` do M25) + aplicação de `categoriaSugerida` em
+   `EmpresaCandidataFornecedor`. Decisão de escopo: cache por CÓDIGO CNAE (~1.300 possíveis),
+   nunca por empresa — chamar a IA por uma das 8,66M linhas seria inviável em custo/tempo; o mesmo
+   CNAE se repete em milhares de candidatos, então basta classificar o código uma vez (upsert linha
+   a linha nesse cache é aceitável, volume pequeno) e propagar. A propagação (Parte B) é um único
+   `UPDATE ... FROM` (`$executeRaw`) juntando `categorias_sugeridas_por_cnae` a
+   `empresas_candidatas_fornecedor` — nunca um update por CNAE: a tabela de candidatos só tem
+   índice em `[estado, municipio]` e GIN em `categoriaSugerida`, nenhum em `cnaePrincipalCodigo`,
+   então N updates individuais seriam N seq-scans contra 8,66M linhas. Só preenche
+   `categoriaSugerida` que ainda está vazia (`= '{}'`) — idempotente, nunca sobrescreve
+   categorização já aplicada (mesma regra de "nunca sobrescrever" do M26). Script administrativo
+   `scripts/categorizar-candidatos-cnpj.ts`, mesmo padrão `--dry-run`/`--limite`/`--concorrencia` de
+   `enriquecer-fornecedores-cnpj.ts`. 9 testes (`categorizarCandidatosCnae.test.ts`), incluindo
+   mutação no WHERE do UPDATE...FROM (a cláusula `categoriaSugerida = '{}'` é o que garante
+   "nunca sobrescreve" — CLAUDE.md §9.35/§9.39) e varredura de superfície de escrita em dry-run
+   (§9.56). **Não rodado de verdade contra os 8,66M candidatos locais nesta entrega** — decisão
+   explícita para não gastar ~1.300 chamadas de IA sem autorização do usuário (CLAUDE.md §8); só
+   `--dry-run`/`--limite` pequeno, se necessário, para demonstrar.
 5. ✅ Geração real do CSV via DuckDB (dump de Estabelecimentos da Receita 2026-08, filtro SP + ativa,
    export com header nomeado) — `candidatos-sp.csv`, 8.657.329 linhas, 1,98GB. Header real bate
    nome-a-nome com `COLUNAS_OBRIGATORIAS`/`linhaCandidatoCnpjSchema` (sem surpresa de nomenclatura).
