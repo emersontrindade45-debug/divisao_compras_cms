@@ -2177,3 +2177,41 @@ amostrar (cada processo tem a sua, criada dinamicamente, `NEXT_PUBLIC_SHEETS_URL
 nesta máquina), mas a mudança só pode tornar leitura de valor em formato de milhar mais correta —
 não existe entrada que a correção passe a ler PIOR do que lia antes, porque o formato decimal real
 (`"997.36"`) continua explicitamente preservado pelo teste e pela regex.
+
+### Migration do M27 aplicada em produção + amostra de 500 candidatos (2026-08-20)
+
+Ao testar a tela `/fornecedores/descobrir` publicada, `municipio`+`categoria` devolveu
+`PrismaClientKnownRequestError P2021`: a tabela `empresas_candidatas_fornecedor` **não existia em
+produção** — a migration `20260819162330_m27_candidatos_cnpj_sp` nunca tinha sido aplicada lá
+(CLAUDE.md §9.19: código e migration sobem em tempos diferentes), mesmo o código já publicado desde
+a etapa 4/6. Confirmado via `PROD_READ_URL`: `_prisma_migrations` de produção parava em
+`20260818181842`. Aplicada via `POST /api/admin/migrate` — `pendentesAntes` continha só essa 1
+migration, aplicação retornou `ok: true`, e um `GET` posterior confirmou `pendentes: []`/`orfas: []`.
+Tabela existe e ficou vazia (0 linhas) — os 8,66M candidatos e a categorização por CNAE só existiam
+no Postgres local.
+
+Para validar a tela contra dado real de produção sem comprometer com a carga completa, exportados
+500 candidatos reais de São Paulo (já com CNPJ/razão social/CNAE reais do banco local) para um CSV
+temporário e importados em produção via `scripts/importar-candidatos-cnpj-sp.ts` (dry-run primeiro,
+confirmado 0 linhas gravadas; depois a rodagem real, 500/500 importadas, 0 rejeitadas — conferido
+direto no banco de produção via `PROD_READ_URL`, não só pelo log do script). `categoriaSugerida`
+ficou vazia nos 500 (import não categoriza; isso é tarefa separada da etapa 4, que não rodou contra
+produção nesta entrega — só localmente).
+
+**Nota operacional para a próxima sessão que rodar um script administrativo apontando para
+produção:** `dotenv@17` sobrescreve `process.env` por padrão (comportamento novo da major),
+então `DATABASE_URL="<prod>" node ...` não bastava — o `dotenv.config()` do script pisava na
+variável de shell com o valor do `.env` local. `DOTENV_CONFIG_PATH` também não ajuda: só é lido
+pelo pré-loader `dotenv/config`, não por `require("dotenv").config()` chamado explicitamente (é o
+que todo script deste projeto usa). O que funcionou: trocar `DATABASE_URL` no `.env` real
+temporariamente (com backup do arquivo original antes), rodar o comando, restaurar o `.env` a
+partir do backup imediatamente depois — e **confirmar a restauração** (`grep DATABASE_URL .env`)
+antes de seguir. Nenhum passo imprimiu a credencial em texto (script Node que lê e escreve o
+arquivo sem `console.log` do valor).
+
+**Pendências que ficam abertas para fechar depois, por decisão do usuário:**
+1. Carga completa dos 8,66M candidatos em produção (só a amostra de 500 foi importada).
+2. Categorização por CNAE rodar contra produção (só rodou local).
+3. Testar de verdade o botão "Adicionar" escrevendo na planilha real (`values.append`/
+   `values.batchUpdate`) — ainda não exercitado, mesma decisão já registrada nas entradas
+   anteriores desta seção.
