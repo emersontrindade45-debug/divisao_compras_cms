@@ -2019,6 +2019,14 @@ o recorte já filtrado, como CSV.
    `--tamanho-lote`) — feito. UI de busca/promoção de candidato a `Fornecedor` real ainda falta (a
    decidir: tela dedicada em `fornecedores/` ou extensão do fluxo de cadastro existente).
 
+**Import completo rodado contra Postgres local (2026-08-20).** `candidatos-sp.csv` inteiro
+(8.657.329 linhas) importado via `importar-candidatos-cnpj-sp.ts --tamanho-lote=2000`:
+**8.657.319 importadas, 10 rejeitadas** (0,0001% — resíduo esperado de linha malformada, não
+investigado por ser irrelevante no volume). Conferido no banco, não só pelo contador do script:
+`count()` bate exato, 100% com `estado = 'SP'`, nenhum `municipio` vazio. Base de candidatos está
+populada localmente — pronta para a etapa 4 (categorização por CNAE) e para desenhar a UI de
+busca/promoção (etapa 6) contra dado real em vez de fixture.
+
 **Risco fechado (2026-08-20):** a etapa 3 estava testada só contra fixture (CLAUDE.md §9.63/§9.69).
 Rodada contra a amostra real de 2.000 linhas (`candidatos-sp-amostra.csv`) em Postgres local:
 **2.000/2.000 importadas, 0 rejeitadas**. Conferido o dado gravado, não só o contador:
