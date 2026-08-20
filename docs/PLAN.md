@@ -2009,8 +2009,18 @@ o recorte já filtrado, como CSV.
    `UPDATE`: é calculada à parte (etapa 4) e uma reimportação não pode zerá-la. 15 testes
    (`importarCandidatosCnpj.test.ts`), incluindo mutação confirmada no ON CONFLICT (trocar por
    `DO NOTHING` derruba o teste de garantia).
-4. ⬜ Cálculo de `CategoriaSugeridaPorCnae` (reuso de `sugerirCategoriasParaObjeto` do M25, cache por
+4. ✅ Cálculo de `CategoriaSugeridaPorCnae` (reuso de `sugerirCategoriasParaObjeto` do M25, cache por
    código CNAE em vez de por empresa) + aplicação de `categoriaSugerida` em `EmpresaCandidataFornecedor`.
+   `categorizarCandidatosCnae.ts`: IA **uma vez por CNAE distinto** (`GROUP BY cnaePrincipalCodigo` +
+   `NOT EXISTS` no cache — nunca um `findMany` das milhões de empresas), concorrência limitada
+   (CLAUDE.md §9.11), persistência incremental do cache (write-once: CNAE já gravado não é
+   recalculado; corrida P2002 conta como já gravado, não como erro). Aplicação em massa com um
+   único `UPDATE ... FROM` copiando `categorias` só onde `cardinality(e."categoriaSugerida") = 0`
+   — nunca sobrescreve classificação existente; `array_length` não serve (array vazio devolve
+   NULL no Postgres). Sem `import "server-only"` (script `tsx`, CLAUDE.md §9.62). Script
+   `scripts/categorizar-candidatos-cnae.ts` (`--dry-run`, `--limite`, `--concorrencia`,
+   `--apenas-aplicar`). 12 testes, inclusive inspeção do SQL de "nunca sobrescreve" e ausência
+   de `server-only` no fonte.
 5. ✅ Geração real do CSV via DuckDB (dump de Estabelecimentos da Receita 2026-08, filtro SP + ativa,
    export com header nomeado) — `candidatos-sp.csv`, 8.657.329 linhas, 1,98GB. Header real bate
    nome-a-nome com `COLUNAS_OBRIGATORIAS`/`linhaCandidatoCnpjSchema` (sem surpresa de nomenclatura).
@@ -2024,8 +2034,9 @@ o recorte já filtrado, como CSV.
 **8.657.319 importadas, 10 rejeitadas** (0,0001% — resíduo esperado de linha malformada, não
 investigado por ser irrelevante no volume). Conferido no banco, não só pelo contador do script:
 `count()` bate exato, 100% com `estado = 'SP'`, nenhum `municipio` vazio. Base de candidatos está
-populada localmente — pronta para a etapa 4 (categorização por CNAE) e para desenhar a UI de
-busca/promoção (etapa 6) contra dado real em vez de fixture.
+populada localmente — etapa 4 (categorização por CNAE) implementada; a rodagem real contra as
+8,6M linhas (IA por CNAE distinto + UPDATE em massa) fica no banco local, via
+`scripts/categorizar-candidatos-cnae.ts`. UI de busca/promoção (etapa 6) ainda falta.
 
 **Risco fechado (2026-08-20):** a etapa 3 estava testada só contra fixture (CLAUDE.md §9.63/§9.69).
 Rodada contra a amostra real de 2.000 linhas (`candidatos-sp-amostra.csv`) em Postgres local:
