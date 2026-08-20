@@ -51,7 +51,7 @@ describe("categorizarCandidatosCnae", () => {
       join(process.cwd(), "src/lib/ingestao/categorizarCandidatosCnae.ts"),
       "utf8",
     );
-    expect(fonte).not.toMatch(/import\s+["']server-only["']/);
+    expect(fonte).not.toMatch(/^\s*import\s+["']server-only["']/m);
   });
 
   it("lista CNAEs distintos ainda fora do cache (GROUP BY + NOT EXISTS), nunca empresa a empresa", async () => {

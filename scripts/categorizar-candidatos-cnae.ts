@@ -40,7 +40,10 @@ async function main() {
   const argConcorrencia = args.find((a) => a.startsWith("--concorrencia="))?.split("=")[1];
   const concorrencia = argConcorrencia ? Number(argConcorrencia) : undefined;
 
-  if (argConcorrencia !== undefined && (!Number.isInteger(concorrencia) || (concorrencia ?? 0) <= 0)) {
+  if (
+    argConcorrencia !== undefined &&
+    (!Number.isInteger(concorrencia) || (concorrencia ?? 0) <= 0)
+  ) {
     console.error(`--concorrencia inválido: "${argConcorrencia}" (esperado inteiro > 0)`);
     process.exitCode = 1;
     return;

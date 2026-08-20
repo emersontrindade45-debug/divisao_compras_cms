@@ -943,3 +943,11 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     `valorTotalHomologado > 0` — CNPJ+ano+sequencial sozinhos montam o edital de uma
     contratação ainda sem julgamento. Sem registro no PNCP, `dataResultado` no Painel
     basta (há órgãos homologados no COMPRASNET e ausentes do PNCP).
+77. **Regex que inspeciona o fonte não pode casar o comentário que documenta a garantia.** Em
+    2026-08-20 o teste de "este módulo não importa `server-only`" usou
+    `/import\s+["']server-only["']/` no arquivo inteiro; o próprio docstring
+    (`// Sem import "server-only" deliberadamente`) derrubou o teste verde. A mutação que o
+    teste existe para pegar — uma linha `import "server-only";` no topo — só é distinguível
+    do comentário se a âncora for o início da linha (`/^\s*import\s+["']server-only["']/m`).
+    Vale para qualquer asserção sobre ausência no fonte: escrever o regex contra o formato
+    da declaração, não contra o texto que a explica.
