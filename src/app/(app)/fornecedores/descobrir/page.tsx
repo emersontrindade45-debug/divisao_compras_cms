@@ -53,11 +53,14 @@ export default async function DescobrirCandidatosCnpjPage({
   const busca = params.busca?.trim() ?? "";
   const cursor = params.cursor?.trim() || undefined;
 
-  // Mesmo padrão de `sugerirFornecedoresPorObjeto`: categorias distintas do
-  // cadastro real de Fornecedor ativo — não existe enum fixo de categoria no
-  // repo. `categoriaSugerida` (etapa 4 do M27) fica de fora desta lista: é
-  // calculada por CNAE e ainda cobre pouco da base real, então o filtro por
-  // ela é aceito como praticamente inerte no v1 (limitação conhecida).
+  // Só as OPÇÕES do dropdown vêm daqui — `Fornecedor.categoria`, mesmo padrão de
+  // `sugerirFornecedoresPorObjeto` (não existe enum fixo de categoria no repo). A busca em si
+  // (`buscarCandidatosCnpj`) já filtra por `categoriaSugerida` do próprio candidato, não por esta
+  // lista; usar `Fornecedor.categoria` aqui só evita listar categoria que a IA nunca atribuiria
+  // (mesmo filtro anti-alucinação do M25/M27 etapa 4 — ela só escolhe entre categorias já
+  // existentes no cadastro real). Filtrar por categoria só devolve resultado depois que a
+  // categorização por CNAE (etapa 4) tiver rodado contra o mesmo banco — em produção, ainda não
+  // rodou (2026-08-20): candidatos importados até agora estão com `categoriaSugerida` vazio.
   const fornecedoresAtivos = await db.fornecedor.findMany({
     where: { status: "ativo" },
     select: { categoria: true },
