@@ -20,4 +20,21 @@ describe("normalizarMunicipio", () => {
   it("preposições curtas (2 letras) ficam em minúscula no título-caso", () => {
     expect(normalizarMunicipio("RIO DE JANEIRO")).toBe("Rio de Janeiro");
   });
+
+  // Regressão: /fornecedores/descobrir buscando "São Paulo" (grafia natural, com acento) não
+  // achava nenhum dos candidatos importados, cujo `municipio` no banco é "Sao Paulo" (sem
+  // acento — veio do CSV da Receita via este mesmo normalizador). O fallback de título-caso
+  // preservava o acento da ENTRADA em vez de operar sobre o texto já normalizado
+  // (sem acento) — só não aparecia no teste acima porque a entrada de exemplo ("SAO PAULO")
+  // já não tinha acento nenhum para preservar.
+  it("remove acento também no fallback de título-caso (cidade fora da Baixada Santista)", () => {
+    expect(normalizarMunicipio("São Paulo")).toBe("Sao Paulo");
+    expect(normalizarMunicipio("SÃO PAULO")).toBe("Sao Paulo");
+    expect(normalizarMunicipio("Ribeirão Preto")).toBe("Ribeirao Preto");
+  });
+
+  it("é idempotente: normalizar duas vezes dá o mesmo resultado que normalizar uma", () => {
+    const uma = normalizarMunicipio("São Paulo");
+    expect(normalizarMunicipio(uma)).toBe(uma);
+  });
 });

@@ -33,6 +33,13 @@ function tituloCase(s: string): string {
  * camada Baixada Santista.
  */
 export function normalizarMunicipio(municipioBruto: string): string {
-  const canonica = CIDADES_CANONICAS.get(normalizarTexto(municipioBruto));
-  return canonica ?? tituloCase(municipioBruto);
+  const semAcento = normalizarTexto(municipioBruto);
+  const canonica = CIDADES_CANONICAS.get(semAcento);
+  // O fallback opera sobre o texto JÁ sem acento (semAcento), não sobre municipioBruto — senão
+  // duas entradas que representam a mesma cidade ("São Paulo" vindo de um formulário de busca
+  // digitado à mão vs. "SAO PAULO" vindo do CSV da Receita) normalizariam para strings
+  // diferentes ("São Paulo" vs. "Sao Paulo"), e uma busca por município nunca bateria com o
+  // dado gravado. Regressão real: /fornecedores/descobrir devolvia 0 resultados buscando
+  // "São Paulo" contra candidatos gravados como "Sao Paulo".
+  return canonica ?? tituloCase(semAcento);
 }
