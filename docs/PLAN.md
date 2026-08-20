@@ -2006,15 +2006,18 @@ o recorte já filtrado, como CSV.
    `DO NOTHING` derruba o teste de garantia).
 4. ⬜ Cálculo de `CategoriaSugeridaPorCnae` (reuso de `sugerirCategoriasParaObjeto` do M25, cache por
    código CNAE em vez de por empresa) + aplicação de `categoriaSugerida` em `EmpresaCandidataFornecedor`.
-5. ⬜ Geração real do CSV via DuckDB (dump de Estabelecimentos da Receita, filtro SP + ativa,
-   export com header nomeado) — **não feito ainda**; o dump não está na máquina desta sessão. Sem
-   isso, etapas 1–3 estão testadas só contra fixture, não contra o formato real de saída do DuckDB.
-6. ⬜ Script administrativo (`scripts/importar-candidatos-cnpj.ts`, mesmo padrão de
-   `scripts/enriquecer-fornecedores-cnpj.ts`) + UI de busca/promoção de candidato a `Fornecedor`
-   real (a decidir: tela dedicada em `fornecedores/` ou extensão do fluxo de cadastro existente).
+5. ✅ Geração real do CSV via DuckDB (dump de Estabelecimentos da Receita 2026-08, filtro SP + ativa,
+   export com header nomeado) — `candidatos-sp.csv`, 8.657.329 linhas, 1,98GB. Header real bate
+   nome-a-nome com `COLUNAS_OBRIGATORIAS`/`linhaCandidatoCnpjSchema` (sem surpresa de nomenclatura).
+6. 🟡 Script administrativo `scripts/importar-candidatos-cnpj-sp.ts` (mesmo padrão de
+   `scripts/enriquecer-fornecedores-cnpj.ts`: `--caminho`, `--competencia=AAAA-MM`, `--dry-run`,
+   `--tamanho-lote`) — feito. UI de busca/promoção de candidato a `Fornecedor` real ainda falta (a
+   decidir: tela dedicada em `fornecedores/` ou extensão do fluxo de cadastro existente).
 
-**Risco em aberto:** a etapa 3 valida o *shape* da linha (Zod) mas não foi exercitada contra uma
-amostra real do CSV gerado pelo DuckDB — CLAUDE.md §9.63/§9.69 (spike que confirma o formato
-assumido, não o real, é dívida bloqueante, não achado de rodapé). Antes de considerar o import
-"pronto" para rodar contra o dump de verdade, gerar uma amostra pequena real e confirmar nomes de
-coluna, formato de data e encoding.
+**Risco fechado (2026-08-20):** a etapa 3 estava testada só contra fixture (CLAUDE.md §9.63/§9.69).
+Rodada contra a amostra real de 2.000 linhas (`candidatos-sp-amostra.csv`) em Postgres local:
+**2.000/2.000 importadas, 0 rejeitadas**. Conferido o dado gravado, não só o contador:
+`municipio` normalizado ("SAO PAULO" → "Sao Paulo"), `estado` maiúsculo, `situacaoCadastralData`
+convertida em `Date` válida, `categoriaSugerida` vazio (esperado, etapa 4 ainda não roda). Formato
+real do DuckDB confirmado idêntico ao assumido pelo parser — nenhum ajuste necessário no código das
+etapas 1–3.
