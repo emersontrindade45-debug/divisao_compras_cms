@@ -2211,7 +2211,32 @@ arquivo sem `console.log` do valor).
 
 **Pendências que ficam abertas para fechar depois, por decisão do usuário:**
 1. Carga completa dos 8,66M candidatos em produção (só a amostra de 500 foi importada).
-2. Categorização por CNAE rodar contra produção (só rodou local).
+2. ✅ Categorização por CNAE rodada contra produção (2026-08-20) — ver abaixo.
 3. Testar de verdade o botão "Adicionar" escrevendo na planilha real (`values.append`/
    `values.batchUpdate`) — ainda não exercitado, mesma decisão já registrada nas entradas
    anteriores desta seção.
+
+### Bug de acento em `normalizarMunicipio` + categorização por CNAE em produção (2026-08-20)
+
+Testando a busca publicada, `/fornecedores/descobrir?municipio=São Paulo` devolvia 0 resultados
+mesmo com os 500 candidatos de SP já em produção. Causa: `normalizarMunicipio` tinha um fallback
+de título-caso que operava sobre a entrada BRUTA em vez do texto já sem acento — "São Paulo"
+(grafia natural, digitada no formulário) e "SAO PAULO" (vindo do CSV da Receita, sem acento)
+normalizavam para strings diferentes ("São Paulo" vs. "Sao Paulo", que é o valor real gravado no
+banco). Só não aparecia no teste existente porque o exemplo usado ("SAO PAULO") já não tinha
+acento nenhum para preservar — mesma classe de bug do CLAUDE.md §9.63 (fixture que não cobre a
+premissa real). Corrigido para o fallback operar sobre o texto já normalizado; sem efeito colateral
+no M26 (a fonte real ali, BrasilAPI, já devolve município sem acento). 2 testes novos, mutação
+confirmada.
+
+Em seguida, ao perguntar sobre o filtro de categoria: o código já filtrava `categoriaSugerida` do
+próprio candidato desde a implementação original (não era preciso mudar nada) — o comentário do
+arquivo é que estava desatualizado, dizendo "praticamente inerte" quando o filtro já funcionava
+plenamente; só faltava dado. Corrigido o comentário e rodada a categorização por CNAE contra
+produção: **55 CNAEs distintos** entre os 500 candidatos importados (dry-run primeiro, depois real),
+**100% com categoria pertinente** (bem acima dos 9% da rodagem local com 1.313 CNAEs — natural,
+porque a amostra de 500 foi extraída do banco local já filtrada por "com categoria não vazia").
+500/500 linhas atualizadas, 0 erros — conferido direto no banco de produção via `PROD_READ_URL`.
+Filtro por categoria em `/fornecedores/descobrir` já funciona de ponta a ponta em produção agora,
+para os 500 candidatos da amostra (a carga completa dos 8,66M/categorização completa segue
+pendente, item 1 acima).
