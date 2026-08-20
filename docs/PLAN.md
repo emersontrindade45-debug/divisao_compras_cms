@@ -2115,3 +2115,18 @@ sem ela, a próxima rodagem do sync M24 (que copia célula vazia da planilha par
 Cidade/UF/Telefone/E-mail/Tags que o M26 preencheu via BrasilAPI, porque a planilha nunca recebeu
 esse dado de volta. Não é urgente (M26 ainda tem ~107 fornecedores em falha temporária e não voltou
 a rodar), mas é uma perda de dado real na próxima sincronização se ninguém tratar antes dela.
+
+**Etapa 4 rodada de verdade contra a base local (2026-08-20).** Dry-run com `--limite=3` primeiro
+para confirmar a escala antes de gastar qualquer chamada de IA: **1.313 CNAEs distintos** entre os
+8,66M candidatos — bate com o teto estimado no desenho original (~1.300). Rodagem completa
+(`scripts/categorizar-candidatos-cnpj.ts --concorrencia=5`, sem `--dry-run`) contra o Postgres
+local: 1.313 CNAEs processados, 116 com categoria pertinente encontrada, 1.197 sem categoria
+(CNAEs cujo texto não bate com nenhuma categoria de `Fornecedor` — comportamento esperado do
+mesmo filtro anti-alucinação do M25, não erro), 0 erros. **1.021.688 linhas de
+`EmpresaCandidataFornecedor` atualizadas** — conferido direto no banco (`count()` com
+`cardinality("categoriaSugerida") > 0`), não só pelo contador do script: bate exato com o log.
+Cache `CategoriaSugeridaPorCnae` também conferido: 1.313 linhas, 116 com `categorias` não-vazio —
+mesmos números do dry-run e da rodagem real, sem divergência. O filtro de categoria em
+`/fornecedores/descobrir` (que hoje usa `Fornecedor.categoria` distinto, não `categoriaSugerida` —
+ver nota da etapa 6 acima) passa a ter dado real para uma migração futura, quando fizer sentido
+trocar a fonte do filtro.
