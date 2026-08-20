@@ -951,3 +951,10 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     do comentário se a âncora for o início da linha (`/^\s*import\s+["']server-only["']/m`).
     Vale para qualquer asserção sobre ausência no fonte: escrever o regex contra o formato
     da declaração, não contra o texto que a explica.
+78. **Busca em tabela de milhões de linhas recusa filtro vazio no servidor, não só na UI.**
+    `EmpresaCandidataFornecedor` (M27) tem 8+ milhões de linhas. Um `findMany` sem `where` +
+    `take` — mesmo disparado por um formulário "sem filtro" ou por uma action chamada direto —
+    faz sequential scan e pode tirar o Postgres do ar. A recusa mora na action (erro
+    explícito, `findMany`/`count` nem são chamados); a UI vazia é só o caminho feliz. Teste
+    que prova a garantia: filtro ausente/em branco ⇒ query não foi invocada. Corolário: não
+    carregar essa tabela no client para filtrar em memória.

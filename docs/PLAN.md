@@ -2024,10 +2024,16 @@ o recorte já filtrado, como CSV.
 5. ✅ Geração real do CSV via DuckDB (dump de Estabelecimentos da Receita 2026-08, filtro SP + ativa,
    export com header nomeado) — `candidatos-sp.csv`, 8.657.329 linhas, 1,98GB. Header real bate
    nome-a-nome com `COLUNAS_OBRIGATORIAS`/`linhaCandidatoCnpjSchema` (sem surpresa de nomenclatura).
-6. 🟡 Script administrativo `scripts/importar-candidatos-cnpj-sp.ts` (mesmo padrão de
+6. ✅ Script administrativo `scripts/importar-candidatos-cnpj-sp.ts` (mesmo padrão de
    `scripts/enriquecer-fornecedores-cnpj.ts`: `--caminho`, `--competencia=AAAA-MM`, `--dry-run`,
-   `--tamanho-lote`) — feito. UI de busca/promoção de candidato a `Fornecedor` real ainda falta (a
-   decidir: tela dedicada em `fornecedores/` ou extensão do fluxo de cadastro existente).
+   `--tamanho-lote`) — feito. UI de busca/promoção: rota dedicada `/fornecedores/candidatos`
+   (não um item novo na sidebar — o cadastro vivo ganha o botão "Buscar candidatos (CNPJ/SP)").
+   Filtros por município (normalizado, índice `[estado, municipio]`), categoria (GIN
+   `has`) ou CNPJ exato. **Busca sem filtro é recusada no servidor**, não só na UI: um
+   `findMany` sem `where`/`take` nesta tabela derruba o Postgres. Paginação server-side
+   (50/página). Promoção atômica `create` + P2002 (CLAUDE.md §9.14) — e-mail inválido da
+   Receita vira `""` (o M26 preenche depois); categoria vazia exige escolha no diálogo,
+   senão o fornecedor some da busca por camada. Sem busca por nome.
 
 **Import completo rodado contra Postgres local (2026-08-20).** `candidatos-sp.csv` inteiro
 (8.657.329 linhas) importado via `importar-candidatos-cnpj-sp.ts --tamanho-lote=2000`:
@@ -2036,7 +2042,7 @@ investigado por ser irrelevante no volume). Conferido no banco, não só pelo co
 `count()` bate exato, 100% com `estado = 'SP'`, nenhum `municipio` vazio. Base de candidatos está
 populada localmente — etapa 4 (categorização por CNAE) implementada; a rodagem real contra as
 8,6M linhas (IA por CNAE distinto + UPDATE em massa) fica no banco local, via
-`scripts/categorizar-candidatos-cnae.ts`. UI de busca/promoção (etapa 6) ainda falta.
+`scripts/categorizar-candidatos-cnae.ts`. UI de busca/promoção: `/fornecedores/candidatos`.
 
 **Risco fechado (2026-08-20):** a etapa 3 estava testada só contra fixture (CLAUDE.md §9.63/§9.69).
 Rodada contra a amostra real de 2.000 linhas (`candidatos-sp-amostra.csv`) em Postgres local:

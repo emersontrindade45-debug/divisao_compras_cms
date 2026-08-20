@@ -1,11 +1,10 @@
+import Link from "next/link";
 import { FornecedoresPageClient } from "@/components/fornecedores/FornecedoresPageClient";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { PageHeader } from "@/components/common/PageHeader";
-import type {
-  FornecedorFixture,
-  HistoricoCotacaoFixture,
-} from "@/lib/fixtures/fornecedores";
+import { Button } from "@/components/ui/button";
+import type { FornecedorFixture, HistoricoCotacaoFixture } from "@/lib/fixtures/fornecedores";
 
 const STATUS_RESPOSTA_MAP: Record<string, HistoricoCotacaoFixture["statusResposta"]> = {
   respondido: "respondido",
@@ -108,6 +107,11 @@ export default async function FornecedoresPage() {
       <PageHeader
         title="Fornecedores"
         description="Cadastro vivo, score operacional e histórico de resposta por processo."
+        actions={
+          <Button variant="outline" size="sm" render={<Link href="/fornecedores/candidatos" />}>
+            Buscar candidatos (CNPJ/SP)
+          </Button>
+        }
       />
       <FornecedoresPageClient fornecedores={fornecedores} historico={historico} />
     </div>
