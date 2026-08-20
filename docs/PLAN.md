@@ -2103,3 +2103,15 @@ abas (sem `sheetId: 0`) e foi confirmado por mutação (remover o fallback derru
 demais continuam verdes). `values.append` em si segue não exercitado contra a planilha real de
 produção — decisão explícita de não escrever lá sem autorização; a lacuna que restava (a
 localização da aba nunca ter sido testada contra a forma real da resposta da API) está fechada.
+
+**PR #31 (Cursor Agent) fechado por obsolescência (2026-08-20).** Uma sessão paralela no Cursor
+implementou as mesmas etapas 4 e 6 por outro caminho (`/fornecedores/candidatos`, promoção criando
+`Fornecedor` direto em vez de escrever na planilha) — build do último preview estava quebrado
+(`promoverCandidatoFornecedor` ausente do módulo). Fechado sem reabrir, já que o desenho mesclado
+em `main` (registro mestre = planilha) é o que ficou. O PR trazia uma peça que `main` ainda não
+tem e vale registrar como pendência futura, não perder junto com o fechamento: **escrita de volta
+do enriquecimento do M26 para a planilha** (`scripts/escrever-fornecedores-planilha.ts` no PR) —
+sem ela, a próxima rodagem do sync M24 (que copia célula vazia da planilha para o banco) apagaria
+Cidade/UF/Telefone/E-mail/Tags que o M26 preencheu via BrasilAPI, porque a planilha nunca recebeu
+esse dado de volta. Não é urgente (M26 ainda tem ~107 fornecedores em falha temporária e não voltou
+a rodar), mas é uma perda de dado real na próxima sincronização se ninguém tratar antes dela.
