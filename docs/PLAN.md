@@ -2069,13 +2069,18 @@ linha — a planilha continua sendo o registro mestre, e o parser dela já toler
 ausentes, comum nos candidatos da Receita (a maioria não tem e-mail nem "responsável", ambos
 obrigatórios no schema Zod de `criarFornecedor`, que por isso não foi usado aqui).
 
-Desvio da decisão original registrada no início desta etapa: o filtro de categoria da UI usa
-valores distintos de `Fornecedor.categoria` (`status = ativo`), o mesmo padrão runtime de
-`sugerirFornecedoresPorObjeto` — não `categoriaSugerida` de `EmpresaCandidataFornecedor`. Motivo:
-neste branch a etapa 4 (categorização por CNAE) ainda não está mesclada, então
-`categoriaSugerida` está vazia na quase totalidade dos candidatos reais; o filtro por ela seria
-tecnicamente funcional e praticamente inerte. O campo `categoriaSugerida` é exibido na tabela
-(badge por candidato) para quando a etapa 4 rodar contra a base real.
+Ajuste de escopo em relação ao desenho original: as **opções** do seletor de categoria na UI vêm
+de valores distintos de `Fornecedor.categoria` (`status = ativo`), o mesmo padrão runtime de
+`sugerirFornecedoresPorObjeto` — não de `categoriaSugerida` de `EmpresaCandidataFornecedor`. A
+query de busca em si já filtra por `categoriaSugerida: { has: categoria }` (índice GIN, conforme
+o desenho original), então isso não é um desvio da lógica de filtro, só da fonte das opções: listar
+valores distintos de `categoriaSugerida` exigiria varrer 8,66M linhas (sem agregação indexada para
+isso), enquanto `Fornecedor.categoria` já é uma lista pequena e barata de consultar. Motivo pelo
+qual o filtro segue praticamente inerte na prática: a etapa 4 (categorização por CNAE) está
+mesclada neste branch, mas o job real de categorização (chamadas de IA) ainda não rodou contra os
+8,66M candidatos — só em dry-run (ver etapa 4 acima) — então `categoriaSugerida` está vazia na
+quase totalidade dos candidatos reais até essa rodagem acontecer. O campo é exibido na tabela
+(badge por candidato) desde já, para quando a rodagem real acontecer.
 
 **Não verificado nesta entrega:** escrita real na planilha Google (`values.append`) — coberta só
 por teste automatizado com o client do Sheets mockado, por decisão explícita do escopo (não
