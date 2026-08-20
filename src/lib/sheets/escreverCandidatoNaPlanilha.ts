@@ -88,7 +88,22 @@ export interface ResultadoAdicionarCandidato {
   jaExistente: boolean;
 }
 
-async function localizarAbaGid0(
+/**
+ * Título da aba de dados, para montar o `range` do `append`.
+ *
+ * É a PRIMEIRA aba da planilha, não a de `sheetId === 0`: a planilha real de
+ * fornecedores ("01. FORNECEDORES_OFICIAL") não tem nenhuma aba com id 0 — os
+ * ids são 1106271462 (Fornecedores), 1709422097 (Cotações Ativas), 382288013,
+ * 1507387464 e 953776461. `sheetId` 0 só existe na primeira aba de planilhas
+ * criadas do zero e que nunca tiveram essa aba recriada; procurá-lo fazia o
+ * botão do M27 falhar em produção antes de escrever qualquer coisa.
+ *
+ * "Primeira aba" é consistente com o caminho de LEITURA logo acima: o gviz
+ * resolve `gid=0` como a primeira aba, e não como a aba de id 0 — medido em
+ * 2026-08-20, `gid=0` e `gid=1106271462` devolvem o mesmo CSV de 5.452 linhas.
+ * Os dois lados apontam para a mesma aba.
+ */
+async function localizarAbaDeDados(
   sheets: ReturnType<typeof getSheetsClient>,
   spreadsheetId: string,
 ): Promise<string> {
@@ -96,11 +111,11 @@ async function localizarAbaGid0(
     spreadsheetId,
     fields: "sheets.properties.title,sheets.properties.sheetId",
   });
-  const aba = (meta.data.sheets ?? []).find((s) => s.properties?.sheetId === 0)?.properties?.title;
+  const abas = meta.data.sheets ?? [];
+  const aba =
+    abas.find((s) => s.properties?.sheetId === 0)?.properties?.title ?? abas[0]?.properties?.title;
   if (!aba) {
-    throw new Error(
-      "Não foi possível localizar a aba de dados (gid=0) na planilha de fornecedores.",
-    );
+    throw new Error("Não foi possível localizar a aba de dados na planilha de fornecedores.");
   }
   return aba;
 }
@@ -148,7 +163,7 @@ export async function adicionarCandidatoNaPlanilha(
   });
 
   const sheets = getSheetsClient();
-  const aba = await localizarAbaGid0(sheets, spreadsheetId);
+  const aba = await localizarAbaDeDados(sheets, spreadsheetId);
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,

@@ -106,8 +106,7 @@ function csvComLinhas(linhasExtra: string[]): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.FORNECEDORES_SHEETS_URL =
-    "https://docs.google.com/spreadsheets/d/abc123/edit#gid=0";
+  process.env.FORNECEDORES_SHEETS_URL = "https://docs.google.com/spreadsheets/d/abc123/edit#gid=0";
   mocks.getMock.mockResolvedValue({
     data: { sheets: [{ properties: { title: "Fornecedores", sheetId: 0 } }] },
   });
@@ -149,6 +148,44 @@ describe("adicionarCandidatoNaPlanilha", () => {
     const resultado = await adicionarCandidatoNaPlanilha(CANDIDATO);
 
     expect(resultado).toEqual({ linhaId: "2", jaExistente: true });
+    expect(mocks.appendMock).not.toHaveBeenCalled();
+  });
+
+  // Regressão: a planilha REAL de fornecedores ("01. FORNECEDORES_OFICIAL") não tem
+  // nenhuma aba com sheetId=0 — as abas são Fornecedores (gid=1106271462), Cotações
+  // Ativas, Legenda de Tags, Histórico e Ranking. Medido contra a API real em
+  // 2026-08-20. O fixture antigo usava `sheetId: 0` e por isso passava sem testar a
+  // premissa (CLAUDE.md §9.63). A aba de dados é a PRIMEIRA da lista, não a de id 0
+  // — que é também o que o gviz devolve para `gid=0` na leitura (confirmado: gid=0 e
+  // gid=1106271462 retornam o mesmo CSV de 5.452 linhas).
+  it("escreve na primeira aba quando a planilha não tem nenhuma aba com sheetId=0", async () => {
+    mocks.getMock.mockResolvedValue({
+      data: {
+        sheets: [
+          { properties: { title: "Fornecedores", sheetId: 1106271462 } },
+          { properties: { title: "Cotações Ativas", sheetId: 1709422097 } },
+          { properties: { title: "Histórico", sheetId: 1507387464 } },
+        ],
+      },
+    });
+    mocks.fetchTextMock.mockResolvedValue(
+      csvComLinhas(["1,Empresa Existente,11.111.111/0001-11,Santos,SP,,,"]),
+    );
+
+    const resultado = await adicionarCandidatoNaPlanilha(CANDIDATO);
+
+    expect(resultado).toEqual({ linhaId: "2", jaExistente: false });
+    expect(mocks.appendMock).toHaveBeenCalledTimes(1);
+    expect(mocks.appendMock.mock.calls[0]![0].range).toBe("'Fornecedores'!A1");
+  });
+
+  it("lança erro quando a planilha não tem aba nenhuma", async () => {
+    mocks.getMock.mockResolvedValue({ data: { sheets: [] } });
+    mocks.fetchTextMock.mockResolvedValue(
+      csvComLinhas(["1,Empresa Existente,11.111.111/0001-11,Santos,SP,,,"]),
+    );
+
+    await expect(adicionarCandidatoNaPlanilha(CANDIDATO)).rejects.toThrow(/aba de dados/);
     expect(mocks.appendMock).not.toHaveBeenCalled();
   });
 

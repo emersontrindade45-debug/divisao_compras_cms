@@ -2082,8 +2082,24 @@ mesclada neste branch, mas o job real de categorização (chamadas de IA) ainda 
 quase totalidade dos candidatos reais até essa rodagem acontecer. O campo é exibido na tabela
 (badge por candidato) desde já, para quando a rodagem real acontecer.
 
-**Não verificado nesta entrega:** escrita real na planilha Google (`values.append`) — coberta só
-por teste automatizado com o client do Sheets mockado, por decisão explícita do escopo (não
-testar contra a planilha real de produção sem autorização). Acesso de Editor da Service Account
-(`GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY`) à planilha de fornecedores também não está confirmado —
-pré-requisito operacional para o botão funcionar em produção.
+**Verificação do pré-requisito operacional (2026-08-20).** Confirmado com a API real do Google
+(`spreadsheets.get` + `drive.files.get`, só leitura, sem escrever nada): a Service Account
+(`divisao-compras-sheets@...iam.gserviceaccount.com`) tem `canEdit: true` na planilha real
+("01. FORNECEDORES_OFICIAL", `1MM6cq_OGUwwpzgzUT1eyG03O65rm-2GHK8kn8km9WcI`) — o pré-requisito de
+acesso está satisfeito.
+
+**Bug de produção encontrado nessa verificação, corrigido antes do merge:** `localizarAbaGid0`
+procurava a aba com `sheetId === 0` para montar o `range` do `append`, mas a planilha real **não
+tem nenhuma aba com esse id** — as 5 abas reais são Fornecedores (sheetId 1106271462), Cotações
+Ativas, Legenda de Tags, Histórico e Ranking. O botão do M27 teria lançado
+"Não foi possível localizar a aba de dados (gid=0)..." na primeira tentativa real, nunca escrevendo
+nada. Só não apareceu antes porque o teste usava um fixture com `sheetId: 0`, que replicava a
+premissa em vez de testá-la (CLAUDE.md §9.63) — o mesmo modo de falha do parser do
+`modulo-contratacoes`. Corrigido: `localizarAbaDeDados` cai para a **primeira aba da lista** quando
+não há `sheetId === 0`, consistente com o caminho de leitura (`gid=0` no endpoint gviz já resolve
+para a primeira aba, não para a de id 0 — confirmado empiricamente: `gid=0` e
+`gid=1106271462` devolvem o mesmo CSV de 5.452 linhas). Teste de regressão reproduz a lista real de
+abas (sem `sheetId: 0`) e foi confirmado por mutação (remover o fallback derruba só esse teste, os
+demais continuam verdes). `values.append` em si segue não exercitado contra a planilha real de
+produção — decisão explícita de não escrever lá sem autorização; a lacuna que restava (a
+localização da aba nunca ter sido testada contra a forma real da resposta da API) está fechada.
