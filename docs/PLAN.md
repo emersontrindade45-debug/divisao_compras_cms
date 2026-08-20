@@ -2156,3 +2156,24 @@ variável localmente, o que apontaria para a planilha real de produção. A leit
 (`devolverEnriquecimentoParaPlanilha`) está coberta por teste; o `values.batchUpdate` real segue
 não exercitado, mesma situação já registrada para `escreverCandidatoNaPlanilha.ts` — decisão
 deliberada de não escrever na planilha de produção sem autorização explícita antes de rodar.
+
+### Correção do descompasso do §9.70 em `parseNumberBR` (2026-08-20)
+
+Fechada a pendência registrada em CLAUDE.md §9.70: `parseNumberBR` (`src/lib/sheets/parsePlanilha.ts`)
+tratava `"1.000"` (ponto sem vírgula) como decimal — `Number("1.000")` devolve `1`, então um valor
+de R$ 15.000 lido da planilha de pesquisa de preços entraria na série como R$ 15, sem nenhum sinal
+na tela. Corrigido replicando a regra já validada em `parseNumeroBR` (`src/components/processos/`,
+criado para o M20): ponto só é milhar quando o texto casa `/^-?\d{1,3}(\.\d{3})+$/` (grupos de
+exatamente 3 dígitos); qualquer outro ponto continua decimal — `"997.36"` (2 dígitos após o ponto)
+não casa e segue tratado como estava, evitando o erro oposto (truncar um decimal real). Teste de
+regressão cobre os dois lados (`"1.000"` → 1000, `"997.36"` → 997.36) e foi confirmado por mutação
+(remover o novo `else if` derruba só o teste novo, os 20 antigos continuam verdes). Suíte completa
+(1138 testes), typecheck e lint limpos depois da mudança — nenhum outro teste quebrou, o que
+confirma que a correção não teve efeito colateral em outro consumidor do parser (`parsePlanilha`
+usa `parseNumberBR` para limite inferior/mediana/limite superior/preços de cada item).
+
+Risco avaliado como unicamente favorável: não há uma planilha fixa de pesquisa de preços para
+amostrar (cada processo tem a sua, criada dinamicamente, `NEXT_PUBLIC_SHEETS_URL` não configurada
+nesta máquina), mas a mudança só pode tornar leitura de valor em formato de milhar mais correta —
+não existe entrada que a correção passe a ler PIOR do que lia antes, porque o formato decimal real
+(`"997.36"`) continua explicitamente preservado pelo teste e pela regex.

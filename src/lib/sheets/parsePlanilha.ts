@@ -55,8 +55,11 @@ export function parseNumberBR(raw: string | undefined | null): number {
   } else if (hasComma) {
     // "4606,15" → vírgula é decimal
     s = s.replace(",", ".");
+  } else if (hasDot && /^-?\d{1,3}(\.\d{3})+$/.test(s)) {
+    // "1.000" / "15.000" — grupos de 3 dígitos: milhar, não decimal (CLAUDE.md §9.70).
+    // "997.36" não casa (só 2 dígitos após o ponto) e segue tratado como decimal abaixo.
+    s = s.replace(/\./g, "");
   }
-  // se só tem ponto, assume que já é decimal padrão (ex.: "997.36")
   const n = Number(s);
   return Number.isFinite(n) ? n : NaN;
 }

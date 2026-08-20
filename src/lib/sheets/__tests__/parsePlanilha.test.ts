@@ -41,6 +41,16 @@ describe("parseNumberBR", () => {
     expect(parseNumberBR("997.36")).toBeCloseTo(997.36, 2);
     expect(parseNumberBR("1")).toBe(1);
   });
+  // Regressão CLAUDE.md §9.70: "1.000" (ponto sem vírgula) é milhar em pt-BR, não decimal.
+  // Number("1.000") ingenuamente devolveria 1 — R$ 15.000 entrando como R$ 15 na série de preços.
+  it("trata ponto sem vírgula como separador de milhar (grupos de 3 dígitos)", () => {
+    expect(parseNumberBR("1.000")).toBe(1000);
+    expect(parseNumberBR("15.000")).toBe(15000);
+    expect(parseNumberBR("1.200.000")).toBe(1200000);
+    // Mas "997.36" continua decimal — só 2 dígitos depois do ponto, não é grupo de milhar.
+    expect(parseNumberBR("997.36")).toBeCloseTo(997.36, 2);
+    expect(parseNumberBR("1.5")).toBeCloseTo(1.5, 2);
+  });
   it("retorna NaN para vazio/texto", () => {
     expect(Number.isNaN(parseNumberBR(""))).toBe(true);
     expect(Number.isNaN(parseNumberBR("LOTE 01"))).toBe(true);
