@@ -2130,3 +2130,29 @@ mesmos números do dry-run e da rodagem real, sem divergência. O filtro de cate
 `/fornecedores/descobrir` (que hoje usa `Fornecedor.categoria` distinto, não `categoriaSugerida` —
 ver nota da etapa 6 acima) passa a ter dado real para uma migração futura, quando fizer sentido
 trocar a fonte do filtro.
+
+**Escrita de volta M26 → planilha implementada (2026-08-20), pendência registrada acima ao
+fechar o PR #31.** `src/lib/sheets/escreverEnriquecimentoNaPlanilha.ts` (grava célula a célula via
+`values.batchUpdate`, mesmo padrão de `preencherPrecosPublicos.ts`) +
+`src/lib/ingestao/devolverEnriquecimentoParaPlanilha.ts` (busca todo `Fornecedor` ativo com
+`origemPlanilhaLinhaId` não nulo — sem depender de timestamp de "quem foi enriquecido
+recentemente", a operação é idempotente por si: célula já preenchida nunca é tocada de novo) +
+`scripts/devolver-enriquecimento-planilha.ts` (`--dry-run`/`--limite`, mesmo padrão dos scripts
+irmãos). Casa por `origemPlanilhaLinhaId` (coluna "#"), nunca por CNPJ — mesma chave do M24. Só
+escreve célula VAZIA (Cidade/UF/Telefone/E-mail/Tags); Telefone conta como vazio só quando AMBAS
+as colunas de telefone da planilha estão vazias; razão social é a única exceção e sobrescreve
+quando diverge (normalizado) — mesmas três regras do M26 em `enriquecerFornecedoresPorCnpj.ts`,
+replicadas deliberadamente para as duas pontas nunca divergirem sobre o que conta como "vazio" ou
+"diverge". Aba de dados localizada com o mesmo fallback (1ª aba quando não há `sheetId === 0`) do
+fix desta sessão em `escreverCandidatoNaPlanilha.ts` — evita reintroduzir o mesmo bug §9.63 aqui.
+
+14 testes novos (9 do módulo de escrita + 5 da ponte banco→planilha), mutação confirmada no teste
+de "nunca sobrescreve" (derrubar a checagem de célula vazia derruba só os 2 testes que dependem
+dela, os outros 7 continuam verdes). 1137 testes no total, typecheck/lint/build limpos.
+
+**Não verificado nesta entrega:** `FORNECEDORES_SHEETS_URL` só existe no ambiente da Vercel — não
+há como rodar `--dry-run` completo (leitura real da planilha) nesta máquina sem configurar essa
+variável localmente, o que apontaria para a planilha real de produção. A leitura do lado do banco
+(`devolverEnriquecimentoParaPlanilha`) está coberta por teste; o `values.batchUpdate` real segue
+não exercitado, mesma situação já registrada para `escreverCandidatoNaPlanilha.ts` — decisão
+deliberada de não escrever na planilha de produção sem autorização explícita antes de rodar.
