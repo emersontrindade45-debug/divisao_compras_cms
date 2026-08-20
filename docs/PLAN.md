@@ -2014,10 +2014,12 @@ o recorte já filtrado, como CSV.
 5. ✅ Geração real do CSV via DuckDB (dump de Estabelecimentos da Receita 2026-08, filtro SP + ativa,
    export com header nomeado) — `candidatos-sp.csv`, 8.657.329 linhas, 1,98GB. Header real bate
    nome-a-nome com `COLUNAS_OBRIGATORIAS`/`linhaCandidatoCnpjSchema` (sem surpresa de nomenclatura).
-6. 🟡 Script administrativo `scripts/importar-candidatos-cnpj-sp.ts` (mesmo padrão de
+6. ✅ Script administrativo `scripts/importar-candidatos-cnpj-sp.ts` (mesmo padrão de
    `scripts/enriquecer-fornecedores-cnpj.ts`: `--caminho`, `--competencia=AAAA-MM`, `--dry-run`,
-   `--tamanho-lote`) — feito. UI de busca/promoção de candidato a `Fornecedor` real ainda falta (a
-   decidir: tela dedicada em `fornecedores/` ou extensão do fluxo de cadastro existente).
+   `--tamanho-lote`). UI de busca/promoção de candidato a `Fornecedor` real: tela dedicada em
+   `/fornecedores/descobrir` (decisão tomada: não estender o cadastro manual — não existia wizard
+   de cadastro na UI para estender, e o domínio de busca de 8,66M linhas é bem diferente do de um
+   formulário manual).
 
 **Import completo rodado contra Postgres local (2026-08-20).** `candidatos-sp.csv` inteiro
 (8.657.329 linhas) importado via `importar-candidatos-cnpj-sp.ts --tamanho-lote=2000`:
@@ -2034,3 +2036,32 @@ Rodada contra a amostra real de 2.000 linhas (`candidatos-sp-amostra.csv`) em Po
 convertida em `Date` válida, `categoriaSugerida` vazio (esperado, etapa 4 ainda não roda). Formato
 real do DuckDB confirmado idêntico ao assumido pelo parser — nenhum ajuste necessário no código das
 etapas 1–3.
+
+**Etapa 6 — UI de busca/promoção (2026-08-20).** `/fornecedores/descobrir`: formulário GET simples
+(município obrigatório — sem ele a busca não roda, só índice em `[estado, municipio]`; CNAE por
+prefixo; categoria; razão social) + tabela paginada por cursor em `cnpj` (nunca offset, para não
+pagar OFFSET profundo numa tabela de 8,66M linhas). `buscarCandidatosCnpj`/`adicionarCandidatoAPlanilha`
+em `lib/actions/candidatosCnpj.ts`.
+
+Decisão de desenho confirmada: o botão **não cria `Fornecedor` diretamente** — escreve uma linha
+nova na planilha Google de fornecedores (M24), reaproveitando `encontrarCabecalho` +
+`parseFornecedoresPlanilha` (`lib/sheets/escreverCandidatoNaPlanilha.ts`) para respeitar a ordem
+real das colunas e para o dedupe por CNPJ. O sync manual existente
+(`/api/admin/sincronizar-fornecedores`) é quem de fato materializa o `Fornecedor` a partir dessa
+linha — a planilha continua sendo o registro mestre, e o parser dela já tolera CNPJ/e-mail
+ausentes, comum nos candidatos da Receita (a maioria não tem e-mail nem "responsável", ambos
+obrigatórios no schema Zod de `criarFornecedor`, que por isso não foi usado aqui).
+
+Desvio da decisão original registrada no início desta etapa: o filtro de categoria da UI usa
+valores distintos de `Fornecedor.categoria` (`status = ativo`), o mesmo padrão runtime de
+`sugerirFornecedoresPorObjeto` — não `categoriaSugerida` de `EmpresaCandidataFornecedor`. Motivo:
+neste branch a etapa 4 (categorização por CNAE) ainda não está mesclada, então
+`categoriaSugerida` está vazia na quase totalidade dos candidatos reais; o filtro por ela seria
+tecnicamente funcional e praticamente inerte. O campo `categoriaSugerida` é exibido na tabela
+(badge por candidato) para quando a etapa 4 rodar contra a base real.
+
+**Não verificado nesta entrega:** escrita real na planilha Google (`values.append`) — coberta só
+por teste automatizado com o client do Sheets mockado, por decisão explícita do escopo (não
+testar contra a planilha real de produção sem autorização). Acesso de Editor da Service Account
+(`GOOGLE_SHEETS_SERVICE_ACCOUNT_KEY`) à planilha de fornecedores também não está confirmado —
+pré-requisito operacional para o botão funcionar em produção.
