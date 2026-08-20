@@ -1958,12 +1958,17 @@ de 120 para 225 — reincidência do padrão já visto nas rodagens 1ª–3ª e 
 esperar aumenta o rate-limit/throttle da BrasilAPI em vez de reduzir o resíduo. 0 erros, 0 campo novo
 preenchido (esperado — universo enriquecível já estava praticamente esgotado desde a 7ª).
 
-**Falta:** ~225 fornecedores em falha temporária no momento — número inflado pela 8ª rodagem
-imediata; resíduo real provavelmente mais próximo dos ~120 da 7ª. **Esperar um intervalo (algumas
-horas) antes de rodar de novo** — mesma lição já registrada acima (6ª rodagem). Comando (concorrência
-1 confirmada eficaz; usar `PROD_READ_URL`, não `DATABASE_URL`, ao rodar fora da Vercel):
+**9ª rodagem (2026-08-20, ~13h de intervalo após a 8ª):** falha temporária **caiu** de 225 para
+**107** — abaixo até do resíduo da 7ª (120), confirma que o padrão é mesmo throttle sensível a
+intervalo, não resíduo estrutural. 2.254 processados, 0 erros, 1 Tag sugerida, 2.146 sem nada a
+fazer. Universo enriquecível está praticamente esgotado; resíduo residual (107) tende a oscilar por
+rate-limit e não indica CNPJ problemático.
+
+**Falta:** ~107 fornecedores em falha temporária no momento. **Esperar um intervalo (algumas horas)
+antes de rodar de novo** — mesma lição já registrada acima (6ª/8ª rodagem). Comando (concorrência 1
+confirmada eficaz; usar `PROD_READ_URL`, não `DATABASE_URL`, ao rodar fora da Vercel):
 ```
-$env:DATABASE_URL="<valor de PROD_READ_URL do .env>"; pnpm exec tsx scripts/enriquecer-fornecedores-cnpj.ts --concorrencia=1
+$env:DATABASE_URL="<valor de PROD_READ_URL do .env>"; node node_modules\tsx\dist\cli.mjs scripts\enriquecer-fornecedores-cnpj.ts --concorrencia=1
 ```
 
 ## M27 — Descoberta de candidatos a Fornecedor por CNPJ/SP (em andamento, iniciado 2026-08-19)
