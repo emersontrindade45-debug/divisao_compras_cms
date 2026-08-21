@@ -2368,5 +2368,23 @@ para eles — não é bug), e Tags preenchida corretamente na linha nova ("Manut
 Serviços gerais"). 1147 testes, typecheck/lint/build limpos, mutação confirmada nos 2 testes
 novos.
 
-**Ainda não confirmado pelo usuário na UI real após este segundo fix** — pedir para tentar
-"Adicionar" de novo.
+**Confirmado pelo usuário na UI real em produção: botão "Adicionar" funcionando.**
+
+### Fechamento desta sequência (2026-08-21)
+
+Enquanto o segundo deploy processava, o usuário perguntou se a amostra de 500 candidatos ainda
+persistia ou se já era a carga completa — confirmado direto no banco: **8.657.319 candidatos**,
+**645 municípios distintos** de SP (não só a capital: Campinas 232k, Guarulhos 206k, Ribeirão
+Preto 156k, etc.). A carga completa já estava em produção desde antes desta sessão.
+
+Efeito colateral notado pelo usuário: o dropdown de Município em `/fornecedores/descobrir` só
+listava "São Paulo", mesmo com a carga completa já no banco. Causa: cache em memória de
+`listarMunicipiosComCandidatos` (TTL 1h, decisão deliberada de sessão anterior) preso numa
+instância de função que carregou o cache antes da carga completa rodar. Resolvido pelo próprio
+redeploy do fix de Tags (nova instância = cache zerado) — não precisou de mudança de código.
+
+Estado final: botão "Adicionar" testado e confirmado funcionando pelo usuário em produção, com
+Tags preenchida corretamente. As 3 pendências textuais da lista original desta sessão (teste real
+de escrita, carga completa, categorização completa) estão todas resolvidas. Únicas pendências que
+seguem abertas: M26 (~107 fornecedores em falha temporária do BrasilAPI, adiado por decisão do
+usuário) — sem mudança nesta sessão.
