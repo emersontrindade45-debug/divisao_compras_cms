@@ -943,3 +943,16 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     `valorTotalHomologado > 0` — CNPJ+ano+sequencial sozinhos montam o edital de uma
     contratação ainda sem julgamento. Sem registro no PNCP, `dataResultado` no Painel
     basta (há órgãos homologados no COMPRASNET e ausentes do PNCP).
+77. **`@default(cuid())` no schema não garante CUID no dado real — só vale quando o Prisma Client
+    gera o id.** `EmpresaCandidataFornecedor.id` declara `@default(cuid())`, mas
+    `importarCandidatosCnpj.ts` grava por SQL bruto (`gen_random_uuid()`, exigido pelo
+    `INSERT ... ON CONFLICT` em lote — `createMany` não faz upsert em massa). O botão "Adicionar"
+    em `/fornecedores/descobrir` validava o id recebido com `z.string().cuid()` e rejeitava
+    **todo** clique, sempre, com "Identificador de candidato inválido" — confirmado nos 8,66M
+    registros de produção: 0 são CUID, 100% são UUID. O teste não pegou porque usava um CUID
+    fictício (`ckqut11d0000abcdefghijklm`) nunca confrontado com um id real — mesma classe do
+    §9.53/§9.63 (fixture que não reflete a premissa real). Regra: quando um model tem mais de um
+    caminho de escrita (Prisma Client normal + SQL bruto/script de importação), o formato do `id`
+    é uma propriedade do **caminho que grava em produção**, não do `@default` do schema — verificar
+    contra uma amostra real do banco antes de validar formato de id em Zod, e usar um id real
+    (não fabricado à mão) nos testes desse caminho.
