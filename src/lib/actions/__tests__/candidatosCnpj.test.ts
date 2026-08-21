@@ -180,7 +180,7 @@ describe("adicionarCandidatoAPlanilha", () => {
 });
 
 describe("listarMunicipiosComCandidatos", () => {
-  // O módulo mantém o resultado em cache (module-level `let`, TTL 1h) — sem `resetModules` +
+  // O módulo mantém o resultado em cache (module-level `let`, TTL 5min) — sem `resetModules` +
   // import dinâmico, a 1ª chamada de qualquer teste "vazaria" cache para os seguintes, mesmo
   // padrão já usado no projeto para estado de módulo (CLAUDE.md §9.34).
   async function importarModuloFresco() {

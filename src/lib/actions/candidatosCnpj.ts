@@ -203,11 +203,17 @@ interface CacheMunicipios {
 // funcionar tanto chamada de uma página (Server Component) quanto de um teste/script — e
 // `unstable_cache` exige o `IncrementalCache` do runtime do Next, ausente fora do fluxo de
 // requisição normal (`Invariant: incrementalCache missing`, confirmado tentando a abordagem e
-// vendo o teste falhar com esse erro exato). TTL de 1h é suficiente: import de candidato é
-// evento raro/manual (script administrativo), nunca em tempo real — cidade nova só aparece no
-// dropdown depois desse intervalo, o que é aceitável.
+// vendo o teste falhar com esse erro exato).
+//
+// TTL de 5min (era 1h até 2026-08-21): o TTL de 1h causou dor real, não só hipotética — depois
+// da carga completa dos 8,66M candidatos rodar em produção, o dropdown de Município continuou
+// mostrando só "São Paulo" (dado da amostra anterior de 500) por mais de 1h, porque instâncias de
+// função Fluid Compute continuam vivas e servindo requisições bem depois de um redeploy — um
+// `readyState: READY` novo não mata as instâncias antigas na hora. Import de candidato continua
+// sendo evento raro/manual, mas 5min é um atraso imperceptível pra esse caso e limita o estrago de
+// uma instância presa com cache velho a uma janela curta.
 let cacheMunicipios: CacheMunicipios | null = null;
-const TTL_CACHE_MUNICIPIOS_MS = 60 * 60 * 1000;
+const TTL_CACHE_MUNICIPIOS_MS = 5 * 60 * 1000;
 
 /**
  * Municípios de `ESTADO_IMPORTADO` que têm ao menos um candidato — alimenta o dropdown de
