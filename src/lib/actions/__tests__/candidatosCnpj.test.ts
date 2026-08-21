@@ -25,7 +25,9 @@ vi.mock("@/lib/sheets/escreverCandidatoNaPlanilha", () => ({
 import { adicionarCandidatoAPlanilha, buscarCandidatosCnpj } from "../candidatosCnpj";
 
 const USUARIO = { id: "user-1", role: "pesquisa", email: "u@e.com", name: "Usuário" };
-const CANDIDATO_ID = "ckqut11d0000abcdefghijklm";
+// UUID, não CUID: é o formato real gravado em produção (gen_random_uuid() no
+// SQL bruto de importarCandidatosCnpj.ts) — ver comentário em candidatosCnpj.ts.
+const CANDIDATO_ID = "e8d4f299-603f-4510-882c-890a39f41e22";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -165,6 +167,13 @@ describe("adicionarCandidatoAPlanilha", () => {
     expect(resultado.error).toBe("Candidato não encontrado");
     expect(mocks.adicionarCandidatoNaPlanilha).not.toHaveBeenCalled();
     expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
+  });
+
+  it("rejeita um id em formato CUID (formato real em produção é UUID)", async () => {
+    const resultado = await adicionarCandidatoAPlanilha("ckqut11d0000abcdefghijklm");
+
+    expect(resultado.error).toBe("Identificador de candidato inválido");
+    expect(mocks.db.empresaCandidataFornecedor.findUnique).not.toHaveBeenCalled();
   });
 });
 

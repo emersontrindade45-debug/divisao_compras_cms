@@ -2303,3 +2303,37 @@ funciona por si só, nem `DOTENV_CONFIG_PATH` (só vale para o pré-loader `dote
 `.env` real temporariamente (com backup do arquivo original), rodar, restaurar imediatamente e
 CONFIRMAR a restauração (`grep DATABASE_URL .env`) antes de seguir — nunca imprimir a credencial
 em texto (script Node que lê/escreve o arquivo sem `console.log` do valor).
+
+### Sessão de 2026-08-21 — bug real no botão "Adicionar" + pendências que já estavam resolvidas
+
+Retomando a lista de pendências da sessão anterior, duas já não eram mais pendência — o
+`docs/PLAN.md` estava desatualizado, não o produto: confirmado direto no banco de produção,
+`empresas_candidatas_fornecedor` já tinha **8.657.319 linhas** (100% SP, não os 500 da amostra) e
+**1.021.688 linhas com `categoriaSugerida`** preenchida (1.313 CNAEs distintos, não os 55 da
+amostra). A carga completa e a categorização completa aconteceram em algum momento entre o fim da
+sessão de 20/08 e agora, sem que a entrada correspondente do PLAN fosse atualizada.
+
+A pendência real era testar o botão "Adicionar" contra a planilha real — e ao testar isolando só
+a escrita (`adicionarCandidatoNaPlanilha` direto, pulando auth), funcionou perfeitamente 3x
+seguidas, com dedupe correto (linhas 5584/5585 criadas com candidatos reais de SP). Mas o usuário
+testou a UI de verdade e reproduziu o erro: **"Identificador de candidato inválido"**, sempre,
+100% dos cliques.
+
+Causa raiz: `candidatosCnpj.ts` validava `candidatoId` com `z.string().cuid()`, mas
+`EmpresaCandidataFornecedor.id` — apesar do schema declarar `@default(cuid())` — é gravado por
+SQL bruto em `importarCandidatosCnpj.ts` (`gen_random_uuid()`, necessário para o
+`INSERT ... ON CONFLICT` em lote; `createMany` não suporta upsert em massa). Confirmado nos
+8,66M registros reais: **0 são CUID, todos são UUID**. O `@default(cuid())` do Prisma só vale
+quando o Prisma Client gera o id — não é o caminho usado aqui. O bug existia desde que a etapa 6
+foi implementada; nenhum teste pegou porque o teste usava um CUID fictício
+(`ckqut11d0000abcdefghijklm`) que a validação real sempre aceitaria — mesma classe de bug do
+CLAUDE.md §9.53/§9.63 (fixture que não reflete a premissa real, teste passa pelo motivo errado).
+
+Corrigido: `candidatoIdSchema` agora é `z.string().uuid()`. Teste ajustado para usar um UUID real
+de produção, e teste novo cobrindo a rejeição explícita de um CUID (mutação confirmada: reverter
+para `.cuid()` derruba 4 testes). 1145 testes no total, typecheck/lint/build limpos.
+
+**Ainda não confirmado pelo usuário na UI real após o fix** — pedir para tentar "Adicionar" de
+novo e reportar. Pendências que seguem abertas, sem mudança: M26 (~107 fornecedores em falha
+temporária do BrasilAPI, adiado por decisão do usuário) e nenhuma outra da lista anterior — as
+outras três foram resolvidas ou já estavam resolvidas nesta sessão.

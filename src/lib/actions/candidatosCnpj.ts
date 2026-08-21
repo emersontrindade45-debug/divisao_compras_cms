@@ -113,7 +113,12 @@ export async function buscarCandidatosCnpj(
   };
 }
 
-const candidatoIdSchema = z.string().cuid();
+// UUID, não CUID: `EmpresaCandidataFornecedor.id` é gravado por SQL bruto
+// (`gen_random_uuid()` em `importarCandidatosCnpj.ts`, necessário para o
+// upsert em lote via `INSERT ... ON CONFLICT`), nunca pelo Prisma Client —
+// o `@default(cuid())` do schema só vale quando o Client gera o id, o que
+// não é o caso aqui. Confirmado nos 8,66M registros de produção: 0 CUID.
+const candidatoIdSchema = z.string().uuid();
 
 export interface AdicionarCandidatoResultado {
   linhaId: string;
