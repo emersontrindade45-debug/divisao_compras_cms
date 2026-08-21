@@ -2267,3 +2267,39 @@ inerente a qualquer cache em memória nesse ambiente, não é um bug desta imple
 4 testes novos (3 de comportamento + 1 confirmando que a 2ª chamada não bate no banco de novo,
 dentro do TTL — confirmado por mutação: desligar a checagem do cache derruba só esse teste).
 1144 testes no total, typecheck/lint/build limpos.
+
+### Sessão de 2026-08-20 encerrada — estado para retomar
+
+Tudo commitado e enviado, `main` = `origin/main`, deploy final (`f05d563`) confirmado `READY` em
+`divisao-compras-cms.vercel.app`. Sequência completa desta sessão, do primeiro ao último commit:
+push do M27 etapa 6 → fix da aba gid=0 → PR #31 fechado → categorização por CNAE local (1,02M
+linhas) → devolução M26→planilha implementada → fix `parseNumberBR` (§9.70) → migration do M27
+aplicada em produção (estava pendente desde 19/08) → amostra de 500 candidatos SP importada em
+produção → fix `normalizarMunicipio` (fallback preservava acento, buscar "São Paulo" não achava
+"Sao Paulo") → categorização por CNAE rodada contra os 500 de produção → dropdown de Município
+(era texto livre).
+
+**Testado e confirmado funcionando pelo usuário em produção:** busca por Município (dropdown) +
+Categoria (dropdown) juntos, na tela `/fornecedores/descobrir`.
+
+**Pendências para a próxima sessão (usuário disse que vai pedir melhorias amanhã — SEM lista
+ainda definida nesta sessão, perguntar o que ele quer antes de agir):**
+1. Testar de verdade o botão "Adicionar" escrevendo na planilha real (`values.append`/
+   `values.batchUpdate` de `escreverCandidatoNaPlanilha.ts`/`escreverEnriquecimentoNaPlanilha.ts`)
+   — ambos seguem só testados com mock, nunca exercitados contra a planilha real de produção.
+2. Carga completa dos 8,66M candidatos em produção — só a amostra de 500 (São Paulo) foi importada;
+   hoje o dropdown de Município em produção só lista essa cidade.
+3. Categorização por CNAE completa em produção — só rodou para os CNAEs dos 500 candidatos da
+   amostra (55 de ~1.313 possíveis).
+4. M26 — ainda ~107 fornecedores em falha temporária (BrasilAPI), aguardando intervalo antes de
+   nova rodagem (adiado por decisão do usuário nesta sessão, não é urgente).
+5. Script não rastreado `scripts/diagnostico-falhas-cnpj.ts` (resíduo do M26, nunca commitado) —
+   decidir se commita, descarta ou mantém local; não fazer nada com ele sem perguntar ao usuário.
+
+**Nota operacional a repetir se a próxima sessão precisar rodar algo contra produção fora da
+Vercel:** `dotenv@17` sobrescreve `process.env` por padrão — `DATABASE_URL="<prod>" node ...` não
+funciona por si só, nem `DOTENV_CONFIG_PATH` (só vale para o pré-loader `dotenv/config`, não para
+`require("dotenv").config()` que todo script daqui usa). O que funciona: trocar `DATABASE_URL` no
+`.env` real temporariamente (com backup do arquivo original), rodar, restaurar imediatamente e
+CONFIRMAR a restauração (`grep DATABASE_URL .env`) antes de seguir — nunca imprimir a credencial
+em texto (script Node que lê/escreve o arquivo sem `console.log` do valor).
