@@ -7,7 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SELECT_CLASS } from "@/components/common/selectClass";
 import { CandidatosCnpjTable } from "@/components/fornecedores/CandidatosCnpjTable";
-import { buscarCandidatosCnpj, type CandidatoCnpjResultado } from "@/lib/actions/candidatosCnpj";
+import {
+  buscarCandidatosCnpj,
+  listarMunicipiosComCandidatos,
+  type CandidatoCnpjResultado,
+} from "@/lib/actions/candidatosCnpj";
 
 interface DescobrirCandidatosSearchParams {
   municipio?: string;
@@ -69,6 +73,12 @@ export default async function DescobrirCandidatosCnpjPage({
     (a, b) => a.localeCompare(b, "pt-BR"),
   );
 
+  // Mesmo raciocínio do dropdown de Categoria: listar só município que já tem candidato evita
+  // o usuário digitar uma grafia (com/sem acento) que nunca bateria com o valor normalizado
+  // gravado no banco — foi exatamente esse tipo de erro (buscar "São Paulo" sem achar "Sao
+  // Paulo") que motivou trocar o campo de texto livre por este select.
+  const municipiosDisponiveis = await listarMunicipiosComCandidatos();
+
   let candidatos: CandidatoCnpjResultado[] = [];
   let proximoCursor: string | null = null;
   let erroBusca: string | null = null;
@@ -101,14 +111,20 @@ export default async function DescobrirCandidatosCnpjPage({
           <label htmlFor="municipio" className="text-xs font-medium text-muted-foreground">
             Município (obrigatório)
           </label>
-          <Input
+          <select
             id="municipio"
             name="municipio"
             defaultValue={municipio}
-            placeholder="ex.: Santos"
-            className="h-8 w-48"
+            className={`${SELECT_CLASS} w-48`}
             required
-          />
+          >
+            <option value="">Selecione...</option>
+            {municipiosDisponiveis.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="space-y-1">

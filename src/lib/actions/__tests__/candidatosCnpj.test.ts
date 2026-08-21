@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   db: {
-    empresaCandidataFornecedor: { findMany: vi.fn(), findUnique: vi.fn() },
+    empresaCandidataFornecedor: { findMany: vi.fn(), findUnique: vi.fn(), groupBy: vi.fn() },
     fornecedor: { findMany: vi.fn() },
   },
   requireAuth: vi.fn(),
@@ -165,5 +165,62 @@ describe("adicionarCandidatoAPlanilha", () => {
     expect(resultado.error).toBe("Candidato não encontrado");
     expect(mocks.adicionarCandidatoNaPlanilha).not.toHaveBeenCalled();
     expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
+  });
+});
+
+describe("listarMunicipiosComCandidatos", () => {
+  // O módulo mantém o resultado em cache (module-level `let`, TTL 1h) — sem `resetModules` +
+  // import dinâmico, a 1ª chamada de qualquer teste "vazaria" cache para os seguintes, mesmo
+  // padrão já usado no projeto para estado de módulo (CLAUDE.md §9.34).
+  async function importarModuloFresco() {
+    vi.resetModules();
+    return import("../candidatosCnpj");
+  }
+
+  it("agrupa por município, filtrando pelo estado importado (SP)", async () => {
+    mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([
+      { municipio: "Campinas" },
+      { municipio: "Santos" },
+      { municipio: "Sao Paulo" },
+    ]);
+
+    const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
+    const resultado = await listar();
+
+    expect(resultado).toEqual(["Campinas", "Santos", "Sao Paulo"]);
+    expect(mocks.db.empresaCandidataFornecedor.groupBy).toHaveBeenCalledWith({
+      by: ["municipio"],
+      where: { estado: "SP" },
+      orderBy: { municipio: "asc" },
+    });
+  });
+
+  it("exige autenticação antes de consultar o banco", async () => {
+    mocks.requireAuth.mockRejectedValue(new Error("não autenticado"));
+    mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([]);
+
+    const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
+
+    await expect(listar()).rejects.toThrow("não autenticado");
+    expect(mocks.db.empresaCandidataFornecedor.groupBy).not.toHaveBeenCalled();
+  });
+
+  it("devolve lista vazia quando não há nenhum candidato importado", async () => {
+    mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([]);
+
+    const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
+    const resultado = await listar();
+
+    expect(resultado).toEqual([]);
+  });
+
+  it("não consulta o banco de novo dentro do TTL (cache em memória)", async () => {
+    mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([{ municipio: "Santos" }]);
+
+    const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
+    await listar();
+    await listar();
+
+    expect(mocks.db.empresaCandidataFornecedor.groupBy).toHaveBeenCalledTimes(1);
   });
 });

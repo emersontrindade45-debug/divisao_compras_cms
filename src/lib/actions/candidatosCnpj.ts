@@ -186,3 +186,48 @@ export async function adicionarCandidatoAPlanilha(
 
   return { data: resultado };
 }
+
+interface CacheMunicipios {
+  valor: string[];
+  expiraEm: number;
+}
+
+// Cache em memória do processo (module-level), não `unstable_cache`: esta função precisa
+// funcionar tanto chamada de uma página (Server Component) quanto de um teste/script — e
+// `unstable_cache` exige o `IncrementalCache` do runtime do Next, ausente fora do fluxo de
+// requisição normal (`Invariant: incrementalCache missing`, confirmado tentando a abordagem e
+// vendo o teste falhar com esse erro exato). TTL de 1h é suficiente: import de candidato é
+// evento raro/manual (script administrativo), nunca em tempo real — cidade nova só aparece no
+// dropdown depois desse intervalo, o que é aceitável.
+let cacheMunicipios: CacheMunicipios | null = null;
+const TTL_CACHE_MUNICIPIOS_MS = 60 * 60 * 1000;
+
+/**
+ * Municípios de `ESTADO_IMPORTADO` que têm ao menos um candidato — alimenta o dropdown de
+ * Município em `/fornecedores/descobrir`, mesmo padrão do dropdown de Categoria (lista só o que
+ * existe, evita usuário digitar cidade sem candidato nenhum ou com erro de acento/grafia — que
+ * já causou um bug real, ver CLAUDE.md e docs/PLAN.md M27).
+ *
+ * `GROUP BY estado, municipio` em vez de `DISTINCT municipio`: nenhum índice cobre valor distinto
+ * de coluna (nem o `[estado, município]` existente — Postgres não faz "loose index scan"
+ * nativamente), então é sequential scan de qualquer forma. Medido contra os 8,66M candidatos
+ * locais: **~14s por chamada, fria ou não** — inaceitável rodar isso a cada carregamento de
+ * página sem cache.
+ */
+export async function listarMunicipiosComCandidatos(): Promise<string[]> {
+  await requireAuth();
+
+  if (cacheMunicipios && cacheMunicipios.expiraEm > Date.now()) {
+    return cacheMunicipios.valor;
+  }
+
+  const linhas = await db.empresaCandidataFornecedor.groupBy({
+    by: ["municipio"],
+    where: { estado: ESTADO_IMPORTADO },
+    orderBy: { municipio: "asc" },
+  });
+  const valor = linhas.map((l) => l.municipio);
+
+  cacheMunicipios = { valor, expiraEm: Date.now() + TTL_CACHE_MUNICIPIOS_MS };
+  return valor;
+}

@@ -2240,3 +2240,30 @@ porque a amostra de 500 foi extraída do banco local já filtrada por "com categ
 Filtro por categoria em `/fornecedores/descobrir` já funciona de ponta a ponta em produção agora,
 para os 500 candidatos da amostra (a carga completa dos 8,66M/categorização completa segue
 pendente, item 1 acima).
+
+### Município vira dropdown, igual Categoria (2026-08-20)
+
+Pedido do usuário: o campo de Município era texto livre — mesmo raiz do bug de acento corrigido
+acima, ele queria o mesmo tratamento de Categoria (dropdown com o que existe, não digitação
+livre). Nova `listarMunicipiosComCandidatos` (`GROUP BY estado, municipio`) alimenta o `<select>`.
+
+**Medido antes de escolher a estratégia (CLAUDE.md §9.69 — não presumir custo):** contra os 8,66M
+candidatos locais, `GROUP BY`/`DISTINCT municipio` levam **~14s por chamada, fria ou não** —
+nenhum índice existente (nem `[estado, município]`) cobre valor distinto de coluna, Postgres não
+faz "loose index scan" nativamente. Inaceitável rodar a cada carregamento de página.
+
+Tentativa 1: `unstable_cache` do Next — descartada. Falha com
+`Invariant: incrementalCache missing` fora do contexto de requisição real do Next (confirmado
+rodando a suíte: o teste da função cacheada quebrava com essa mensagem exata, mesmo chamando de
+dentro de uma Server Action). Como a mesma função precisa ser exercitável em teste/script, não só
+numa página, a dependência do `IncrementalCache` a torna frágil demais para este caso.
+
+Resolvido com cache em memória do processo (`let` module-level + TTL de 1h) — mesmo padrão de
+robustez usado em `db.ts` para o singleton do Prisma. Cidade nova só aparece no dropdown depois do
+TTL expirar (aceitável: import de candidato é evento raro/manual). Ressalva conhecida: em
+serverless, o cache é por instância de função, não compartilhado globalmente — mesma limitação
+inerente a qualquer cache em memória nesse ambiente, não é um bug desta implementação.
+
+4 testes novos (3 de comportamento + 1 confirmando que a 2ª chamada não bate no banco de novo,
+dentro do TTL — confirmado por mutação: desligar a checagem do cache derruba só esse teste).
+1144 testes no total, typecheck/lint/build limpos.
