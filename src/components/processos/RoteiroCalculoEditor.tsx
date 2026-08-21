@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, Eraser, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -185,6 +185,22 @@ export function RoteiroCalculoEditor({
   );
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  /**
+   * `startTransition` só rastreia como transição as atualizações disparadas
+   * SINCRONAMENTE dentro do callback — o que roda depois de um `await` (como
+   * `router.refresh()` e `onFechar()` em `handleSalvar`) fica fora da
+   * transição. Sem isso, `onFechar()` fechava o editor antes dos dados novos
+   * do servidor chegarem: reabrir rápido demais mostrava o roteiro salvo
+   * ANTERIOR, com a memória de cálculo "presa" no valor de antes.
+   */
+  const fecharAposRefresh = useRef(false);
+
+  useEffect(() => {
+    if (!pending && fecharAposRefresh.current) {
+      fecharAposRefresh.current = false;
+      onFechar();
+    }
+  }, [pending, onFechar]);
 
   const roteiro: RoteiroCalculo = {
     valorInicial: parseNumeroBR(valorInicial),
@@ -231,8 +247,10 @@ export function RoteiroCalculoEditor({
           ? "Roteiro salvo e valor atualizado na série de preços."
           : "Roteiro salvo. O valor será usado ao promover o candidato para Fonte.",
       );
-      router.refresh();
-      onFechar();
+      fecharAposRefresh.current = true;
+      startTransition(() => {
+        router.refresh();
+      });
     });
   }
 
@@ -244,8 +262,10 @@ export function RoteiroCalculoEditor({
         return;
       }
       toast.success("Roteiro removido. Vale de novo o valor publicado pela fonte.");
-      router.refresh();
-      onFechar();
+      fecharAposRefresh.current = true;
+      startTransition(() => {
+        router.refresh();
+      });
     });
   }
 
