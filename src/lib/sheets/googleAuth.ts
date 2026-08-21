@@ -45,6 +45,32 @@ export function getSheetsClient() {
   return google.sheets({ version: "v4", auth: getGoogleAuthClient() });
 }
 
+/**
+ * Lê uma aba inteira via API autenticada (`values.get`), devolvendo `string[][]`
+ * no mesmo formato de `parseCsv` — usar no lugar do endpoint público
+ * `gviz/tq?tqx=out:csv` quando o caller já tem (ou vai precisar de) um cliente
+ * autenticado: o `gviz` depende de cache do lado do Google que pode servir
+ * conteúdo obsoleto/corrompido por tempo indeterminado mesmo com a planilha
+ * pública e correta (medido em produção 2026-08-21 — API autenticada e `gviz`
+ * discordavam sobre o mesmo range, planilha confirmada correta pelo dono).
+ * Célula ausente vira `""`, nunca `undefined` — mesma garantia do parser CSV.
+ */
+export async function lerAbaAutenticado(
+  spreadsheetId: string,
+  abaTitulo: string,
+): Promise<string[][]> {
+  const sheets = getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `'${abaTitulo}'`,
+  });
+  const linhas = res.data.values ?? [];
+  const largura = linhas.reduce((max, linha) => Math.max(max, linha.length), 0);
+  return linhas.map((linha) =>
+    Array.from({ length: largura }, (_, i) => String(linha[i] ?? "")),
+  );
+}
+
 export function getDriveClient() {
   return google.drive({ version: "v3", auth: getGoogleAuthClient() });
 }

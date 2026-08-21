@@ -1,35 +1,46 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  fetchTextMock: vi.fn(),
+  valuesGetMock: vi.fn(),
   batchUpdateMock: vi.fn(),
   getMock: vi.fn(),
 }));
-
-vi.mock("../googleSheets", async () => {
-  const actual = await vi.importActual<typeof import("../googleSheets")>("../googleSheets");
-  return {
-    ...actual,
-    fetchText: mocks.fetchTextMock,
-  };
-});
 
 vi.mock("../googleAuth", () => ({
   getSheetsClient: () => ({
     spreadsheets: {
       get: mocks.getMock,
-      values: { batchUpdate: mocks.batchUpdateMock },
+      values: { batchUpdate: mocks.batchUpdateMock, get: mocks.valuesGetMock },
     },
   }),
+  // `lerAbaAutenticado` é testado direto (googleAuth.test.ts) — aqui só repassa
+  // o resultado de `values.get` no formato string[][], mesma lógica da função real.
+  lerAbaAutenticado: async () => {
+    const res = await mocks.valuesGetMock();
+    const linhas: string[][] = res.data.values ?? [];
+    const largura = linhas.reduce((max: number, l: string[]) => Math.max(max, l.length), 0);
+    return linhas.map((l) => Array.from({ length: largura }, (_, i) => String(l[i] ?? "")));
+  },
 }));
 
 import { escreverEnriquecimentoNaPlanilha } from "../escreverEnriquecimentoNaPlanilha";
 
-const CABECALHO_CSV =
-  "#,Nome/Razão Social,CPF/CNPJ,Telefone,Telefone 2,E-mail,Contato,Município,UF,Tags\n";
+const CABECALHO = [
+  "#",
+  "Nome/Razão Social",
+  "CPF/CNPJ",
+  "Telefone",
+  "Telefone 2",
+  "E-mail",
+  "Contato",
+  "Município",
+  "UF",
+  "Tags",
+];
 
-function csvComLinhas(linhasExtra: string[]): string {
-  return CABECALHO_CSV + linhasExtra.join("\n");
+/** Fixtures simples (sem vírgula/aspas dentro de campo) — split direto é suficiente aqui. */
+function linhasParaValuesGet(linhasCsv: string[]): string[][] {
+  return [CABECALHO, ...linhasCsv.map((l) => l.split(","))];
 }
 
 beforeEach(() => {
@@ -43,7 +54,9 @@ beforeEach(() => {
 
 describe("escreverEnriquecimentoNaPlanilha", () => {
   it("preenche só as colunas vazias (Município/UF/Telefone/E-mail/Tags)", async () => {
-    mocks.fetchTextMock.mockResolvedValue(csvComLinhas(["10,Empresa X,11.222.333/0001-81,,,,,,,"]));
+    mocks.valuesGetMock.mockResolvedValue({
+      data: { values: linhasParaValuesGet(["10,Empresa X,11.222.333/0001-81,,,,,,,"]) },
+    });
 
     const resultado = await escreverEnriquecimentoNaPlanilha([
       {
@@ -65,7 +78,7 @@ describe("escreverEnriquecimentoNaPlanilha", () => {
     expect(mocks.batchUpdateMock).toHaveBeenCalledTimes(1);
     const chamada = mocks.batchUpdateMock.mock.calls[0]![0];
     const ranges = chamada.requestBody.data.map((d: { range: string }) => d.range);
-    // Colunas do CABECALHO_CSV: #(A),Nome(B),CNPJ(C),Tel(D),Tel2(E),Email(F),Contato(G),Municipio(H),UF(I),Tags(J).
+    // Colunas do CABECALHO: #(A),Nome(B),CNPJ(C),Tel(D),Tel2(E),Email(F),Contato(G),Municipio(H),UF(I),Tags(J).
     // Linha de dados é a 2ª linha da planilha (cabeçalho ocupa a 1ª).
     expect(ranges).toEqual(
       expect.arrayContaining([
@@ -79,11 +92,13 @@ describe("escreverEnriquecimentoNaPlanilha", () => {
   });
 
   it("NUNCA sobrescreve célula já preenchida na planilha (Cidade/UF/Telefone/E-mail/Tags)", async () => {
-    mocks.fetchTextMock.mockResolvedValue(
-      csvComLinhas([
-        "10,Empresa X,11.222.333/0001-81,(13) 3333-4444,,ja@existe.com,,Santos Já Preenchido,SP,Tag Existente",
-      ]),
-    );
+    mocks.valuesGetMock.mockResolvedValue({
+      data: {
+        values: linhasParaValuesGet([
+          "10,Empresa X,11.222.333/0001-81,(13) 3333-4444,,ja@existe.com,,Santos Já Preenchido,SP,Tag Existente",
+        ]),
+      },
+    });
 
     const resultado = await escreverEnriquecimentoNaPlanilha([
       {
@@ -106,9 +121,9 @@ describe("escreverEnriquecimentoNaPlanilha", () => {
   });
 
   it("preenche Telefone só quando AMBAS as colunas de telefone estão vazias", async () => {
-    mocks.fetchTextMock.mockResolvedValue(
-      csvComLinhas(["10,Empresa X,11.222.333/0001-81,,(13) 3333-4444,,,,,"]),
-    );
+    mocks.valuesGetMock.mockResolvedValue({
+      data: { values: linhasParaValuesGet(["10,Empresa X,11.222.333/0001-81,,(13) 3333-4444,,,,,"]) },
+    });
 
     const resultado = await escreverEnriquecimentoNaPlanilha([
       {
@@ -127,9 +142,9 @@ describe("escreverEnriquecimentoNaPlanilha", () => {
   });
 
   it("razão social é a única exceção: sobrescreve quando diverge (mesma regra do M26)", async () => {
-    mocks.fetchTextMock.mockResolvedValue(
-      csvComLinhas(["10,Nome Antigo Divergente,11.222.333/0001-81,,,,,,,"]),
-    );
+    mocks.valuesGetMock.mockResolvedValue({
+      data: { values: linhasParaValuesGet(["10,Nome Antigo Divergente,11.222.333/0001-81,,,,,,,"]) },
+    });
 
     const resultado = await escreverEnriquecimentoNaPlanilha([
       {
@@ -151,9 +166,9 @@ describe("escreverEnriquecimentoNaPlanilha", () => {
   });
 
   it("não escreve nada quando razão social já bate (ignorando acento/caixa)", async () => {
-    mocks.fetchTextMock.mockResolvedValue(
-      csvComLinhas(["10,empresa   x,11.222.333/0001-81,,,,,,,"]),
-    );
+    mocks.valuesGetMock.mockResolvedValue({
+      data: { values: linhasParaValuesGet(["10,empresa   x,11.222.333/0001-81,,,,,,,"]) },
+    });
 
     const resultado = await escreverEnriquecimentoNaPlanilha([
       {
@@ -172,7 +187,9 @@ describe("escreverEnriquecimentoNaPlanilha", () => {
   });
 
   it("reporta linhaId não encontrado na planilha sem lançar exceção nem afetar as demais", async () => {
-    mocks.fetchTextMock.mockResolvedValue(csvComLinhas(["10,Empresa X,11.222.333/0001-81,,,,,,,"]));
+    mocks.valuesGetMock.mockResolvedValue({
+      data: { values: linhasParaValuesGet(["10,Empresa X,11.222.333/0001-81,,,,,,,"]) },
+    });
 
     const resultado = await escreverEnriquecimentoNaPlanilha([
       {
@@ -192,7 +209,7 @@ describe("escreverEnriquecimentoNaPlanilha", () => {
   });
 
   it("não chama batchUpdate quando não há nada para escrever em nenhuma linha", async () => {
-    mocks.fetchTextMock.mockResolvedValue(csvComLinhas([]));
+    mocks.valuesGetMock.mockResolvedValue({ data: { values: linhasParaValuesGet([]) } });
 
     const resultado = await escreverEnriquecimentoNaPlanilha([]);
 
@@ -205,7 +222,9 @@ describe("escreverEnriquecimentoNaPlanilha", () => {
   });
 
   it("modo dry-run calcula o resultado mas não chama batchUpdate", async () => {
-    mocks.fetchTextMock.mockResolvedValue(csvComLinhas(["10,Empresa X,11.222.333/0001-81,,,,,,,"]));
+    mocks.valuesGetMock.mockResolvedValue({
+      data: { values: linhasParaValuesGet(["10,Empresa X,11.222.333/0001-81,,,,,,,"]) },
+    });
 
     const resultado = await escreverEnriquecimentoNaPlanilha(
       [

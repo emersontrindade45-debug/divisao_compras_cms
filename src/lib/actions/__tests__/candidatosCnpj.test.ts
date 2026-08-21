@@ -122,6 +122,7 @@ describe("adicionarCandidatoAPlanilha", () => {
     estado: "SP",
     email: "contato@empresa.com",
     telefone: "13988887777",
+    categoriaSugerida: ["Móveis"],
   };
 
   it("registra auditoria só depois da escrita na planilha ter sucesso", async () => {
@@ -139,6 +140,7 @@ describe("adicionarCandidatoAPlanilha", () => {
       email: "contato@empresa.com",
       telefone: "13988887777",
       fonte: "M27 — Receita Federal",
+      categoria: ["Móveis"],
     });
     expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
       expect.objectContaining({

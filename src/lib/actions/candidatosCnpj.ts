@@ -151,6 +151,7 @@ export async function adicionarCandidatoAPlanilha(
       estado: true,
       email: true,
       telefone: true,
+      categoriaSugerida: true,
     },
   });
   if (!candidato) return { error: "Candidato não encontrado" };
@@ -165,6 +166,7 @@ export async function adicionarCandidatoAPlanilha(
       email: candidato.email ?? "",
       telefone: candidato.telefone ?? "",
       fonte: FONTE_CANDIDATOS_CNPJ,
+      categoria: candidato.categoriaSugerida,
     });
   } catch (erro) {
     return {

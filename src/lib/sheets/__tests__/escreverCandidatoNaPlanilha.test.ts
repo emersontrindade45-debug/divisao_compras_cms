@@ -4,26 +4,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // (que são içadas para o topo do arquivo, antes de qualquer `const` comum —
 // mesmo padrão de src/lib/actions/__tests__/promoverFonte.test.ts).
 const mocks = vi.hoisted(() => ({
-  fetchTextMock: vi.fn(),
+  valuesGetMock: vi.fn(),
   appendMock: vi.fn(),
   getMock: vi.fn(),
 }));
-
-vi.mock("../googleSheets", async () => {
-  const actual = await vi.importActual<typeof import("../googleSheets")>("../googleSheets");
-  return {
-    ...actual,
-    fetchText: mocks.fetchTextMock,
-  };
-});
 
 vi.mock("../googleAuth", () => ({
   getSheetsClient: () => ({
     spreadsheets: {
       get: mocks.getMock,
-      values: { append: mocks.appendMock },
+      values: { append: mocks.appendMock, get: mocks.valuesGetMock },
     },
   }),
+  // `lerAbaAutenticado` é testado direto (googleAuth.test.ts) — aqui só repassa
+  // o resultado de `values.get` no formato string[][], mesma lógica da função real.
+  lerAbaAutenticado: async () => {
+    const res = await mocks.valuesGetMock();
+    const linhas: string[][] = res.data.values ?? [];
+    const largura = linhas.reduce((max: number, l: string[]) => Math.max(max, l.length), 0);
+    return linhas.map((l) => Array.from({ length: largura }, (_, i) => String(l[i] ?? "")));
+  },
 }));
 
 import {
@@ -45,6 +45,7 @@ describe("montarLinhaPlanilha", () => {
       email: "contato@teste.com",
       telefone: "13999999999",
       fonte: "M27 — Receita Federal",
+      categoria: [],
     });
 
     expect(linha).toEqual([
@@ -68,9 +69,27 @@ describe("montarLinhaPlanilha", () => {
       email: "",
       telefone: "",
       fonte: "M27 — Receita Federal",
+      categoria: [],
     });
 
     expect(linha).toEqual(["Empresa X", "11.222.333/0001-81"]);
+  });
+
+  it("preenche a coluna de categoria (Tags) juntando o array com vírgula", () => {
+    const colunas = { razaoSocial: 0, categoria: 1 };
+    const linha = montarLinhaPlanilha(colunas, 2, {
+      linhaId: "1",
+      razaoSocial: "Empresa X",
+      cnpj: "11.222.333/0001-81",
+      cidade: "Santos",
+      estado: "SP",
+      email: "",
+      telefone: "",
+      fonte: "M27 — Receita Federal",
+      categoria: ["Móveis", "Papelaria"],
+    });
+
+    expect(linha).toEqual(["Empresa X", "Móveis, Papelaria"]);
   });
 });
 
@@ -96,12 +115,13 @@ const CANDIDATO = {
   email: "contato@empresanova.com",
   telefone: "13988887777",
   fonte: "M27 — Receita Federal",
+  categoria: ["Móveis"],
 };
 
-const CABECALHO_CSV = "#,Nome/Razão Social,CPF/CNPJ,Município,UF,E-mail,Telefone,Fonte\n";
+const CABECALHO = ["#", "Nome/Razão Social", "CPF/CNPJ", "Município", "UF", "E-mail", "Telefone", "Fonte"];
 
-function csvComLinhas(linhasExtra: string[]): string {
-  return CABECALHO_CSV + linhasExtra.join("\n");
+function linhasParaValuesGet(linhasExtra: string[][]): string[][] {
+  return [CABECALHO, ...linhasExtra];
 }
 
 beforeEach(() => {
@@ -115,9 +135,13 @@ beforeEach(() => {
 
 describe("adicionarCandidatoNaPlanilha", () => {
   it("adiciona o candidato como linha nova quando o CNPJ ainda não está na planilha", async () => {
-    mocks.fetchTextMock.mockResolvedValue(
-      csvComLinhas(["1,Empresa Existente,11.111.111/0001-11,Santos,SP,,,"]),
-    );
+    mocks.valuesGetMock.mockResolvedValue({
+      data: {
+        values: linhasParaValuesGet([
+          ["1", "Empresa Existente", "11.111.111/0001-11", "Santos", "SP", "", "", ""],
+        ]),
+      },
+    });
 
     const resultado = await adicionarCandidatoNaPlanilha(CANDIDATO);
 
@@ -138,12 +162,14 @@ describe("adicionarCandidatoNaPlanilha", () => {
   });
 
   it("não escreve de novo quando o CNPJ já está na planilha (dedupe)", async () => {
-    mocks.fetchTextMock.mockResolvedValue(
-      csvComLinhas([
-        "1,Empresa Existente,11.111.111/0001-11,Santos,SP,,,",
-        "2,Empresa Nova LTDA,11.222.333/0001-81,Santos,SP,,,",
-      ]),
-    );
+    mocks.valuesGetMock.mockResolvedValue({
+      data: {
+        values: linhasParaValuesGet([
+          ["1", "Empresa Existente", "11.111.111/0001-11", "Santos", "SP", "", "", ""],
+          ["2", "Empresa Nova LTDA", "11.222.333/0001-81", "Santos", "SP", "", "", ""],
+        ]),
+      },
+    });
 
     const resultado = await adicionarCandidatoNaPlanilha(CANDIDATO);
 
@@ -153,11 +179,9 @@ describe("adicionarCandidatoNaPlanilha", () => {
 
   // Regressão: a planilha REAL de fornecedores ("01. FORNECEDORES_OFICIAL") não tem
   // nenhuma aba com sheetId=0 — as abas são Fornecedores (gid=1106271462), Cotações
-  // Ativas, Legenda de Tags, Histórico e Ranking. Medido contra a API real em
-  // 2026-08-20. O fixture antigo usava `sheetId: 0` e por isso passava sem testar a
-  // premissa (CLAUDE.md §9.63). A aba de dados é a PRIMEIRA da lista, não a de id 0
-  // — que é também o que o gviz devolve para `gid=0` na leitura (confirmado: gid=0 e
-  // gid=1106271462 retornam o mesmo CSV de 5.452 linhas).
+  // Ativas, Legenda de Tags, Histórico e Ranking. O fixture antigo usava `sheetId: 0`
+  // e por isso passava sem testar a premissa (CLAUDE.md §9.63). A aba de dados é a
+  // PRIMEIRA da lista, não a de id 0.
   it("escreve na primeira aba quando a planilha não tem nenhuma aba com sheetId=0", async () => {
     mocks.getMock.mockResolvedValue({
       data: {
@@ -168,9 +192,13 @@ describe("adicionarCandidatoNaPlanilha", () => {
         ],
       },
     });
-    mocks.fetchTextMock.mockResolvedValue(
-      csvComLinhas(["1,Empresa Existente,11.111.111/0001-11,Santos,SP,,,"]),
-    );
+    mocks.valuesGetMock.mockResolvedValue({
+      data: {
+        values: linhasParaValuesGet([
+          ["1", "Empresa Existente", "11.111.111/0001-11", "Santos", "SP", "", "", ""],
+        ]),
+      },
+    });
 
     const resultado = await adicionarCandidatoNaPlanilha(CANDIDATO);
 
@@ -181,9 +209,6 @@ describe("adicionarCandidatoNaPlanilha", () => {
 
   it("lança erro quando a planilha não tem aba nenhuma", async () => {
     mocks.getMock.mockResolvedValue({ data: { sheets: [] } });
-    mocks.fetchTextMock.mockResolvedValue(
-      csvComLinhas(["1,Empresa Existente,11.111.111/0001-11,Santos,SP,,,"]),
-    );
 
     await expect(adicionarCandidatoNaPlanilha(CANDIDATO)).rejects.toThrow(/aba de dados/);
     expect(mocks.appendMock).not.toHaveBeenCalled();
@@ -195,6 +220,15 @@ describe("adicionarCandidatoNaPlanilha", () => {
     await expect(adicionarCandidatoNaPlanilha(CANDIDATO)).rejects.toThrow(
       /FORNECEDORES_SHEETS_URL/,
     );
+    expect(mocks.appendMock).not.toHaveBeenCalled();
+  });
+
+  it("lança erro quando o cabeçalho não tem coluna de CNPJ", async () => {
+    mocks.valuesGetMock.mockResolvedValue({
+      data: { values: [["Nome", "Cidade"], ["Empresa X", "Santos"]] },
+    });
+
+    await expect(adicionarCandidatoNaPlanilha(CANDIDATO)).rejects.toThrow(/cabeçalho/);
     expect(mocks.appendMock).not.toHaveBeenCalled();
   });
 });

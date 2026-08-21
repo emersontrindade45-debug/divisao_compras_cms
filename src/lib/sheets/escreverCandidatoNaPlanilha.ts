@@ -1,8 +1,7 @@
 import "server-only";
-import { fetchText, csvUrl, extrairSpreadsheetId } from "./googleSheets";
-import { parseCsv } from "./csv";
+import { extrairSpreadsheetId } from "./googleSheets";
 import { encontrarCabecalho, parseFornecedoresPlanilha } from "./fornecedoresPlanilha";
-import { getSheetsClient } from "./googleAuth";
+import { getSheetsClient, lerAbaAutenticado } from "./googleAuth";
 
 /**
  * Escreve um candidato a Fornecedor (`EmpresaCandidataFornecedor`, M27) como
@@ -25,6 +24,9 @@ export interface CandidatoParaPlanilha {
   email: string;
   telefone: string;
   fonte: string;
+  /** `EmpresaCandidataFornecedor.categoriaSugerida` — vira a coluna "Tags", mesmo formato
+   *  separado por vírgula que `parseFornecedoresPlanilha`/`FornecedorPlanilhaRow.categoria` lê. */
+  categoria: string[];
 }
 
 interface CamposLinhaPlanilha extends CandidatoParaPlanilha {
@@ -59,6 +61,7 @@ export function montarLinhaPlanilha(
   preencher("linhaId", campos.linhaId);
   preencher("razaoSocial", campos.razaoSocial);
   preencher("cnpj", campos.cnpj);
+  preencher("categoria", campos.categoria.join(", "));
   preencher("cidade", campos.cidade);
   preencher("estado", campos.estado);
   preencher("email", campos.email);
@@ -98,10 +101,8 @@ export interface ResultadoAdicionarCandidato {
  * criadas do zero e que nunca tiveram essa aba recriada; procurá-lo fazia o
  * botão do M27 falhar em produção antes de escrever qualquer coisa.
  *
- * "Primeira aba" é consistente com o caminho de LEITURA logo acima: o gviz
- * resolve `gid=0` como a primeira aba, e não como a aba de id 0 — medido em
- * 2026-08-20, `gid=0` e `gid=1106271462` devolvem o mesmo CSV de 5.452 linhas.
- * Os dois lados apontam para a mesma aba.
+ * "Primeira aba" é consistente com o caminho de LEITURA logo abaixo, que
+ * também usa este mesmo título via API autenticada.
  */
 async function localizarAbaDeDados(
   sheets: ReturnType<typeof getSheetsClient>,
@@ -121,11 +122,11 @@ async function localizarAbaDeDados(
 }
 
 /**
- * Lê a planilha pública de fornecedores (mesmo caminho de leitura do M24:
- * `FORNECEDORES_SHEETS_URL`, `gid=0`), calcula o próximo `linhaId` e checa se
- * o CNPJ do candidato já está lá (dedupe — sem precisar de campo de estado
- * novo em `EmpresaCandidataFornecedor`). Se não estiver, adiciona a linha ao
- * final via `values.append` (`INSERT_ROWS`).
+ * Lê a planilha de fornecedores via API autenticada (não o endpoint público
+ * `gviz` — ver `lerAbaAutenticado`), calcula o próximo `linhaId` e checa se o
+ * CNPJ do candidato já está lá (dedupe — sem precisar de campo de estado novo
+ * em `EmpresaCandidataFornecedor`). Se não estiver, adiciona a linha ao final
+ * via `values.append` (`INSERT_ROWS`).
  */
 export async function adicionarCandidatoNaPlanilha(
   candidato: CandidatoParaPlanilha,
@@ -140,8 +141,9 @@ export async function adicionarCandidatoNaPlanilha(
     throw new Error("FORNECEDORES_SHEETS_URL não é uma URL de planilha Google válida.");
   }
 
-  const csv = await fetchText(csvUrl(spreadsheetId, "0"));
-  const rows = parseCsv(csv);
+  const sheets = getSheetsClient();
+  const aba = await localizarAbaDeDados(sheets, spreadsheetId);
+  const rows = await lerAbaAutenticado(spreadsheetId, aba);
 
   const cabecalho = encontrarCabecalho(rows);
   if (!cabecalho) {
@@ -161,9 +163,6 @@ export async function adicionarCandidatoNaPlanilha(
     ...candidato,
     linhaId,
   });
-
-  const sheets = getSheetsClient();
-  const aba = await localizarAbaDeDados(sheets, spreadsheetId);
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,

@@ -1,9 +1,8 @@
 import "server-only";
-import { fetchText, csvUrl, extrairSpreadsheetId } from "./googleSheets";
-import { parseCsv } from "./csv";
+import { extrairSpreadsheetId } from "./googleSheets";
 import { encontrarCabecalho } from "./fornecedoresPlanilha";
 import { normalizarTexto } from "@/lib/domain/normalizarMunicipio";
-import { getSheetsClient } from "./googleAuth";
+import { getSheetsClient, lerAbaAutenticado } from "./googleAuth";
 
 /**
  * Escreve de volta na planilha Google de fornecedores (M24) os campos que o enriquecimento por
@@ -96,17 +95,15 @@ export async function escreverEnriquecimentoNaPlanilha(
     throw new Error("FORNECEDORES_SHEETS_URL não é uma URL de planilha Google válida.");
   }
 
-  const csv = await fetchText(csvUrl(spreadsheetId, "0"));
-  const rows = parseCsv(csv);
+  const sheets = getSheetsClient();
+  const abaTitulo = await localizarAbaDeDados(sheets, spreadsheetId);
+  const rows = await lerAbaAutenticado(spreadsheetId, abaTitulo);
 
   const cabecalho = encontrarCabecalho(rows);
   if (!cabecalho) {
     throw new Error("Não foi possível localizar o cabeçalho da planilha de fornecedores.");
   }
   const { indiceLinha, colunas } = cabecalho;
-
-  const sheets = getSheetsClient();
-  const abaTitulo = await localizarAbaDeDados(sheets, spreadsheetId);
 
   // linhaId (coluna "#") -> índice 0-based da linha na matriz `rows`.
   const indicePorLinhaId = new Map<string, number>();
