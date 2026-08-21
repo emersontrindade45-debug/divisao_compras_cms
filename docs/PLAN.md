@@ -2337,3 +2337,36 @@ para `.cuid()` derruba 4 testes). 1145 testes no total, typecheck/lint/build lim
 novo e reportar. Pendências que seguem abertas, sem mudança: M26 (~107 fornecedores em falha
 temporária do BrasilAPI, adiado por decisão do usuário) e nenhuma outra da lista anterior — as
 outras três foram resolvidas ou já estavam resolvidas nesta sessão.
+
+### Sequência: dois bugs a mais depois do fix de UUID/CUID (mesma sessão, 2026-08-21)
+
+Depois do deploy do fix de UUID/CUID, o usuário testou de novo na UI real e encontrou dois
+problemas novos — mostra que "compila e passa nos testes" não é o mesmo que "funciona de ponta a
+ponta", mesmo depois de um fix confirmado.
+
+**Bug 2 — leitura da planilha via `gviz` servindo conteúdo corrompido.** Clique em "Adicionar"
+passou a falhar com "Não foi possível localizar o cabeçalho da planilha de fornecedores". A
+planilha real estava correta (usuário confirmou com print: cabeçalho `#`/`Tags`/`Nome/Razão
+Social`/`CPF/CNPJ`/... na linha 1, como esperado) e a permissão de compartilhamento também
+("qualquer pessoa com o link" = Editor). A API autenticada (Service Account) lia os dados certos;
+o endpoint público `gviz/tq?tqx=out:csv` devolvia uma célula de texto concatenado sem estrutura
+tabular — cache do lado do Google, fora do nosso controle (ver CLAUDE.md §9.78). Corrigido
+trocando a leitura de `escreverCandidatoNaPlanilha.ts`/`escreverEnriquecimentoNaPlanilha.ts` para
+`sheets.spreadsheets.values.get` via o novo helper `lerAbaAutenticado` em `googleAuth.ts` — mesma
+sessão autenticada já usada para escrever, elimina a dependência do `gviz` nesse fluxo.
+
+**Bug 3 — coluna "Tags" nunca preenchida.** Usuário notou que o candidato adicionado não levava
+a categoria sugerida por CNAE para a planilha. `montarLinhaPlanilha` de fato nunca preenchia essa
+coluna — faltava desde a implementação original do M27 etapa 6, sem teste cobrindo (ver
+CLAUDE.md §9.79). Corrigido: `CandidatoParaPlanilha` ganhou o campo `categoria: string[]`,
+repassado pela Server Action a partir de `EmpresaCandidataFornecedor.categoriaSugerida`.
+
+Testado contra a planilha e o banco reais de produção, 3 candidatos adicionados com sucesso
+(linhas 5584, 5585, 5586) — confirmado célula a célula via `values.get`: telefone/e-mail corretos
+quando presentes na origem (ausentes em 2 dos 3 candidatos porque a Receita não tinha esse dado
+para eles — não é bug), e Tags preenchida corretamente na linha nova ("Manutenção predial,
+Serviços gerais"). 1147 testes, typecheck/lint/build limpos, mutação confirmada nos 2 testes
+novos.
+
+**Ainda não confirmado pelo usuário na UI real após este segundo fix** — pedir para tentar
+"Adicionar" de novo.

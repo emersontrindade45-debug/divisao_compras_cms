@@ -956,3 +956,23 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     é uma propriedade do **caminho que grava em produção**, não do `@default` do schema — verificar
     contra uma amostra real do banco antes de validar formato de id em Zod, e usar um id real
     (não fabricado à mão) nos testes desse caminho.
+78. **O endpoint público `gviz/tq?tqx=out:csv` do Google Sheets pode servir conteúdo
+    obsoleto/corrompido por tempo indeterminado, mesmo com a planilha pública e correta.** Em
+    2026-08-21, com a permissão de compartilhamento certa ("qualquer pessoa com o link" = Editor,
+    confirmado pelo dono) e a API autenticada (Service Account) lendo os dados corretos, o `gviz`
+    devolvia uma célula de texto concatenado sem cabeçalho reconhecível para a mesma aba — não era
+    filtro ativo, não era permissão, era cache do lado do Google fora do nosso controle. O botão
+    "Adicionar" (M27) falhava com "Não foi possível localizar o cabeçalho" enquanto a planilha
+    estava perfeita. Regra: para qualquer fluxo que já abre uma sessão autenticada do Sheets API
+    para ESCREVER (`values.append`/`batchUpdate`), ler pela mesma API (`values.get`) em vez do
+    endpoint público `gviz` — elimina essa classe de falha inteira, sem custo (a mesma credencial
+    já está em uso). Reservar o `gviz` só para o caso que genuinamente precisa dele: leitura sem
+    nenhuma credencial, de uma planilha arbitrária informada pelo usuário (fluxo de processos).
+79. **Campo de escrita ausente na função nunca aparece em erro nem em teste que só verifica
+    campos presentes.** `montarLinhaPlanilha` nunca preencheu a coluna "Tags" — candidato
+    promovido pelo M27 sempre chegava à planilha sem a categoria sugerida por CNAE, e nenhum teste
+    pegou porque nenhum comparava o array de saída contra um cabeçalho que incluísse a coluna
+    "categoria". Só apareceu porque o usuário comparou a planilha real com o que esperava ver.
+    Regra: ao escrever um objeto/linha a partir de campos nomeados, o teste de regressão precisa
+    cobrir **todo** campo da interface de entrada contra um cabeçalho que os contenha todos — não
+    só os campos que o autor lembrou de testar na hora.
