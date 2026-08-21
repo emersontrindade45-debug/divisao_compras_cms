@@ -151,6 +151,44 @@ describe("preencherPrecosPublicos", () => {
     expect(structuralBatchUpdateMock).not.toHaveBeenCalled();
   });
 
+  it("linhas diferentes com órgãos diferentes vão para colunas diferentes, sem o cabeçalho mentir sobre o valor de nenhuma delas", async () => {
+    // Regressão: cada linha, isoladamente, tinha as duas colunas "Preço
+    // Público" vazias, então o código antigo mandava as duas para a coluna I
+    // (primeira vazia DA LINHA) — o cabeçalho de I acabava rotulado com o
+    // órgão da última linha processada, mentindo sobre o valor da primeira.
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({
+      data: {
+        values: [
+          CABECALHO_COM_COLUNAS,
+          linha("Cadeira giratória"),
+          linha("Mesa redonda"),
+        ],
+      },
+    });
+
+    await preencherPrecosPublicos("sheet-id", [
+      { descricao: "Cadeira giratória", precos: [{ valor: 100, orgao: "ORGAO A" }] },
+      { descricao: "Mesa redonda", precos: [{ valor: 200, orgao: "ORGAO B" }] },
+    ]);
+
+    const { data } = valuesBatchUpdateMock.mock.calls[0]![0].requestBody;
+    // Órgão A fica em I (única linha que usa I), Órgão B vai para J — nunca
+    // as duas dividindo a mesma coluna com órgãos diferentes.
+    expect(data).toEqual([
+      { range: "'Modelo'!I2", values: [[100]] },
+      { range: "'Modelo'!J3", values: [[200]] },
+    ]);
+
+    const { requests } = structuralBatchUpdateMock.mock.calls[0]![0].requestBody;
+    const textoDaColuna = (colIdx: number) =>
+      requests.find((r: { updateCells: { range: { startColumnIndex: number } } }) =>
+        r.updateCells.range.startColumnIndex === colIdx,
+      )?.updateCells.rows[0].values[0].userEnteredValue.stringValue;
+    expect(textoDaColuna(8)).toBe("Preço Público I - Orgao A");
+    expect(textoDaColuna(9)).toBe("Preço Público II - Orgao B");
+  });
+
   it("não escreve nada e sinaliza quando a planilha não tem nenhuma coluna 'Preço Público'", async () => {
     mockGet([]);
     const cabecalhoSemColuna = linha("MATERIAL");

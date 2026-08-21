@@ -98,6 +98,12 @@ const PREFIXO_PRECO_PUBLICO = "preco publico";
 // para reaproveitar a numeração que já está na planilha em vez de recalcular.
 const REGEX_NUMERAL = /pre[çc]o\s+p[úu]blico\s*([ivxlcdm]+|\d+)?/i;
 
+/** Sufixo "- Órgão" já escrito no cabeçalho, se houver ("Preço Público I - Fulano" → "Fulano"). */
+function extrairSufixoOrgao(header: string): string | null {
+  const idx = header.indexOf(" - ");
+  return idx === -1 ? null : header.slice(idx + 3).trim();
+}
+
 /** Colunas cujo cabeçalho começa com "Preço Público", na ordem em que aparecem. */
 function localizarColunasPrecoPublico(headerRow: string[]): number[] {
   const indices: number[] = [];
@@ -204,10 +210,15 @@ async function descobrirTamanhoFonteBase(
  * — feito via `textFormatRuns`, que o `values.batchUpdate` (usado para os
  * valores) não suporta.
  *
- * Limitação conhecida: o rótulo do cabeçalho é por COLUNA, não por linha —
- * numa planilha com vários itens compartilhando as mesmas colunas de preço
- * público, o nome do órgão exibido reflete a última escrita, não
- * necessariamente o órgão usado em toda linha daquela coluna.
+ * O cabeçalho é por COLUNA, compartilhado por todas as linhas — então a
+ * escolha de coluna por item não pode ser "a primeira vazia": duas linhas
+ * com órgãos diferentes caindo na mesma coluna faria o rótulo (escrito por
+ * último) mentir sobre o valor de uma das duas. A escolha respeita a
+ * identidade já gravada no cabeçalho (`escolherColuna`): reaproveita coluna
+ * já rotulada com o MESMO órgão, senão usa uma ainda sem órgão, e só cai
+ * numa coluna de outro órgão como último recurso — quando o processo tem
+ * mais órgãos distintos do que colunas "Preço Público" disponíveis, que é
+ * um limite de capacidade da planilha, não um bug de rotulagem.
  */
 export async function preencherPrecosPublicos(
   spreadsheetId: string,
@@ -240,6 +251,46 @@ export async function preencherPrecosPublicos(
 
   const dataValores: { range: string; values: number[][] }[] = [];
   const cabecalhosParaAtualizar = new Map<number, string>(); // colIdx -> texto completo
+
+  // Órgão (normalizado) já reservado para cada coluna nesta execução. `null`
+  // = coluna livre para qualquer órgão. Uma coluna só entra "reservada" se
+  // já tiver algum VALOR escrito em alguma linha — o texto do cabeçalho
+  // sozinho não basta: planilha antiga pode ter rótulo "Preço Público II -
+  // Fulano" sem nenhuma célula preenchida (rótulo morto de uma limpeza
+  // manual), e tratar isso como reservado bloquearia a coluna para sempre
+  // sem nenhum dado real por trás do nome.
+  const colunaTemValor = new Map<number, boolean>();
+  colunasPrecoPublico.forEach((idx) => {
+    const temValor = valores.some(
+      (row, i) => i !== linhaCabecalho && (row[idx] ?? "").trim() !== "",
+    );
+    colunaTemValor.set(idx, temValor);
+  });
+  const colunaOrgaoAtual = new Map<number, string | null>();
+  colunasPrecoPublico.forEach((idx) => {
+    if (!colunaTemValor.get(idx)) {
+      colunaOrgaoAtual.set(idx, null);
+      return;
+    }
+    const sufixo = extrairSufixoOrgao(headerRow[idx] ?? "");
+    // Coluna com valor mas sem sufixo de órgão no cabeçalho: reservada, mas
+    // para um órgão desconhecido — nunca deve "casar" por engano com um
+    // órgão real, então usa uma chave que normalizar() jamais produz.
+    colunaOrgaoAtual.set(idx, sufixo ? normalizar(sufixo) : "\0ocupada-sem-orgao");
+  });
+
+  /** Escolhe, entre as colunas vazias desta linha e ainda não usadas nesta linha, a melhor candidata para `orgKey`. */
+  function escolherColuna(
+    candidatas: number[],
+    orgKey: string,
+  ): number | undefined {
+    return (
+      candidatas.find((idx) => colunaOrgaoAtual.get(idx) === orgKey) ??
+      candidatas.find((idx) => colunaOrgaoAtual.get(idx) === null) ??
+      candidatas[0]
+    );
+  }
+
   let linhasPreenchidas = 0;
 
   for (const item of itens) {
@@ -251,15 +302,26 @@ export async function preencherPrecosPublicos(
     }
 
     const linhaAtual = valores[linha - 1] ?? [];
-    const colunasVazias = colunasPrecoPublico.filter((idx) => !(linhaAtual[idx] ?? "").trim());
-    if (colunasVazias.length === 0) {
+    const colunasVaziasNestaLinha = colunasPrecoPublico.filter(
+      (idx) => !(linhaAtual[idx] ?? "").trim(),
+    );
+    if (colunasVaziasNestaLinha.length === 0) {
       itensSemColunaDisponivel.push({ descricao: item.descricao });
       continue;
     }
 
-    const precos = item.precos.slice(0, Math.min(MAX_PRECOS_POR_ITEM, colunasVazias.length));
-    precos.forEach((preco, i) => {
-      const colIdx = colunasVazias[i]!;
+    const usadasNestaLinha = new Set<number>();
+    let algumaEscrita = false;
+
+    for (const preco of item.precos.slice(0, MAX_PRECOS_POR_ITEM)) {
+      const candidatas = colunasVaziasNestaLinha.filter((idx) => !usadasNestaLinha.has(idx));
+      if (candidatas.length === 0) break;
+
+      const orgKey = normalizar(abreviarOrgao(preco.orgao));
+      const colIdx = escolherColuna(candidatas, orgKey)!;
+      usadasNestaLinha.add(colIdx);
+      colunaOrgaoAtual.set(colIdx, orgKey);
+
       dataValores.push({
         range: `'${aba}'!${letraColuna(colIdx)}${linha}`,
         values: [[preco.valor]],
@@ -269,8 +331,10 @@ export async function preencherPrecosPublicos(
       const numeralExistente = REGEX_NUMERAL.exec(headerRow[colIdx] ?? "")?.[1];
       const numeral = numeralExistente ?? paraRomano(posicao);
       cabecalhosParaAtualizar.set(colIdx, `Preço Público ${numeral} - ${abreviarOrgao(preco.orgao)}`);
-    });
-    linhasPreenchidas += 1;
+      algumaEscrita = true;
+    }
+    if (algumaEscrita) linhasPreenchidas += 1;
+    else itensSemColunaDisponivel.push({ descricao: item.descricao });
   }
 
   if (dataValores.length > 0) {
