@@ -23,6 +23,15 @@ vi.mock("@/lib/actions/sugerirCandidatosCotacao", () => ({
 vi.mock("@/lib/actions/candidatosCnpj", () => ({
   adicionarCandidatoAPlanilha: mocks.adicionarNaPlanilha,
 }));
+// A busca agora passa pelo PainelCnaes (aprovação dos CNAEs). Estes testes são sobre a SELEÇÃO
+// das empresas, então o painel é substituído por um botão que dispara a aprovação direto.
+vi.mock("../PainelCnaes", () => ({
+  PainelCnaes: ({ onAprovar }: { onAprovar: (c: string[]) => void }) => (
+    <button type="button" onClick={() => onAprovar(["8121400"])}>
+      Buscar empresas na base
+    </button>
+  ),
+}));
 
 import { SelecaoFornecedoresForm } from "../SelecaoFornecedoresForm";
 

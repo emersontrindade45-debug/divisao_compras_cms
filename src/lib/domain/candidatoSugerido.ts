@@ -22,6 +22,23 @@ export interface CandidatoSugerido {
   emailCompartilhado: boolean;
 }
 
+/** Um CNAE proposto pela IA, com o volume de empresas por trás — o dado que permite ao analista
+ *  julgar se aquele código faz sentido antes de gastar a busca. */
+export interface CnaeSugerido {
+  codigo: string;
+  descricao: string;
+  /** Empresas com e-mail em SP nesse CNAE. */
+  empresas: number;
+  /** Quantas delas na Baixada Santista. */
+  locais: number;
+  /** `false` quando o analista acrescentou o código à mão, em vez de a IA tê-lo proposto. */
+  daIa: boolean;
+}
+
+export interface ResultadoCnaesSugeridos {
+  cnaes: CnaeSugerido[];
+}
+
 export interface ResultadoSugestaoCandidatos {
   cnaesSugeridos: string[];
   candidatos: CandidatoSugerido[];

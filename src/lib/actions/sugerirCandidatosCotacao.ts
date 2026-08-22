@@ -3,9 +3,10 @@
 import { dbCandidatos } from "@/lib/dbCandidatos";
 import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
-import { sugerirCnaesParaObjeto, type ClasseCnae } from "@/lib/ia/sugerirCnaesParaObjeto";
+import { sugerirCnaesParaObjeto } from "@/lib/ia/sugerirCnaesParaObjeto";
 import { ordenarCandidatosCotacao } from "@/lib/domain/ordenarCandidatosCotacao";
 import { CAMADAS_GEOGRAFICAS } from "@/lib/domain/camadaGeografica";
+import { obterCatalogoCnaes, ESTADO_IMPORTADO } from "./catalogoCnaes";
 import { lerCnpjsJaConsultadosNoProcesso } from "@/lib/sheets/lerConsultasPorProcesso";
 import { mascararCnpj } from "@/lib/domain/cnpj";
 import {
@@ -14,48 +15,12 @@ import {
   type ResultadoSugestaoCandidatos,
 } from "@/lib/domain/candidatoSugerido";
 
-const ESTADO_IMPORTADO = "SP";
 
 const CIDADES_BAIXADA = new Set(
   CAMADAS_GEOGRAFICAS.find((c) => c.nome === "baixada_santista")?.cidades ?? [],
 );
 
-// Cache em memória do processo para o catálogo de CNAEs — mesmo padrão de
-// `listarMunicipiosComCandidatos` (candidatosCnpj.ts), e pelo mesmo motivo: o `groupBy` que o monta
-// não tem índice que o cubra e varre a tabela inteira (medido: 1,9s de Execution Time e 400 mil
-// páginas lidas, contra a base local). Da função em `iad1` até o VPS em Campinas esse custo é
-// bem maior, e ele se pagava a CADA clique no botão.
-//
-// TTL de 1h é seguro aqui porque o catálogo só muda quando a base de candidatos é reimportada —
-// evento raro e manual, ao contrário da lista de municípios (§9 do PLAN, TTL reduzido para 5min
-// depois de uma carga nova demorar a aparecer).
-interface CacheCatalogo {
-  classes: ClasseCnae[];
-  expiraEm: number;
-}
-let cacheCatalogo: CacheCatalogo | null = null;
-const TTL_CACHE_CATALOGO_MS = 60 * 60 * 1000;
 
-async function obterCatalogoCnaes(): Promise<ClasseCnae[]> {
-  if (cacheCatalogo && cacheCatalogo.expiraEm > Date.now()) return cacheCatalogo.classes;
-
-  const grupos = await dbCandidatos.empresaCandidataFornecedor.groupBy({
-    by: ["cnaePrincipalCodigo", "cnaePrincipalDescricao"],
-  });
-  const porClasse = new Map<string, ClasseCnae>();
-  for (const g of grupos) {
-    if (!porClasse.has(g.cnaePrincipalCodigo)) {
-      porClasse.set(g.cnaePrincipalCodigo, {
-        classe: g.cnaePrincipalCodigo,
-        descricao: g.cnaePrincipalDescricao,
-      });
-    }
-  }
-
-  const classes = [...porClasse.values()];
-  cacheCatalogo = { classes, expiraEm: Date.now() + TTL_CACHE_CATALOGO_MS };
-  return classes;
-}
 
 /**
  * Sugere empresas capazes de atender o objeto de um processo, buscando na base de candidatos
@@ -73,6 +38,12 @@ async function obterCatalogoCnaes(): Promise<ClasseCnae[]> {
 export async function sugerirCandidatosParaObjeto(
   objeto: string,
   numeroProcesso?: string,
+  /**
+   * CNAEs já aprovados pelo analista no painel. Quando presentes, a IA NÃO é chamada — a escolha
+   * revisada por uma pessoa tem precedência sobre a proposta automática, e rechamar a IA aqui
+   * poderia devolver um conjunto diferente do que foi aprovado na tela.
+   */
+  cnaesAprovados?: string[],
 ): Promise<ResultadoSugestaoCandidatos> {
   const user = await requireAuth();
 
@@ -84,12 +55,12 @@ export async function sugerirCandidatosParaObjeto(
   };
   if (!objeto.trim()) return vazio;
 
-  // Catálogo de subclasses realmente presentes na base — a IA só pode escolher entre estas, e usar
-  // a base como fonte (em vez de uma tabela oficial de CNAEs) garante que todo código sugerido tem
-  // pelo menos uma empresa por trás. Sem agrupar por classe de 5 dígitos: ver ClasseCnae.
-  const catalogo = await obterCatalogoCnaes();
-
-  const cnaesSugeridos = await sugerirCnaesParaObjeto(objeto, catalogo);
+  // Com CNAEs aprovados, nem o catálogo é montado: a chamada de IA e o `groupBy` que a alimenta
+  // são desnecessários quando a escolha já foi revisada na tela.
+  const cnaesSugeridos =
+    cnaesAprovados && cnaesAprovados.length > 0
+      ? cnaesAprovados
+      : await sugerirCnaesParaObjeto(objeto, await obterCatalogoCnaes());
   if (cnaesSugeridos.length === 0) return vazio;
 
   // Igualdade exata: a IA já escolhe a subclasse de 7 dígitos, que é o formato gravado na base.

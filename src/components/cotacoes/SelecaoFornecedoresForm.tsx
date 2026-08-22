@@ -21,6 +21,7 @@ import { sugerirFornecedoresPorObjeto } from "@/lib/actions/fornecedores";
 import { sugerirCandidatosParaObjeto } from "@/lib/actions/sugerirCandidatosCotacao";
 import { adicionarCandidatoAPlanilha } from "@/lib/actions/candidatosCnpj";
 import { aplicarSelecao } from "@/lib/domain/selecaoEmMassa";
+import { PainelCnaes } from "./PainelCnaes";
 import type { CandidatoSugerido } from "@/lib/domain/candidatoSugerido";
 import { cn } from "@/lib/utils";
 
@@ -141,7 +142,7 @@ export function SelecaoFornecedoresForm({
     }
   }
 
-  async function handleBuscarCandidatos() {
+  async function handleBuscarCandidatos(cnaesAprovados: string[]) {
     const processo = processos.find((p) => p.id === processoId);
     if (!processo) {
       toast.error("Selecione o processo primeiro — a busca usa o objeto dele.");
@@ -149,7 +150,11 @@ export function SelecaoFornecedoresForm({
     }
     setBuscandoCandidatos(true);
     try {
-      const r = await sugerirCandidatosParaObjeto(processo.objeto, processo.numero);
+      const r = await sugerirCandidatosParaObjeto(
+        processo.objeto,
+        processo.numero,
+        cnaesAprovados,
+      );
       setCandidatos(r.candidatos);
       setTotalCandidatos(r.totalEncontrado);
       setLocaisCandidatos(r.locais);
@@ -327,17 +332,6 @@ export function SelecaoFornecedoresForm({
               <Sparkles className="size-3.5" />
               {sugerindo ? "Sugerindo…" : "Sugerir por IA"}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={handleBuscarCandidatos}
-              disabled={buscandoCandidatos || !processoId}
-            >
-              <Search className="size-3.5" />
-              {buscandoCandidatos ? "Buscando…" : "Buscar empresas na base"}
-            </Button>
             <Badge variant="secondary" className="tabular-nums">
               {selecionados.size} selecionados
             </Badge>
@@ -426,6 +420,14 @@ export function SelecaoFornecedoresForm({
         </CardContent>
       </Card>
 
+
+      {processoId && (
+        <PainelCnaes
+          objeto={processos.find((p) => p.id === processoId)?.objeto ?? ""}
+          onAprovar={handleBuscarCandidatos}
+          buscando={buscandoCandidatos}
+        />
+      )}
 
       {candidatos !== null && candidatos.length > 0 && (
         <Card>
