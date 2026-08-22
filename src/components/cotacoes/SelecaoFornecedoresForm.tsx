@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Mail, Users, Sparkles, Copy } from "lucide-react";
+import { Send, Mail, Users, Sparkles, Copy, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -18,6 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import { ScoreBadge } from "@/components/fornecedores/ScoreBadge";
 import { criarCotacao } from "@/lib/actions/cotacoes";
 import { sugerirFornecedoresPorObjeto } from "@/lib/actions/fornecedores";
+import { sugerirCandidatosParaObjeto } from "@/lib/actions/sugerirCandidatosCotacao";
+import type { CandidatoSugerido } from "@/lib/domain/candidatoSugerido";
 import { cn } from "@/lib/utils";
 
 const TEMPLATE_EMAIL = `Prezado(a) {responsavel},
@@ -79,6 +81,10 @@ export function SelecaoFornecedoresForm({
   const [registrando, setRegistrando] = useState(false);
   const [sugerindo, setSugerindo] = useState(false);
   const [categoriasSugeridas, setCategoriasSugeridas] = useState<string[] | null>(null);
+  const [candidatos, setCandidatos] = useState<CandidatoSugerido[] | null>(null);
+  const [totalCandidatos, setTotalCandidatos] = useState(0);
+  const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
+  const [candidatosSelecionados, setCandidatosSelecionados] = useState<Set<string>>(new Set());
 
   const toggle = (id: string) => {
     setSelecionados((prev) => {
@@ -114,6 +120,45 @@ export function SelecaoFornecedoresForm({
     } finally {
       setSugerindo(false);
     }
+  }
+
+  async function handleBuscarCandidatos() {
+    const processo = processos.find((p) => p.id === processoId);
+    if (!processo) {
+      toast.error("Selecione o processo primeiro — a busca usa o objeto dele.");
+      return;
+    }
+    setBuscandoCandidatos(true);
+    try {
+      const r = await sugerirCandidatosParaObjeto(processo.objeto);
+      setCandidatos(r.candidatos);
+      setTotalCandidatos(r.totalEncontrado);
+      // Nada vem pré-selecionado: a lista chega com até 500 empresas e marcar todas faria o
+      // analista enviar cotação em massa sem revisar (§9.40 — a UI não pode prometer o que a
+      // conferência da IN 65/2021 exige que seja conferido).
+      setCandidatosSelecionados(new Set());
+      if (r.candidatos.length === 0) {
+        toast.warning("Nenhuma empresa encontrada para o objeto deste processo.");
+      } else {
+        toast.success(`${r.candidatos.length} empresa(s) encontrada(s). Revise e selecione.`);
+      }
+    } catch {
+      toast.error("Não foi possível buscar empresas agora. Tente de novo.");
+    } finally {
+      setBuscandoCandidatos(false);
+    }
+  }
+
+  async function handleCopiarEmailsCandidatos() {
+    const emails = (candidatos ?? [])
+      .filter((c) => candidatosSelecionados.has(c.id))
+      .map((c) => c.email);
+    if (emails.length === 0) {
+      toast.error("Selecione ao menos uma empresa.");
+      return;
+    }
+    await navigator.clipboard.writeText(emails.join("; "));
+    toast.success(`${emails.length} e-mail(s) copiado(s).`);
   }
 
   async function handleCopiarEmails() {
@@ -215,6 +260,17 @@ export function SelecaoFornecedoresForm({
               <Sparkles className="size-3.5" />
               {sugerindo ? "Sugerindo…" : "Sugerir por IA"}
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleBuscarCandidatos}
+              disabled={buscandoCandidatos || !processoId}
+            >
+              <Search className="size-3.5" />
+              {buscandoCandidatos ? "Buscando…" : "Buscar empresas na base"}
+            </Button>
             <Badge variant="secondary" className="tabular-nums">
               {selecionados.size} selecionados
             </Badge>
@@ -302,6 +358,98 @@ export function SelecaoFornecedoresForm({
           </Table>
         </CardContent>
       </Card>
+
+
+      {candidatos !== null && candidatos.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Search className="size-4 text-muted-foreground" />
+              Empresas encontradas na base
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="tabular-nums">
+                {candidatosSelecionados.size} de {candidatos.length}
+              </Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleCopiarEmailsCandidatos}
+              >
+                <Copy className="size-3.5" />
+                Copiar e-mails
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="mb-3 text-sm text-muted-foreground">
+              {totalCandidatos > candidatos.length
+                ? `${totalCandidatos.toLocaleString("pt-BR")} empresas casaram com o objeto; mostrando as ${candidatos.length} mais relevantes (Baixada Santista primeiro).`
+                : `${candidatos.length} empresa(s), Baixada Santista primeiro.`}{" "}
+              Estas empresas <strong>não</strong> estão no cadastro — revise antes de consultar.
+            </p>
+            <div className="max-h-[28rem] overflow-y-auto rounded-md border">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background">
+                  <TableRow>
+                    <TableHead className="w-10" />
+                    <TableHead className="w-[34%]">Empresa</TableHead>
+                    <TableHead className="w-[18%]">Município</TableHead>
+                    <TableHead className="w-[28%]">Atividade (CNAE)</TableHead>
+                    <TableHead className="w-[20%]">E-mail</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {candidatos.map((c) => (
+                    <TableRow
+                      key={c.id}
+                      className="cursor-pointer"
+                      onClick={() =>
+                        setCandidatosSelecionados((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(c.id)) next.delete(c.id);
+                          else next.add(c.id);
+                          return next;
+                        })
+                      }
+                    >
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          readOnly
+                          checked={candidatosSelecionados.has(c.id)}
+                          className="accent-primary size-4 cursor-pointer"
+                          aria-label={`Selecionar ${c.razaoSocial}`}
+                        />
+                      </TableCell>
+                      <TableCell className="whitespace-normal">
+                        <p className="text-sm font-medium break-words">{c.razaoSocial}</p>
+                        <p className="text-xs text-muted-foreground tabular-nums">{c.cnpj}</p>
+                      </TableCell>
+                      <TableCell className="whitespace-normal text-sm">
+                        {c.municipio}/{c.estado}
+                      </TableCell>
+                      <TableCell className="whitespace-normal text-xs text-muted-foreground">
+                        {c.cnaePrincipalDescricao}
+                      </TableCell>
+                      <TableCell className="whitespace-normal">
+                        <span className="text-xs break-all">{c.email}</span>
+                        {c.emailCompartilhado && (
+                          <Badge variant="secondary" className="ml-1 text-[0.65rem]">
+                            compartilhado
+                          </Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {selecionados.size > 0 && (
         <Card>
