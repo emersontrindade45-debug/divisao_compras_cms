@@ -3,6 +3,7 @@
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { dbCandidatos } from "@/lib/dbCandidatos";
 import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { normalizarMunicipio } from "@/lib/domain/normalizarMunicipio";
@@ -70,7 +71,7 @@ export async function buscarCandidatosCnpj(
     ...(busca ? { razaoSocial: { contains: busca, mode: "insensitive" } } : {}),
   };
 
-  const registros = await db.empresaCandidataFornecedor.findMany({
+  const registros = await dbCandidatos.empresaCandidataFornecedor.findMany({
     where,
     select: {
       id: true,
@@ -141,7 +142,7 @@ export async function adicionarCandidatoAPlanilha(
   const parsedId = candidatoIdSchema.safeParse(candidatoId);
   if (!parsedId.success) return { error: "Identificador de candidato inválido" };
 
-  const candidato = await db.empresaCandidataFornecedor.findUnique({
+  const candidato = await dbCandidatos.empresaCandidataFornecedor.findUnique({
     where: { id: parsedId.data },
     select: {
       id: true,
@@ -242,7 +243,7 @@ export async function listarMunicipiosComCandidatos(): Promise<string[]> {
     return cacheMunicipios.valor;
   }
 
-  const linhas = await db.$queryRaw<Array<{ municipio: string }>>`
+  const linhas = await dbCandidatos.$queryRaw<Array<{ municipio: string }>>`
     WITH RECURSIVE municipios AS (
       (
         SELECT "municipio"

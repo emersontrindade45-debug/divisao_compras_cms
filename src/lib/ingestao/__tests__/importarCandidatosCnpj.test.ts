@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
+// Estes módulos leem/escrevem o banco de candidatos (VPS), não o transacional.
+vi.mock("@/lib/dbCandidatos", () => ({ dbCandidatos: mocks.db }));
 
 import { importarCandidatosCnpj } from "../importarCandidatosCnpj";
 

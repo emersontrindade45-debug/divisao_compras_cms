@@ -1,7 +1,7 @@
 // Sem `import "server-only"` deliberadamente (CLAUDE.md §9.62): scripts/categorizar-candidatos-cnpj.ts
 // precisa importar este módulo fora do bundler do Next, onde `server-only` sempre lança. Não é
 // alcançável a partir de `components/` — só pelo script administrativo.
-import { db } from "@/lib/db";
+import { dbCandidatos as db } from "@/lib/dbCandidatos";
 import { sugerirCategoriasParaObjeto } from "@/lib/ia/categorizarObjeto";
 import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorrencia";
 

@@ -4,7 +4,7 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { Prisma } from "@prisma/client";
-import { db } from "@/lib/db";
+import { dbCandidatos as db } from "@/lib/dbCandidatos";
 import { normalizarMunicipio } from "@/lib/domain/normalizarMunicipio";
 import { linhaCandidatoCnpjSchema, type LinhaCandidatoCnpj } from "@/lib/validations/candidatoCnpjRow";
 import { parseLinhaCsv } from "./parseLinhaCsv";
