@@ -10,6 +10,13 @@ import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { PageHeader } from "@/components/common/PageHeader";
 
+/**
+ * A busca de empresas na base de candidatos (server action desta página) atravessa o Postgres do
+ * VPS em Campinas a partir de `iad1`, e a latência entre regiões domina o custo — o padrão da
+ * plataforma não dá folga suficiente. Mesmo valor das demais rotas pesadas do projeto.
+ */
+export const maxDuration = 60;
+
 export default async function CotacoesPage() {
   await requireAuth();
 

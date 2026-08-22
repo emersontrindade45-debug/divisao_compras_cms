@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Mail, Users, Sparkles, Copy, Search } from "lucide-react";
+import { Send, Mail, Users, Sparkles, Copy, Search, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -19,6 +19,7 @@ import { ScoreBadge } from "@/components/fornecedores/ScoreBadge";
 import { criarCotacao } from "@/lib/actions/cotacoes";
 import { sugerirFornecedoresPorObjeto } from "@/lib/actions/fornecedores";
 import { sugerirCandidatosParaObjeto } from "@/lib/actions/sugerirCandidatosCotacao";
+import { adicionarCandidatoAPlanilha } from "@/lib/actions/candidatosCnpj";
 import type { CandidatoSugerido } from "@/lib/domain/candidatoSugerido";
 import { cn } from "@/lib/utils";
 
@@ -85,6 +86,7 @@ export function SelecaoFornecedoresForm({
   const [totalCandidatos, setTotalCandidatos] = useState(0);
   const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
   const [candidatosSelecionados, setCandidatosSelecionados] = useState<Set<string>>(new Set());
+  const [adicionandoPlanilha, setAdicionandoPlanilha] = useState(false);
 
   const toggle = (id: string) => {
     setSelecionados((prev) => {
@@ -142,10 +144,53 @@ export function SelecaoFornecedoresForm({
       } else {
         toast.success(`${r.candidatos.length} empresa(s) encontrada(s). Revise e selecione.`);
       }
-    } catch {
-      toast.error("Não foi possível buscar empresas agora. Tente de novo.");
+    } catch (erro) {
+      // Mostra a causa real em vez de engolir a mensagem: sem isso, uma falha de conexão com o
+      // banco de candidatos e um timeout ficam indistinguíveis para quem está na tela, e o
+      // diagnóstico depende de ler log de servidor.
+      const motivo = erro instanceof Error ? erro.message : String(erro);
+      toast.error(`Não foi possível buscar empresas: ${motivo}`);
     } finally {
       setBuscandoCandidatos(false);
+    }
+  }
+
+  async function handleAdicionarNaPlanilha() {
+    const alvos = (candidatos ?? []).filter((c) => candidatosSelecionados.has(c.id));
+    if (alvos.length === 0) {
+      toast.error("Selecione ao menos uma empresa.");
+      return;
+    }
+    setAdicionandoPlanilha(true);
+    try {
+      // Sequencial de propósito: `adicionarCandidatoAPlanilha` faz append na planilha e deduplica
+      // contra o que já está lá. Em paralelo, duas chamadas leriam a planilha antes de qualquer
+      // uma escrever e ambas concluiriam que o CNPJ não existe — o mesmo modo de falha de
+      // check-antes-de-escrever da §9.14, agora com o Sheets no lugar do banco.
+      let adicionados = 0;
+      let jaExistentes = 0;
+      const falhas: string[] = [];
+      for (const c of alvos) {
+        const r = await adicionarCandidatoAPlanilha(c.id);
+        if (r.error) falhas.push(`${c.razaoSocial}: ${r.error}`);
+        else if (r.data?.jaExistente) jaExistentes++;
+        else adicionados++;
+      }
+
+      const partes: string[] = [];
+      if (adicionados > 0) partes.push(`${adicionados} adicionada(s) à planilha`);
+      if (jaExistentes > 0) partes.push(`${jaExistentes} já estava(m) lá`);
+      if (falhas.length > 0) partes.push(`${falhas.length} falhou(aram)`);
+      const resumo = partes.join(", ");
+
+      if (falhas.length === 0) toast.success(resumo);
+      else if (adicionados > 0 || jaExistentes > 0) toast.warning(`${resumo}. ${falhas[0]}`);
+      else toast.error(`Nenhuma adicionada. ${falhas[0]}`);
+    } catch (erro) {
+      const motivo = erro instanceof Error ? erro.message : String(erro);
+      toast.error(`Falha ao adicionar na planilha: ${motivo}`);
+    } finally {
+      setAdicionandoPlanilha(false);
     }
   }
 
@@ -380,6 +425,16 @@ export function SelecaoFornecedoresForm({
               >
                 <Copy className="size-3.5" />
                 Copiar e-mails
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="gap-2"
+                onClick={handleAdicionarNaPlanilha}
+                disabled={adicionandoPlanilha}
+              >
+                <FileSpreadsheet className="size-3.5" />
+                {adicionandoPlanilha ? "Adicionando…" : "Adicionar à planilha"}
               </Button>
             </div>
           </CardHeader>

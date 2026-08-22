@@ -13,6 +13,43 @@ import {
 
 const ESTADO_IMPORTADO = "SP";
 
+// Cache em memória do processo para o catálogo de CNAEs — mesmo padrão de
+// `listarMunicipiosComCandidatos` (candidatosCnpj.ts), e pelo mesmo motivo: o `groupBy` que o monta
+// não tem índice que o cubra e varre a tabela inteira (medido: 1,9s de Execution Time e 400 mil
+// páginas lidas, contra a base local). Da função em `iad1` até o VPS em Campinas esse custo é
+// bem maior, e ele se pagava a CADA clique no botão.
+//
+// TTL de 1h é seguro aqui porque o catálogo só muda quando a base de candidatos é reimportada —
+// evento raro e manual, ao contrário da lista de municípios (§9 do PLAN, TTL reduzido para 5min
+// depois de uma carga nova demorar a aparecer).
+interface CacheCatalogo {
+  classes: ClasseCnae[];
+  expiraEm: number;
+}
+let cacheCatalogo: CacheCatalogo | null = null;
+const TTL_CACHE_CATALOGO_MS = 60 * 60 * 1000;
+
+async function obterCatalogoCnaes(): Promise<ClasseCnae[]> {
+  if (cacheCatalogo && cacheCatalogo.expiraEm > Date.now()) return cacheCatalogo.classes;
+
+  const grupos = await dbCandidatos.empresaCandidataFornecedor.groupBy({
+    by: ["cnaePrincipalCodigo", "cnaePrincipalDescricao"],
+  });
+  const porClasse = new Map<string, ClasseCnae>();
+  for (const g of grupos) {
+    if (!porClasse.has(g.cnaePrincipalCodigo)) {
+      porClasse.set(g.cnaePrincipalCodigo, {
+        classe: g.cnaePrincipalCodigo,
+        descricao: g.cnaePrincipalDescricao,
+      });
+    }
+  }
+
+  const classes = [...porClasse.values()];
+  cacheCatalogo = { classes, expiraEm: Date.now() + TTL_CACHE_CATALOGO_MS };
+  return classes;
+}
+
 /**
  * Sugere empresas capazes de atender o objeto de um processo, buscando na base de candidatos
  * (milhões de empresas ativas de SP, derivada do dump da Receita) em vez do cadastro próprio de
@@ -37,20 +74,9 @@ export async function sugerirCandidatosParaObjeto(
   // Catálogo de subclasses realmente presentes na base — a IA só pode escolher entre estas, e usar
   // a base como fonte (em vez de uma tabela oficial de CNAEs) garante que todo código sugerido tem
   // pelo menos uma empresa por trás. Sem agrupar por classe de 5 dígitos: ver ClasseCnae.
-  const grupos = await dbCandidatos.empresaCandidataFornecedor.groupBy({
-    by: ["cnaePrincipalCodigo", "cnaePrincipalDescricao"],
-  });
-  const porClasse = new Map<string, ClasseCnae>();
-  for (const g of grupos) {
-    if (!porClasse.has(g.cnaePrincipalCodigo)) {
-      porClasse.set(g.cnaePrincipalCodigo, {
-        classe: g.cnaePrincipalCodigo,
-        descricao: g.cnaePrincipalDescricao,
-      });
-    }
-  }
+  const catalogo = await obterCatalogoCnaes();
 
-  const cnaesSugeridos = await sugerirCnaesParaObjeto(objeto, [...porClasse.values()]);
+  const cnaesSugeridos = await sugerirCnaesParaObjeto(objeto, catalogo);
   if (cnaesSugeridos.length === 0) return vazio;
 
   // Igualdade exata: a IA já escolhe a subclasse de 7 dígitos, que é o formato gravado na base.
@@ -70,10 +96,12 @@ export async function sugerirCandidatosParaObjeto(
       cnaePrincipalCodigo: true,
       cnaePrincipalDescricao: true,
     },
-    // Teto de segurança acima do da UI: a ordenação por localidade precisa enxergar mais que os 500
+    // Janela acima do teto da UI: a ordenação por localidade precisa enxergar mais que os 500
     // finais, senão o corte aconteceria antes de priorizar a Baixada e devolveria 500 empresas
-    // arbitrárias do estado inteiro.
-    take: TETO_CANDIDATOS * 20,
+    // arbitrárias do estado inteiro. 4x (2.000 linhas, ~600 KB) em vez de 20x: medido que 10.000
+    // linhas trafegam ~3 MB do VPS em Campinas até `iad1` a cada clique, e a Baixada Santista cabe
+    // folgadamente nessa janela.
+    take: TETO_CANDIDATOS * 4,
   });
 
   const comEmail = encontrados.filter((c): c is typeof c & { email: string } => Boolean(c.email));

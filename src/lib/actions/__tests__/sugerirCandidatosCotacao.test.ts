@@ -20,6 +20,13 @@ vi.mock("@/lib/ia/sugerirCnaesParaObjeto", () => ({
   sugerirCnaesParaObjeto: mocks.sugerirCnaesParaObjeto,
 }));
 
+// `vi.resetModules()` + import dinâmico porque o cache do catálogo é estado de módulo (§9.34):
+// sem instância nova, um teste veria o cache populado pelo anterior.
+async function importarAcao() {
+  vi.resetModules();
+  return (await import("../sugerirCandidatosCotacao")).sugerirCandidatosParaObjeto;
+}
+
 import { sugerirCandidatosParaObjeto } from "../sugerirCandidatosCotacao";
 
 function candidato(over: Partial<Record<string, unknown>> & { id: string }) {
@@ -154,5 +161,29 @@ describe("sugerirCandidatosParaObjeto", () => {
       if (["groupBy", "findMany", "count"].includes(nome)) continue;
       expect(fn, `${nome} não deveria ter sido chamado`).not.toHaveBeenCalled();
     }
+  });
+
+  it("cacheia o catálogo de CNAEs entre chamadas (o groupBy varre a tabela inteira)", async () => {
+    const acao = await importarAcao();
+    mocks.sugerirCnaesParaObjeto.mockResolvedValue(["4761003"]);
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([candidato({ id: "1" })]);
+
+    await acao("caneta");
+    await acao("outro objeto");
+
+    // Duas buscas, mas o catálogo é montado uma vez só.
+    expect(mocks.dbCandidatos.empresaCandidataFornecedor.groupBy).toHaveBeenCalledTimes(1);
+    expect(mocks.sugerirCnaesParaObjeto).toHaveBeenCalledTimes(2);
+  });
+
+  it("lê uma janela limitada, não a tabela inteira", async () => {
+    mocks.sugerirCnaesParaObjeto.mockResolvedValue(["4761003"]);
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([candidato({ id: "1" })]);
+
+    await sugerirCandidatosParaObjeto("caneta");
+
+    const args = mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mock.calls[0][0];
+    expect(args.take).toBeLessThanOrEqual(2000);
+    expect(args.take).toBeGreaterThanOrEqual(500);
   });
 });
