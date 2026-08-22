@@ -1013,3 +1013,35 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     **qual cliente Prisma recebeu cada consulta**, porque trocar os bancos não quebra tipo nem
     asserção de resultado — confirmado por mutação; (c) certificado auto-assinado exige
     `sslmode=no-verify`, não `require` (§9.57).
+83. **Lista longa demais faz o modelo escolher por proximidade de CÓDIGO em vez de significado —
+    a correção é lotear, não melhorar o prompt.** Com as 1.313 subclasses CNAE numa chamada só,
+    "caneta esferográfica" devolvia `3299001 Fabricação de guarda-chuvas` (vizinho numérico de
+    `3299002 Fabricação de canetas`) e ignorava `4761003 Comércio varejista de artigos de
+    papelaria` — 15.774 empresas, e quem o órgão de fato compraria. Três rodadas de prompt não
+    resolveram; lotes de 200 resolveram na primeira, e como os lotes são independentes rodam em
+    paralelo (7 chamadas em 1,5s). Antes disso construí um **pré-filtro textual do catálogo e tive
+    de descartá-lo**: casava "caneta" com "Caixas de financiamento" e eliminava os alvos certos,
+    ficando pior que a IA sozinha (§9.24 — parar na segunda falha pela mesma razão em vez de tentar
+    a terceira variação do mesmo palpite). Corolário sobre agregação: agrupar por chave mais curta
+    obriga eleger UMA descrição para representar o grupo, e a eleita pode esconder o resto — a
+    classe `47610` herdava "Comércio varejista de livros" da primeira subclasse. Ao reduzir a
+    granularidade de um catálogo, perguntar **o que a descrição escolhida está escondendo**.
+84. **Teste que verifica que o componente existe e funciona não verifica ONDE ele está.** O painel
+    de CNAEs foi inserido depois de uma tabela longa: existia, funcionava, e os 10 testes dele
+    passavam — mas ficava fora da primeira tela, e o usuário relatou que "não apareceu". Nenhuma
+    asserção olhava a posição. Para componente cuja utilidade depende de ser visto no momento
+    certo, ancorar a ordem no DOM (`compareDocumentPosition`) além do comportamento; e lembrar que
+    a ordem de leitura da página deve espelhar a ordem do trabalho — um painel que decide O QUE
+    buscar não pode vir depois do resultado da busca. Vale a §9.40 num eixo novo: lá o elemento
+    prometia o que não entregava, aqui entregava sem ser encontrável.
+85. **Dado derivado que a IA nunca vê precisa ser exposto ao humano antes de virar ação — a
+    contagem é o que transforma palpite em decisão.** A busca por CNAE devolvia 103.536 empresas
+    para "Limpeza e Conservação Predial", das quais **54.981 de PINTURA** e 7.200 de lavanderia de
+    roupas, e nada na tela indicava isso: o analista via só a lista final, já misturada. Mostrar o
+    volume ao lado de cada CNAE sugerido custou um índice parcial (62 MB, `CREATE INDEX
+    CONCURRENTLY` para não travar a tabela) e tornou o erro óbvio à primeira olhada. Ao construir
+    pipeline em que a IA escolhe filtros que o usuário não enxerga, perguntar **qual número
+    tornaria um filtro errado visível** e mostrá-lo antes da execução, não só depois no resultado.
+    Corolário de refinamento: quando o usuário revisa uma proposta automática, reprocessar **não
+    pode descartar a revisão já feita** — código que ele desmarcou não volta marcado, e item que
+    ele acrescentou sobrevive (confirmado por mutação).
