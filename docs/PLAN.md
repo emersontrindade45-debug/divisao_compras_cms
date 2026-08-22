@@ -2503,3 +2503,62 @@ reescrevê-la à mão é o que distingue verificação de encenação (§9.30/§
   isso a produção não sofreu interrupção.
 - `.ssh-vps/vps_key` (chave privada sem passphrase) dentro do repositório: conferir `.gitignore`.
 - M26: ~107 fornecedores em falha temporária do BrasilAPI — sem mudança.
+
+---
+
+## Sessão 2026-08-22 (parte 2) — Busca de empresas por CNAE para cotação (M28)
+
+O botão "Sugerir por IA" escolhia entre os **7 fornecedores ativos** do cadastro — insuficiente
+para uma pesquisa com ≥3 respostas (IN 65/2021). A base de candidatos tem 7,98M empresas com
+e-mail, mas era inalcançável: filtrar por tag cobre 11,8% dos registros, e o CNAE cobre 100%.
+
+### Entregue
+
+1. **Busca por CNAE** (`sugerirCandidatosCotacao.ts`): objeto → CNAEs (IA) → empresas, com o
+   "Copiar e-mails" que já existia. Teto de 500, Baixada Santista primeiro, e-mail compartilhado
+   (23,5%, tipicamente contador) despriorizado sem ser excluído.
+2. **Seleção em massa** (`selecaoEmMassa.ts`): Shift para intervalo, Ctrl/Cmd para avulso,
+   checkbox de "todas". O Shift não move a âncora (permite reajustar o intervalo) e o intervalo
+   segue a ordem VISÍVEL.
+3. **Situação + Processos Cotação** na planilha, com o processo **acumulando** na célula em vez de
+   substituir — a mesma empresa é consultada em processos diferentes ao longo do tempo.
+4. **Paginação por processo**: coluna "E-mail enviado?" preenchida automaticamente, e a busca
+   exclui quem já tem aquele processo. Exclusão **por processo, não global** (pedido do usuário) —
+   um booleano global tornaria a empresa invisível para sempre após a primeira cotação.
+5. **Painel de aprovação de CNAEs** (`PainelCnaes.tsx`): a IA propõe, o analista revisa com a
+   contagem de empresas ao lado de cada código e desmarca o que não serve.
+
+### Medições que mudaram o desenho
+
+- **Catálogo por subclasse de 7 dígitos, não classe de 5.** Agrupar por classe obrigava eleger uma
+  descrição para o grupo: `47610` herdava "Comércio varejista de livros" e escondia
+  `4761003 artigos de papelaria` (15.774 empresas). Buscar caneta não trazia papelaria.
+- **Catálogo em lotes de 200, não numa chamada só.** Com as 1.313 subclasses de uma vez o modelo
+  escolhia por proximidade de CÓDIGO em vez de significado (para caneta devolvia "fabricação de
+  guarda-chuvas", vizinho numérico). Os lotes rodam em paralelo: 1,5s.
+- **Um pré-filtro textual do catálogo foi construído e DESCARTADO** por medição: casava "caneta"
+  com "Caixas de financiamento" e eliminava os alvos certos — pior que a IA sozinha (§9.24).
+- **O painel se justifica sozinho:** "PM - Limpeza e Conservação Predial" propõe 103.536 empresas,
+  das quais **54.981 são de PINTURA** e 7.200 de lavanderia de roupas. Nada indicava isso na tela.
+- **Índice parcial `(cnaePrincipalCodigo, municipio) WHERE email IS NOT NULL`** criado no VPS com
+  CONCURRENTLY (62 MB, 12,8s, sem travar): a contagem por CNAE cai de 2,72s para 0,10s. Migration
+  `20260822170000_indice_cnae_candidatos` — **já aplicada no VPS**.
+
+### Correções de defeito na própria sessão
+
+- `groupBy` do catálogo varria a tabela inteira a cada clique (1,9s, 400 mil páginas) → cache em
+  memória, TTL 1h. `maxDuration=60` na página, que não declarava nenhum. `catch {}` sem parâmetro
+  engolia a mensagem do erro → a causa real agora aparece na tela.
+- **Painel inserido na posição errada** (depois da tabela longa de fornecedores): existia e
+  funcionava, mas ficava fora da primeira tela e o usuário relatou que "não apareceu". Os 10
+  testes do painel verificavam que ele existe e funciona, nunca ONDE estava — passavam todos com
+  o defeito no ar. Corrigido, com teste ancorando a posição no DOM.
+
+### Pendências
+
+- **Não medi a taxa de resposta dos e-mails** da Receita. Para a IN 65/2021, "≥3 fornecedores
+  consultados" pressupõe que a consulta chegou — vale medir antes de adotar como rotina.
+- O laço de "Adicionar à planilha" **aborta no primeiro erro**: numa sessão, um deploy no meio da
+  operação truncou o lote em 89 de 500. Deveria pular a falha e continuar, reportando no fim.
+- Senha do papel `postgres` do VPS trafegou pelo chat (sessão anterior) — trocar.
+- M26: ~107 fornecedores em falha temporária do BrasilAPI — sem mudança.
