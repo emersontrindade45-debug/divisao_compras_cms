@@ -314,6 +314,14 @@ export function SelecaoFornecedoresForm({
         </CardContent>
       </Card>
 
+      {processoId && (
+        <PainelCnaes
+          objeto={processos.find((p) => p.id === processoId)?.objeto ?? ""}
+          onAprovar={handleBuscarCandidatos}
+          buscando={buscandoCandidatos}
+        />
+      )}
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <CardTitle className="text-base flex items-center gap-2">
@@ -420,14 +428,6 @@ export function SelecaoFornecedoresForm({
         </CardContent>
       </Card>
 
-
-      {processoId && (
-        <PainelCnaes
-          objeto={processos.find((p) => p.id === processoId)?.objeto ?? ""}
-          onAprovar={handleBuscarCandidatos}
-          buscando={buscandoCandidatos}
-        />
-      )}
 
       {candidatos !== null && candidatos.length > 0 && (
         <Card>
