@@ -2388,3 +2388,76 @@ Tags preenchida corretamente. As 3 pendências textuais da lista original desta 
 de escrita, carga completa, categorização completa) estão todas resolvidas. Únicas pendências que
 seguem abertas: M26 (~107 fornecedores em falha temporária do BrasilAPI, adiado por decisão do
 usuário) — sem mudança nesta sessão.
+
+---
+
+## Sessão 2026-08-21/22 — Separação do banco de candidatos (M27)
+
+**Correção de registro:** a nota da sessão anterior dizia que "carga completa" e "categorização
+completa" estavam resolvidas. Estava errado em dois pontos, descobertos hoje: a carga dos 8,66M foi
+para um Postgres no **VPS**, que a aplicação **não lia** (ela apontava para o Supabase), e a
+categorização por CNAE nunca rodou contra esse banco (0 de 8,66M com `categoriaSugerida`).
+
+### O que aconteceu
+
+`/fornecedores/descobrir` ficava presa no skeleton em produção. Foram três correções sucessivas,
+todas medidas e corretas **no banco errado**, antes de o diagnóstico real aparecer:
+
+1. Índice composto `(estado, municipio, cnpj)` — a query filtra por município mas ordena por
+   `cnpj`, e o planner preferia varrer o unique de `cnpj`. Medido: 1,3ms (era timeout).
+2. `listarMunicipiosComCandidatos` trocada de `GROUP BY` (seq scan, ~14s) para **loose index scan**
+   com `WITH RECURSIVE`. Medido: 645 municípios em 182ms.
+3. Só então: `statement_timeout` no VPS era **`0`** — aquele banco não podia emitir o `57014` que a
+   app recebia. E `pg_stat_activity` não mostrava conexão nenhuma da Vercel. A app falava com o
+   Supabase (ver CLAUDE.md §9.80/§9.81).
+
+### Arquitetura resultante (decisão do usuário)
+
+Dois bancos, com fronteira por **acoplamento**, não por tamanho (CLAUDE.md §9.82):
+
+- **VPS** (`187.77.36.8:5433`, Postgres 16 em Docker): só `empresas_candidatas_fornecedor` —
+  8,66M linhas / 5,2GB, que não cabem no plano do Supabase. Derivada de fonte externa,
+  somente-leitura na operação, sem foreign key com nenhum outro model.
+- **Supabase**: todo o resto do domínio. `Fornecedor` fica aqui — tem relação com `Cotacao`,
+  `Proposta` e `QualificacaoFornecedor`, e carrega a trilha de auditoria da IN 65/2021.
+
+Infra feita no VPS: papel `app_candidatos` com **apenas `SELECT`** na tabela (verificado:
+escrita retorna `permission denied`); TLS ligado com certificado auto-assinado em `/opt/pg-certs`
+(exige `sslmode=no-verify`, §9.57); porta publicada em `0.0.0.0:5433`; `ufw` ativo liberando
+22/80/443/3000/5432/5433. Backup do volume em `/opt/pg-backup/pgdata_cms_20260822_023023` (5,2GB).
+
+Código: `src/lib/dbCandidatos.ts` (conexão preguiçosa, §9.54). Variáveis:
+`DATABASE_CANDIDATOS_URL` (leitura, na Vercel) e `DATABASE_CANDIDATOS_ADMIN_URL` (escrita, só na
+máquina do operador — nunca na Vercel).
+
+**Confirmado em produção:** a tela carrega, o dropdown lista os 645 municípios e a busca por
+município devolve candidatos reais.
+
+### PENDÊNCIA PARA A PRÓXIMA SESSÃO — categorização por CNAE
+
+O filtro **Categoria** da tela está inerte: **0 de 8.657.319** candidatos têm `categoriaSugerida`,
+e `categorias_sugeridas_por_cnae` está vazia. Foi o que o usuário notou ao buscar
+"Guarujá + Limpeza" e não obter resultado (Guarujá tem 47.155 candidatos e funciona sem o filtro
+de categoria — o acento **não** é o problema, foi hipótese minha que a medição derrubou).
+
+Para rodar:
+
+- Escala: **1.313 CNAEs distintos** → 1.313 chamadas de IA (uma por código, nunca por empresa);
+  depois um único `UPDATE ... FROM` propaga para os 8,66M.
+- Comando: `scripts/categorizar-candidatos-cnpj.ts`, com `--dry-run` e `--limite` pequeno antes.
+- **Requisito de ambiente:** o script precisa das DUAS conexões — `DATABASE_URL` (Supabase) para
+  ler `Fornecedor.categoria`, que é a lista fechada entre a qual a IA escolhe, e
+  `DATABASE_CANDIDATOS_ADMIN_URL` (VPS, credencial de escrita) para gravar. Já corrigido em
+  `categorizarCandidatosCnae.ts` para ler cada um do banco certo — sem isso a lista viria vazia e
+  as 1.313 chamadas produziriam zero categoria em silêncio.
+- **Verificar antes de gastar:** quantas categorias distintas existem em `Fornecedor` (é o teto da
+  qualidade do resultado). Visível no próprio dropdown "Categoria" da tela.
+- Decisão pendente: quem executa. Rodar da máquina do agente exigiria compartilhar a
+  `DATABASE_URL` do Supabase; a alternativa é o usuário rodar com o comando pronto.
+
+### Riscos conhecidos, ainda não exercitados sob carga real
+
+- **Latência**: banco em Campinas, função Vercel em `iad1` (Virgínia). Handshake TLS medido em
+  4,2s a frio.
+- **Conexões**: o Postgres do VPS não tem pooler na frente (o Supabase tem Supavisor). Sob
+  concorrência pode esgotar `max_connections`.
