@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Send, Mail, Users, Sparkles, Copy, Search, FileSpreadsheet } from "lucide-react";
@@ -20,6 +20,7 @@ import { criarCotacao } from "@/lib/actions/cotacoes";
 import { sugerirFornecedoresPorObjeto } from "@/lib/actions/fornecedores";
 import { sugerirCandidatosParaObjeto } from "@/lib/actions/sugerirCandidatosCotacao";
 import { adicionarCandidatoAPlanilha } from "@/lib/actions/candidatosCnpj";
+import { aplicarSelecao } from "@/lib/domain/selecaoEmMassa";
 import type { CandidatoSugerido } from "@/lib/domain/candidatoSugerido";
 import { cn } from "@/lib/utils";
 
@@ -87,6 +88,21 @@ export function SelecaoFornecedoresForm({
   const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
   const [candidatosSelecionados, setCandidatosSelecionados] = useState<Set<string>>(new Set());
   const [adicionandoPlanilha, setAdicionandoPlanilha] = useState(false);
+  // Âncora do Shift: a linha a partir da qual o intervalo é medido (ver lib/domain/selecaoEmMassa).
+  const [ancoraCandidatos, setAncoraCandidatos] = useState<string | null>(null);
+
+  function handleCliqueCandidato(id: string, evento: ReactMouseEvent) {
+    const ordemVisivel = (candidatos ?? []).map((c) => c.id);
+    const { selecionados, ancora } = aplicarSelecao(
+      candidatosSelecionados,
+      ancoraCandidatos,
+      id,
+      ordemVisivel,
+      { shift: evento.shiftKey, ctrl: evento.ctrlKey || evento.metaKey },
+    );
+    setCandidatosSelecionados(selecionados);
+    setAncoraCandidatos(ancora);
+  }
 
   const toggle = (id: string) => {
     setSelecionados((prev) => {
@@ -445,11 +461,35 @@ export function SelecaoFornecedoresForm({
                 : `${candidatos.length} empresa(s), Baixada Santista primeiro.`}{" "}
               Estas empresas <strong>não</strong> estão no cadastro — revise antes de consultar.
             </p>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Clique para selecionar uma. <kbd className="rounded border px-1">Shift</kbd>+clique
+              seleciona o intervalo desde a última;{" "}
+              <kbd className="rounded border px-1">Ctrl</kbd>+clique marca ou desmarca sem perder o
+              resto.
+            </p>
             <div className="max-h-[28rem] overflow-y-auto rounded-md border">
               <Table>
                 <TableHeader className="sticky top-0 bg-background">
                   <TableRow>
-                    <TableHead className="w-10" />
+                    <TableHead className="w-10">
+                      <input
+                        type="checkbox"
+                        className="accent-primary size-4 cursor-pointer"
+                        aria-label="Selecionar todas as empresas da lista"
+                        checked={
+                          candidatos.length > 0 &&
+                          candidatosSelecionados.size === candidatos.length
+                        }
+                        onChange={(evento) => {
+                          setCandidatosSelecionados(
+                            evento.target.checked
+                              ? new Set(candidatos.map((c) => c.id))
+                              : new Set(),
+                          );
+                          setAncoraCandidatos(null);
+                        }}
+                      />
+                    </TableHead>
                     <TableHead className="w-[34%]">Empresa</TableHead>
                     <TableHead className="w-[18%]">Município</TableHead>
                     <TableHead className="w-[28%]">Atividade (CNAE)</TableHead>
@@ -460,15 +500,9 @@ export function SelecaoFornecedoresForm({
                   {candidatos.map((c) => (
                     <TableRow
                       key={c.id}
-                      className="cursor-pointer"
-                      onClick={() =>
-                        setCandidatosSelecionados((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(c.id)) next.delete(c.id);
-                          else next.add(c.id);
-                          return next;
-                        })
-                      }
+                      className="cursor-pointer select-none"
+                      data-state={candidatosSelecionados.has(c.id) ? "selected" : undefined}
+                      onClick={(evento) => handleCliqueCandidato(c.id, evento)}
                     >
                       <TableCell>
                         <input
