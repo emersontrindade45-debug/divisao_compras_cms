@@ -72,13 +72,22 @@ const ALIASES_CAMPO: Record<string, string[]> = {
   cidade: ["municipio", "cidade"],
   estado: ["uf", "estado"],
   fonte: ["fonte"],
+  // Colunas de acompanhamento de cotação: mapeadas para que a ESCRITA (M27) saiba onde colocar
+  // "Ativa" e o número do processo. O parser de LEITURA continua sem consumi-las — elas não entram
+  // em `FornecedorPlanilhaRow` nem no sync do M24, que segue com a mesma forma de antes.
+  situacao: ["situacao"],
+  processosCotacao: ["processos cotacao"],
 };
 
 /**
- * Colunas de acompanhamento de cotação reconhecidas apenas para serem
- * ignoradas — nunca entram em `colunas`, nenhuma lógica do parser as lê.
+ * Colunas reconhecidas apenas para serem ignoradas — nunca entram em `colunas`.
+ *
+ * "Situação" e "Processos Cotação" saíram desta lista em 2026-08-22: a escrita do M27 precisa da
+ * POSIÇÃO delas para preencher, e mantê-las aqui fazia `montarLinhaPlanilha` deixá-las em branco
+ * (mesmo modo de falha da §9.79 — campo de escrita ausente não aparece em erro nem em teste que só
+ * verifica os campos presentes). A leitura segue sem consumi-las.
  */
-const ALIASES_IGNORADAS = ["processos cotacao", "respondeu?", "enviou orcamento?", "situacao"];
+const ALIASES_IGNORADAS = ["respondeu?", "enviou orcamento?"];
 
 const LIMITE_LINHAS_CABECALHO = 5;
 

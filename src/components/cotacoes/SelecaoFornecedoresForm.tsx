@@ -177,6 +177,8 @@ export function SelecaoFornecedoresForm({
       toast.error("Selecione ao menos uma empresa.");
       return;
     }
+    // Número do processo em curso — vai para a coluna "Processos Cotação" de cada empresa.
+    const numeroProcesso = processos.find((p) => p.id === processoId)?.numero;
     setAdicionandoPlanilha(true);
     try {
       // Sequencial de propósito: `adicionarCandidatoAPlanilha` faz append na planilha e deduplica
@@ -187,7 +189,7 @@ export function SelecaoFornecedoresForm({
       let jaExistentes = 0;
       const falhas: string[] = [];
       for (const c of alvos) {
-        const r = await adicionarCandidatoAPlanilha(c.id);
+        const r = await adicionarCandidatoAPlanilha(c.id, numeroProcesso);
         if (r.error) falhas.push(`${c.razaoSocial}: ${r.error}`);
         else if (r.data?.jaExistente) jaExistentes++;
         else adicionados++;

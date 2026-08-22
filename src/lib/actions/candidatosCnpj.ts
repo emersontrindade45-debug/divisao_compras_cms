@@ -136,6 +136,7 @@ export interface AdicionarCandidatoResultado {
  */
 export async function adicionarCandidatoAPlanilha(
   candidatoId: string,
+  numeroProcesso?: string,
 ): Promise<ActionResult<AdicionarCandidatoResultado>> {
   const user = await requireRole("pesquisa");
 
@@ -168,6 +169,7 @@ export async function adicionarCandidatoAPlanilha(
       telefone: candidato.telefone ?? "",
       fonte: FONTE_CANDIDATOS_CNPJ,
       categoria: candidato.categoriaSugerida,
+      numeroProcesso,
     });
   } catch (erro) {
     return {
@@ -189,6 +191,7 @@ export async function adicionarCandidatoAPlanilha(
       cnpj: candidato.cnpj,
       linhaId: resultado.linhaId,
       jaExistente: resultado.jaExistente,
+      numeroProcesso,
     },
   });
 

@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   valuesGetMock: vi.fn(),
   appendMock: vi.fn(),
+  updateMock: vi.fn(),
   getMock: vi.fn(),
 }));
 
@@ -13,7 +14,11 @@ vi.mock("../googleAuth", () => ({
   getSheetsClient: () => ({
     spreadsheets: {
       get: mocks.getMock,
-      values: { append: mocks.appendMock, get: mocks.valuesGetMock },
+      values: {
+        append: mocks.appendMock,
+        update: mocks.updateMock,
+        get: mocks.valuesGetMock,
+      },
     },
   }),
   // `lerAbaAutenticado` é testado direto (googleAuth.test.ts) — aqui só repassa
@@ -30,6 +35,7 @@ import {
   montarLinhaPlanilha,
   proximoLinhaId,
   adicionarCandidatoNaPlanilha,
+  letraColuna,
 } from "../escreverCandidatoNaPlanilha";
 
 describe("montarLinhaPlanilha", () => {
@@ -229,6 +235,106 @@ describe("adicionarCandidatoNaPlanilha", () => {
     });
 
     await expect(adicionarCandidatoNaPlanilha(CANDIDATO)).rejects.toThrow(/cabeçalho/);
+    expect(mocks.appendMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("letraColuna", () => {
+  it("converte índice em letra de coluna do A1 notation", () => {
+    expect(letraColuna(0)).toBe("A");
+    expect(letraColuna(12)).toBe("M");
+    expect(letraColuna(25)).toBe("Z");
+  });
+
+  it("passa de 26 colunas com duas letras (a planilha real tem mais que isso)", () => {
+    expect(letraColuna(26)).toBe("AA");
+    expect(letraColuna(27)).toBe("AB");
+    expect(letraColuna(51)).toBe("AZ");
+    expect(letraColuna(52)).toBe("BA");
+  });
+});
+
+describe("Situação e Processos Cotação", () => {
+  // Cabeçalho com as duas colunas novas, nas posições em que aparecem na planilha real.
+  const CABECALHO_COMPLETO = [
+    "#", "Nome/Razão Social", "CPF/CNPJ", "Município", "UF", "E-mail",
+    "Telefone", "Fonte", "Tags", "Situação", "Processos Cotação",
+  ];
+  const I_SITUACAO = 9;
+  const I_PROCESSOS = 10;
+
+  function planilhaCom(linhas: string[][]) {
+    mocks.valuesGetMock.mockResolvedValue({ data: { values: [CABECALHO_COMPLETO, ...linhas] } });
+  }
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("preenche Situação como 'Ativa' e o processo na linha nova", async () => {
+    planilhaCom([]);
+
+    await adicionarCandidatoNaPlanilha({ ...CANDIDATO, numeroProcesso: "908/2024" });
+
+    const escrita = mocks.appendMock.mock.calls[0]![0].requestBody.values[0];
+    expect(escrita[I_SITUACAO]).toBe("Ativa");
+    expect(escrita[I_PROCESSOS]).toBe("908/2024");
+  });
+
+  it("marca Situação como 'Ativa' mesmo sem processo em curso", async () => {
+    planilhaCom([]);
+
+    await adicionarCandidatoNaPlanilha(CANDIDATO);
+
+    const escrita = mocks.appendMock.mock.calls[0]![0].requestBody.values[0];
+    expect(escrita[I_SITUACAO]).toBe("Ativa");
+    expect(escrita[I_PROCESSOS]).toBe("");
+  });
+
+  it("ACRESCENTA o processo novo na empresa já cadastrada, sem apagar o anterior", async () => {
+    planilhaCom([
+      ["1", "Empresa Nova LTDA", "11.222.333/0001-81", "Santos", "SP", "", "", "", "", "Ativa", "908/2024"],
+    ]);
+
+    const r = await adicionarCandidatoNaPlanilha({ ...CANDIDATO, numeroProcesso: "13137/2024" });
+
+    expect(r.jaExistente).toBe(true);
+    // Não cria linha nova...
+    expect(mocks.appendMock).not.toHaveBeenCalled();
+    // ...mas atualiza a célula acumulando os dois processos.
+    expect(mocks.updateMock).toHaveBeenCalledTimes(1);
+    const chamada = mocks.updateMock.mock.calls[0]![0];
+    expect(chamada.requestBody.values[0][0]).toBe("908/2024, 13137/2024");
+    // Linha 2 da planilha (1 = cabeçalho), coluna K (índice 10).
+    expect(chamada.range).toContain("K2");
+  });
+
+  it("não reescreve quando a empresa já tem aquele mesmo processo", async () => {
+    planilhaCom([
+      ["1", "Empresa Nova LTDA", "11.222.333/0001-81", "Santos", "SP", "", "", "", "", "Ativa", "908/2024"],
+    ]);
+
+    await adicionarCandidatoNaPlanilha({ ...CANDIDATO, numeroProcesso: "908/2024" });
+
+    expect(mocks.updateMock).not.toHaveBeenCalled();
+  });
+
+  it("preenche a célula vazia da empresa já cadastrada", async () => {
+    planilhaCom([
+      ["1", "Empresa Nova LTDA", "11.222.333/0001-81", "Santos", "SP", "", "", "", "", "Ativa", ""],
+    ]);
+
+    await adicionarCandidatoNaPlanilha({ ...CANDIDATO, numeroProcesso: "908/2024" });
+
+    expect(mocks.updateMock.mock.calls[0]![0].requestBody.values[0][0]).toBe("908/2024");
+  });
+
+  it("não toca na planilha quando a empresa já existe e não há processo em curso", async () => {
+    planilhaCom([
+      ["1", "Empresa Nova LTDA", "11.222.333/0001-81", "Santos", "SP", "", "", "", "", "Ativa", "908/2024"],
+    ]);
+
+    await adicionarCandidatoNaPlanilha(CANDIDATO);
+
+    expect(mocks.updateMock).not.toHaveBeenCalled();
     expect(mocks.appendMock).not.toHaveBeenCalled();
   });
 });

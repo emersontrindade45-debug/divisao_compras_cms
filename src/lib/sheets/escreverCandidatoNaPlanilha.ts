@@ -2,6 +2,7 @@ import "server-only";
 import { extrairSpreadsheetId } from "./googleSheets";
 import { encontrarCabecalho, parseFornecedoresPlanilha } from "./fornecedoresPlanilha";
 import { getSheetsClient, lerAbaAutenticado } from "./googleAuth";
+import { acrescentarProcessoCotacao } from "@/lib/domain/processosCotacaoCelula";
 
 /**
  * Escreve um candidato a Fornecedor (`EmpresaCandidataFornecedor`, M27) como
@@ -15,6 +16,9 @@ import { getSheetsClient, lerAbaAutenticado } from "./googleAuth";
 
 export const FONTE_CANDIDATOS_CNPJ = "M27 — Receita Federal";
 
+/** Valor da coluna "Situação" para fornecedor recém-adicionado. */
+export const SITUACAO_ATIVA = "Ativa";
+
 export interface CandidatoParaPlanilha {
   /** Mascarado XX.XXX.XXX/XXXX-XX — mesmo formato de `FornecedorPlanilhaRow.cnpj`. */
   cnpj: string;
@@ -27,6 +31,11 @@ export interface CandidatoParaPlanilha {
   /** `EmpresaCandidataFornecedor.categoriaSugerida` — vira a coluna "Tags", mesmo formato
    *  separado por vírgula que `parseFornecedoresPlanilha`/`FornecedorPlanilhaRow.categoria` lê. */
   categoria: string[];
+  /**
+   * Número do processo em que esta empresa está sendo consultada — vai para "Processos Cotação".
+   * Opcional porque a tela de descobrir candidatos (M27) adiciona fornecedor sem processo em curso.
+   */
+  numeroProcesso?: string;
 }
 
 interface CamposLinhaPlanilha extends CandidatoParaPlanilha {
@@ -37,8 +46,7 @@ interface CamposLinhaPlanilha extends CandidatoParaPlanilha {
  * Monta o array de células de uma linha nova respeitando a posição REAL de
  * cada coluna no cabeçalho (`colunas`, saída de `encontrarCabecalho`) — nunca
  * uma ordem fixa, porque a planilha pode ter as colunas reordenadas. Campo
- * sem correspondência no cabeçalho (`Situação`, `Processos Cotação`, etc.)
- * fica em branco. `largura` é o comprimento da linha de cabeçalho — a linha
+ * sem correspondência no cabeçalho fica em branco. `largura` é o comprimento da linha de cabeçalho — a linha
  * montada nunca é mais curta que ele, mesmo se algum campo mapear para um
  * índice além do que os campos conhecidos preenchem.
  */
@@ -67,6 +75,8 @@ export function montarLinhaPlanilha(
   preencher("email", campos.email);
   preencher("telefone", campos.telefone);
   preencher("fonte", campos.fonte);
+  preencher("situacao", SITUACAO_ATIVA);
+  if (campos.numeroProcesso) preencher("processosCotacao", campos.numeroProcesso);
 
   return linha;
 }
@@ -83,6 +93,20 @@ export function proximoLinhaId(linhas: { linhaId: string }[]): string {
     if (Number.isFinite(numero) && numero > maior) maior = numero;
   }
   return String(maior + 1);
+}
+
+/**
+ * Índice 0-based → letra de coluna no A1 notation ("A", "Z", "AA", ...). A planilha de fornecedores
+ * passa de 26 colunas, então o caso de duas letras não é hipotético.
+ */
+export function letraColuna(indice: number): string {
+  let n = indice;
+  let letra = "";
+  while (n >= 0) {
+    letra = String.fromCharCode((n % 26) + 65) + letra;
+    n = Math.floor(n / 26) - 1;
+  }
+  return letra;
 }
 
 export interface ResultadoAdicionarCandidato {
@@ -154,6 +178,33 @@ export async function adicionarCandidatoNaPlanilha(
 
   const existente = linhas.find((l) => l.cnpj === candidato.cnpj);
   if (existente) {
+    // Empresa já cadastrada: NÃO cria linha nova, mas acrescenta o processo atual ao histórico da
+    // célula "Processos Cotação" — a mesma empresa é consultada em processos diferentes ao longo
+    // do tempo, e substituir apagaria o registro de quem já foi consultado em quê.
+    const indiceColuna = cabecalho.colunas.processosCotacao;
+    if (candidato.numeroProcesso && indiceColuna !== undefined) {
+      const indiceLinha = rows.findIndex((row) => {
+        const celulaCnpj = row[cabecalho.colunas.cnpj ?? -1];
+        return typeof celulaCnpj === "string" && celulaCnpj.trim() === candidato.cnpj;
+      });
+
+      if (indiceLinha !== -1) {
+        const atual = rows[indiceLinha]?.[indiceColuna] ?? "";
+        const atualizada = acrescentarProcessoCotacao(atual, candidato.numeroProcesso);
+
+        // Só escreve se mudou — reenviar a mesma empresa no mesmo processo não gasta uma escrita
+        // nem reescreve a célula com o valor idêntico.
+        if (atualizada !== atual.trim()) {
+          await sheets.spreadsheets.values.update({
+            spreadsheetId,
+            range: `'${aba}'!${letraColuna(indiceColuna)}${indiceLinha + 1}`,
+            valueInputOption: "USER_ENTERED",
+            requestBody: { values: [[atualizada]] },
+          });
+        }
+      }
+    }
+
     return { linhaId: existente.linhaId, jaExistente: true };
   }
 

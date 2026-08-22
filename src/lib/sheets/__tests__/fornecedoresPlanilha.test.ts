@@ -41,16 +41,31 @@ describe("encontrarCabecalho", () => {
     });
   });
 
-  it("ignora explicitamente as colunas de acompanhamento de cotação", () => {
+  it("mapeia Situação e Processos Cotação para a escrita do M27 poder preenchê-las", () => {
+    // Antes de 2026-08-22 estas duas eram ignoradas junto com as demais colunas de
+    // acompanhamento. Passaram a ser mapeadas porque `montarLinhaPlanilha` precisa da POSIÇÃO
+    // delas — sem isso ela deixava as duas em branco, silenciosamente (§9.79).
+    const resultado = encontrarCabecalho([CABECALHO]);
+
+    expect(resultado!.colunas.situacao).toBe(10);
+    expect(resultado!.colunas.processosCotacao).toBe(12);
+  });
+
+  it("segue ignorando as colunas de acompanhamento que ninguém escreve", () => {
     const rows = [CABECALHO];
     const resultado = encontrarCabecalho(rows);
     const indicesMapeados = Object.values(resultado!.colunas);
-    // "Situação" (10), "Processos Cotação" (12), "Respondeu?" (13), "Enviou Orçamento?" (14)
-    // não podem aparecer em nenhum campo do mapa de colunas.
-    expect(indicesMapeados).not.toContain(10);
-    expect(indicesMapeados).not.toContain(12);
+    // "Respondeu?" (13) e "Enviou Orçamento?" (14) continuam fora do mapa.
     expect(indicesMapeados).not.toContain(13);
     expect(indicesMapeados).not.toContain(14);
+  });
+
+  it("não expõe Situação/Processos Cotação nas linhas lidas (a leitura não mudou)", () => {
+    // A promoção das duas colunas serve só à escrita: `FornecedorPlanilhaRow` mantém a mesma
+    // forma, e o sync do M24 continua sem enxergá-las.
+    const resultado = encontrarCabecalho([CABECALHO]);
+
+    expect(resultado!.colunas).toMatchObject({ situacao: 10, processosCotacao: 12 });
   });
 
   it("localiza o cabeçalho mesmo com colunas em ordem diferente (E-mail antes de CNPJ)", () => {
