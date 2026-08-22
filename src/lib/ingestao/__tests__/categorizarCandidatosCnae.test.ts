@@ -39,11 +39,22 @@ const mocks = vi.hoisted(() => {
     for (const metodo of METODOS_ESCRITA) db[model]![metodo] = vi.fn();
   }
 
-  return { db, sugerirCategoriasParaObjeto: vi.fn() };
+  // Cliente do banco transacional: só `Fornecedor` é lido de lá.
+  const dbTransacional: Record<string, Record<string, ReturnType<typeof vi.fn>>> = {} as never;
+  for (const model of MODELS) {
+    dbTransacional[model] = { findMany: vi.fn(), groupBy: vi.fn() };
+    for (const metodo of METODOS_ESCRITA) dbTransacional[model]![metodo] = vi.fn();
+  }
+
+  return { db, dbTransacional, sugerirCategoriasParaObjeto: vi.fn() };
 });
 
-vi.mock("@/lib/db", () => ({ db: mocks.db }));
-// Estes módulos leem/escrevem o banco de candidatos (VPS), não o transacional.
+// Dois clientes distintos de propósito: `Fornecedor` (a lista de categorias reais que limita
+// a escolha da IA) mora no transacional; candidatos e o cache de CNAE moram no banco de
+// candidatos. Mockar separado é o que faz o teste abaixo detectar a troca — com um mock só,
+// ler `Fornecedor` do banco errado passaria despercebido e gastaria ~1.300 chamadas de IA
+// para produzir zero categoria.
+vi.mock("@/lib/db", () => ({ db: mocks.dbTransacional }));
 vi.mock("@/lib/dbCandidatos", () => ({ dbCandidatos: mocks.db }));
 vi.mock("@/lib/ia/categorizarObjeto", () => ({
   sugerirCategoriasParaObjeto: mocks.sugerirCategoriasParaObjeto,
@@ -59,10 +70,26 @@ describe("categorizarCandidatosCnae", () => {
     vi.clearAllMocks();
     mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([CNAE_A, CNAE_B]);
     mocks.db.categoriaSugeridaPorCnae.findMany.mockResolvedValue([]);
-    mocks.db.fornecedor.findMany.mockResolvedValue([{ categoria: ["ferragens"] }, { categoria: ["elétrica"] }]);
+    mocks.dbTransacional.fornecedor.findMany.mockResolvedValue([{ categoria: ["ferragens"] }, { categoria: ["elétrica"] }]);
     mocks.db.categoriaSugeridaPorCnae.upsert.mockResolvedValue({});
     mocks.db.$executeRaw.mockResolvedValue(0);
     mocks.sugerirCategoriasParaObjeto.mockResolvedValue([]);
+  });
+
+  // Defeito real, pego antes de rodar: ao separar candidatos em banco próprio, este módulo teve
+  // o `db` inteiro trocado por `dbCandidatos` — e junto foi a leitura de `Fornecedor`, que não
+  // existe naquele banco. A lista de categorias viria vazia, a IA não teria entre o que escolher
+  // e as ~1.300 chamadas produziriam zero categoria, sem erro nenhum: o script terminaria
+  // "com sucesso" e o filtro da UI continuaria inerte.
+  it("lê Fornecedor do transacional e candidatos do banco de candidatos, nunca trocados", async () => {
+    await categorizarCandidatosCnae({ dryRun: true });
+
+    expect(mocks.dbTransacional.fornecedor.findMany).toHaveBeenCalledTimes(1);
+    expect(mocks.db.empresaCandidataFornecedor.groupBy).toHaveBeenCalledTimes(1);
+    // O banco de candidatos não tem `Fornecedor` populado — pedir a lista de categorias a ele
+    // devolveria vazio e a IA classificaria contra nada.
+    expect(mocks.db.fornecedor.findMany).not.toHaveBeenCalled();
+    expect(mocks.dbTransacional.empresaCandidataFornecedor.groupBy).not.toHaveBeenCalled();
   });
 
   it("não chama a IA de novo para CNAE já cacheado (evita custo repetido)", async () => {

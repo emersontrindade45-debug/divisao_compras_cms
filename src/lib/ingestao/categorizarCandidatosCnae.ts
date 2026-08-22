@@ -1,6 +1,7 @@
 // Sem `import "server-only"` deliberadamente (CLAUDE.md §9.62): scripts/categorizar-candidatos-cnpj.ts
 // precisa importar este módulo fora do bundler do Next, onde `server-only` sempre lança. Não é
 // alcançável a partir de `components/` — só pelo script administrativo.
+import { db as dbTransacional } from "@/lib/db";
 import { dbCandidatos as db } from "@/lib/dbCandidatos";
 import { sugerirCategoriasParaObjeto } from "@/lib/ia/categorizarObjeto";
 import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorrencia";
@@ -77,7 +78,11 @@ export async function categorizarCandidatosCnae(
   const novos = distintos.filter((d) => !cacheadosSet.has(d.cnaeCodigo));
   const alvo = opcoes.limite !== undefined ? novos.slice(0, opcoes.limite) : novos;
 
-  const fornecedoresAtivos = await db.fornecedor.findMany({
+  // `Fornecedor` vive no banco TRANSACIONAL, não no de candidatos — a lista de categorias
+  // reais do cadastro da Câmara é o que limita a escolha da IA (filtro anti-alucinação do
+  // M25). Lida do `db` errado, viria vazia (o banco de candidatos não tem fornecedor
+  // nenhum) e as ~1.300 chamadas de IA produziriam zero categoria, em silêncio.
+  const fornecedoresAtivos = await dbTransacional.fornecedor.findMany({
     where: { status: "ativo" },
     select: { categoria: true },
   });
