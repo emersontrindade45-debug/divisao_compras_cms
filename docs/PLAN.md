@@ -2461,3 +2461,45 @@ Para rodar:
   4,2s a frio.
 - **Conexões**: o Postgres do VPS não tem pooler na frente (o Supabase tem Supavisor). Sob
   concorrência pode esgotar `max_connections`.
+
+---
+
+## Sessão 2026-08-22 — Categorização por CNAE aplicada ao VPS (M27 etapa 4, CONCLUÍDA)
+
+**As 1.313 chamadas de IA não foram feitas de novo — já estavam pagas.** A verificação que o PLAN
+mandava fazer "antes de gastar" derrubou a premissa da pendência: o banco **local** já tinha a
+rodagem completa (1.313 linhas em `categorias_sugeridas_por_cnae`, 116 com categoria, 1.021.688
+candidatos categorizados) de uma sessão anterior. O que faltava nunca foi IA — era que o dado
+ficara no local enquanto a aplicação passou a ler o VPS. Custo desta sessão em chamadas de IA:
+**zero**.
+
+### O que foi feito
+
+1. Cache exportado do local como SQL idempotente (`INSERT ... ON CONFLICT DO UPDATE`, 1.313 linhas
+   / 164 kB) e **validado por dupla carga** num schema descartável antes de tocar o VPS.
+2. Conferido que as cargas batem: VPS e local com **8.657.319 linhas e os mesmos 1.313 CNAEs**,
+   cobertura do cache **total** (0 CNAEs do VPS fora do cache local).
+3. Cache carregado no VPS (0,1s) → 1.313 linhas, 116 com categoria.
+4. `--dry-run` como prova de custo: `cnaesJaCacheados: 1313`, `cnaesProcessados: 0`.
+5. Rodagem real: **1.021.688 linhas atualizadas em 6m28s**, 0 erros — idêntico ao local.
+
+### Verificação (o caso que o usuário reportou)
+
+"Guarujá + Material de limpeza": **205 candidatos** (era 0). Guarujá tem 47.155 candidatos, 6.819
+categorizados. Confirmado **pelo caminho real da aplicação** (Prisma + `normalizarMunicipio`, não
+só SQL): "Guarujá"/"guaruja"/"GUARUJA" normalizam para `"Guarujá"` e devolvem página cheia em
+35–410ms. `app_candidatos` conferido: `SELECT true`, `UPDATE false`.
+
+### Lição de método
+
+Um `EXPLAIN` meu com `municipio='GUARUJA'` (chute, não o que a app faz) deu `rows=0` e pareceu
+defeito; o valor gravado é `"Guarujá"`. Reproduzir a query **pelo código da aplicação** em vez de
+reescrevê-la à mão é o que distingue verificação de encenação (§9.30/§9.80).
+
+### Pendências
+
+- Senha do papel `postgres` do VPS foi redefinida nesta sessão e **trafegou pelo chat** — trocar
+  por uma nova e guardar no gerenciador. `app_candidatos` (o que a Vercel usa) não foi tocado, por
+  isso a produção não sofreu interrupção.
+- `.ssh-vps/vps_key` (chave privada sem passphrase) dentro do repositório: conferir `.gitignore`.
+- M26: ~107 fornecedores em falha temporária do BrasilAPI — sem mudança.

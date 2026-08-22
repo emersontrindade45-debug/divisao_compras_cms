@@ -16,10 +16,17 @@ import { categorizarCandidatosCnae } from "../src/lib/ingestao/categorizarCandid
  *   npx tsx scripts/categorizar-candidatos-cnpj.ts                       (grava de verdade)
  *   npx tsx scripts/categorizar-candidatos-cnpj.ts --concorrencia=1      (mais lento, menos risco de rate limit)
  *
- * **Não rodar sem `--dry-run`/`--limite` contra o banco de produção sem antes conferir o resumo do
- * dry-run** (CLAUDE.md §8) — a `DATABASE_URL` do ambiente decide o banco de destino. Contra a base
- * local (8,66M candidatos), o número de CNAEs distintos é o que importa para o custo em chamadas de
- * IA (~1.300 no máximo), não o número de linhas da tabela.
+ * **Duas conexões, dois bancos** (M27 — CLAUDE.md §9.82): `DATABASE_URL` aponta para o banco
+ * TRANSACIONAL e é lida só para obter `Fornecedor.categoria`, a lista fechada entre a qual a IA
+ * escolhe; o destino da escrita é o banco de CANDIDATOS, via
+ * `DATABASE_CANDIDATOS_ADMIN_URL` (credencial de escrita, só na máquina do operador — a da Vercel,
+ * `DATABASE_CANDIDATOS_URL`, tem apenas `SELECT`). Rodar sem a lista de categorias produziria as
+ * ~1.300 chamadas de IA com zero categoria, em silêncio.
+ *
+ * **Não rodar sem `--dry-run`/`--limite` antes de conferir o resumo do dry-run** (CLAUDE.md §8).
+ * O custo em chamadas de IA é o número de CNAEs distintos AINDA NÃO CACHEADOS (~1.300 no total),
+ * não o número de linhas da tabela: com `CategoriaSugeridaPorCnae` já populada, a rodagem faz zero
+ * chamadas e executa só a propagação (Parte B).
  */
 
 async function main() {
