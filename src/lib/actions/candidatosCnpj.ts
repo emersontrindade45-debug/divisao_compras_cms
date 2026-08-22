@@ -221,11 +221,19 @@ const TTL_CACHE_MUNICIPIOS_MS = 5 * 60 * 1000;
  * existe, evita usuário digitar cidade sem candidato nenhum ou com erro de acento/grafia — que
  * já causou um bug real, ver CLAUDE.md e docs/PLAN.md M27).
  *
- * `GROUP BY estado, municipio` em vez de `DISTINCT municipio`: nenhum índice cobre valor distinto
- * de coluna (nem o `[estado, município]` existente — Postgres não faz "loose index scan"
- * nativamente), então é sequential scan de qualquer forma. Medido contra os 8,66M candidatos
- * locais: **~14s por chamada, fria ou não** — inaceitável rodar isso a cada carregamento de
- * página sem cache.
+ * Implementado como **loose index scan** (skip scan) emulado com `WITH RECURSIVE`, não como
+ * `GROUP BY`/`DISTINCT`: o Postgres não tem skip scan nativo, então um `GROUP BY municipio`
+ * varre a tabela inteira — medido em ~14s contra os 8,66M candidatos, e em produção nem chega a
+ * terminar: o `statement_timeout` corta antes (SQLSTATE 57014) e a página fica em branco. Pior,
+ * como toda tentativa falha, o cache abaixo nunca é populado e cada carregamento repete o erro.
+ *
+ * A recursão pede repetidamente "o menor município > o último que achei", e cada passo é um
+ * `Index Scan ... LIMIT 1` sobre `[estado, municipio, cnpj]` — o custo passa a ser proporcional
+ * ao número de municípios (645 em SP), não ao de linhas. Medido em produção: **182ms**, ~77x mais
+ * rápido, dentro do `statement_timeout` com folga.
+ *
+ * O `WHERE municipio IS NOT NULL` no SELECT final descarta a linha-sentinela: o passo recursivo
+ * devolve `NULL` quando não há mais município à frente, e é isso que encerra a recursão.
  */
 export async function listarMunicipiosComCandidatos(): Promise<string[]> {
   await requireAuth();
@@ -234,11 +242,32 @@ export async function listarMunicipiosComCandidatos(): Promise<string[]> {
     return cacheMunicipios.valor;
   }
 
-  const linhas = await db.empresaCandidataFornecedor.groupBy({
-    by: ["municipio"],
-    where: { estado: ESTADO_IMPORTADO },
-    orderBy: { municipio: "asc" },
-  });
+  const linhas = await db.$queryRaw<Array<{ municipio: string }>>`
+    WITH RECURSIVE municipios AS (
+      (
+        SELECT "municipio"
+        FROM "empresas_candidatas_fornecedor"
+        WHERE "estado" = ${ESTADO_IMPORTADO}
+        ORDER BY "municipio"
+        LIMIT 1
+      )
+      UNION ALL
+      SELECT (
+        SELECT "municipio"
+        FROM "empresas_candidatas_fornecedor"
+        WHERE "estado" = ${ESTADO_IMPORTADO}
+          AND "municipio" > municipios."municipio"
+        ORDER BY "municipio"
+        LIMIT 1
+      )
+      FROM municipios
+      WHERE municipios."municipio" IS NOT NULL
+    )
+    SELECT "municipio"
+    FROM municipios
+    WHERE "municipio" IS NOT NULL
+    ORDER BY "municipio"
+  `;
   const valor = linhas.map((l) => l.municipio);
 
   cacheMunicipios = { valor, expiraEm: Date.now() + TTL_CACHE_MUNICIPIOS_MS };

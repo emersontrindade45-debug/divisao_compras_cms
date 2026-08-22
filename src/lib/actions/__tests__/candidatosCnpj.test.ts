@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   db: {
     empresaCandidataFornecedor: { findMany: vi.fn(), findUnique: vi.fn(), groupBy: vi.fn() },
+    $queryRaw: vi.fn(),
     fornecedor: { findMany: vi.fn() },
   },
   requireAuth: vi.fn(),
@@ -188,8 +189,14 @@ describe("listarMunicipiosComCandidatos", () => {
     return import("../candidatosCnpj");
   }
 
-  it("agrupa por município, filtrando pelo estado importado (SP)", async () => {
-    mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([
+  /** Texto plano da query montada pelo template tag do Prisma (`$queryRaw`). */
+  function sqlDaChamada(): string {
+    const [template] = mocks.db.$queryRaw.mock.calls[0] as [TemplateStringsArray];
+    return template.join(" ");
+  }
+
+  it("devolve os municípios do estado importado (SP), em ordem", async () => {
+    mocks.db.$queryRaw.mockResolvedValue([
       { municipio: "Campinas" },
       { municipio: "Santos" },
       { municipio: "Sao Paulo" },
@@ -199,25 +206,42 @@ describe("listarMunicipiosComCandidatos", () => {
     const resultado = await listar();
 
     expect(resultado).toEqual(["Campinas", "Santos", "Sao Paulo"]);
-    expect(mocks.db.empresaCandidataFornecedor.groupBy).toHaveBeenCalledWith({
-      by: ["municipio"],
-      where: { estado: "SP" },
-      orderBy: { municipio: "asc" },
-    });
+    // O estado entra como parâmetro do template tag, nunca interpolado no SQL.
+    expect(mocks.db.$queryRaw.mock.calls[0]?.slice(1)).toContain("SP");
+  });
+
+  // A garantia que essa função existe para dar: em produção o `GROUP BY` varria os 8,66M
+  // candidatos, estourava o `statement_timeout` (57014) e deixava a tela em branco — e como
+  // toda tentativa falhava, o cache nunca era populado. Trocar o skip scan de volta por um
+  // agrupamento/DISTINCT reintroduz exatamente esse bug, então o teste ancora na forma da
+  // query, não no resultado (que um GROUP BY também devolveria certo, em outro tempo).
+  it("consulta por skip scan recursivo, nunca varrendo a tabela com GROUP BY/DISTINCT", async () => {
+    mocks.db.$queryRaw.mockResolvedValue([{ municipio: "Santos" }]);
+
+    const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
+    await listar();
+
+    const sql = sqlDaChamada();
+    expect(sql).toMatch(/WITH RECURSIVE/i);
+    expect(sql).toMatch(/LIMIT 1/i);
+    expect(sql).not.toMatch(/GROUP BY/i);
+    expect(sql).not.toMatch(/DISTINCT/i);
+    // `groupBy` do Prisma é o caminho antigo — não pode ressurgir por baixo dos panos.
+    expect(mocks.db.empresaCandidataFornecedor.groupBy).not.toHaveBeenCalled();
   });
 
   it("exige autenticação antes de consultar o banco", async () => {
     mocks.requireAuth.mockRejectedValue(new Error("não autenticado"));
-    mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([]);
+    mocks.db.$queryRaw.mockResolvedValue([]);
 
     const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
 
     await expect(listar()).rejects.toThrow("não autenticado");
-    expect(mocks.db.empresaCandidataFornecedor.groupBy).not.toHaveBeenCalled();
+    expect(mocks.db.$queryRaw).not.toHaveBeenCalled();
   });
 
   it("devolve lista vazia quando não há nenhum candidato importado", async () => {
-    mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([]);
+    mocks.db.$queryRaw.mockResolvedValue([]);
 
     const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
     const resultado = await listar();
@@ -226,12 +250,12 @@ describe("listarMunicipiosComCandidatos", () => {
   });
 
   it("não consulta o banco de novo dentro do TTL (cache em memória)", async () => {
-    mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([{ municipio: "Santos" }]);
+    mocks.db.$queryRaw.mockResolvedValue([{ municipio: "Santos" }]);
 
     const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
     await listar();
     await listar();
 
-    expect(mocks.db.empresaCandidataFornecedor.groupBy).toHaveBeenCalledTimes(1);
+    expect(mocks.db.$queryRaw).toHaveBeenCalledTimes(1);
   });
 });
