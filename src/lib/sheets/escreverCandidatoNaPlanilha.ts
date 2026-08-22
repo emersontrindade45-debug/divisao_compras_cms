@@ -19,6 +19,14 @@ export const FONTE_CANDIDATOS_CNPJ = "M27 — Receita Federal";
 /** Valor da coluna "Situação" para fornecedor recém-adicionado. */
 export const SITUACAO_ATIVA = "Ativa";
 
+/** Valor da coluna "E-mail enviado?" — preenchido automaticamente ao adicionar à planilha. */
+export const EMAIL_ENVIADO_SIM = "Sim";
+
+/** Reexporta o client para os módulos irmãos que só leem (evita duplicar a construção). */
+export function getSheetsClientCompartilhado() {
+  return getSheetsClient();
+}
+
 export interface CandidatoParaPlanilha {
   /** Mascarado XX.XXX.XXX/XXXX-XX — mesmo formato de `FornecedorPlanilhaRow.cnpj`. */
   cnpj: string;
@@ -76,7 +84,13 @@ export function montarLinhaPlanilha(
   preencher("telefone", campos.telefone);
   preencher("fonte", campos.fonte);
   preencher("situacao", SITUACAO_ATIVA);
-  if (campos.numeroProcesso) preencher("processosCotacao", campos.numeroProcesso);
+  if (campos.numeroProcesso) {
+    preencher("processosCotacao", campos.numeroProcesso);
+    // "E-mail enviado?" só faz sentido junto com o processo: é a marcação de que esta empresa já
+    // entrou na leva de consulta DAQUELE processo. Sem processo em curso (fluxo de descobrir
+    // candidatos), a empresa é só cadastrada e a coluna fica vazia.
+    preencher("emailEnviado", EMAIL_ENVIADO_SIM);
+  }
 
   return linha;
 }
@@ -128,7 +142,7 @@ export interface ResultadoAdicionarCandidato {
  * "Primeira aba" é consistente com o caminho de LEITURA logo abaixo, que
  * também usa este mesmo título via API autenticada.
  */
-async function localizarAbaDeDados(
+export async function localizarAbaDeDados(
   sheets: ReturnType<typeof getSheetsClient>,
   spreadsheetId: string,
 ): Promise<string> {
@@ -201,6 +215,19 @@ export async function adicionarCandidatoNaPlanilha(
             valueInputOption: "USER_ENTERED",
             requestBody: { values: [[atualizada]] },
           });
+
+          // Marca "E-mail enviado?" também na linha já existente: sem isso, empresa cadastrada
+          // antes desta funcionalidade entraria num processo novo sem a marcação, e a coluna
+          // mentiria sobre o que foi trabalhado.
+          const iEnviado = cabecalho.colunas.emailEnviado;
+          if (iEnviado !== undefined) {
+            await sheets.spreadsheets.values.update({
+              spreadsheetId,
+              range: `'${aba}'!${letraColuna(iEnviado)}${indiceLinha + 1}`,
+              valueInputOption: "USER_ENTERED",
+              requestBody: { values: [[EMAIL_ENVIADO_SIM]] },
+            });
+          }
         }
       }
     }

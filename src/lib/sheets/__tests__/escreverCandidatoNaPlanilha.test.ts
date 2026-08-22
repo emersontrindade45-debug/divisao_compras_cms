@@ -258,10 +258,11 @@ describe("Situação e Processos Cotação", () => {
   // Cabeçalho com as duas colunas novas, nas posições em que aparecem na planilha real.
   const CABECALHO_COMPLETO = [
     "#", "Nome/Razão Social", "CPF/CNPJ", "Município", "UF", "E-mail",
-    "Telefone", "Fonte", "Tags", "Situação", "Processos Cotação",
+    "Telefone", "Fonte", "Tags", "Situação", "Processos Cotação", "E-mail enviado?",
   ];
   const I_SITUACAO = 9;
   const I_PROCESSOS = 10;
+  const I_ENVIADO = 11;
 
   function planilhaCom(linhas: string[][]) {
     mocks.valuesGetMock.mockResolvedValue({ data: { values: [CABECALHO_COMPLETO, ...linhas] } });
@@ -277,6 +278,16 @@ describe("Situação e Processos Cotação", () => {
     const escrita = mocks.appendMock.mock.calls[0]![0].requestBody.values[0];
     expect(escrita[I_SITUACAO]).toBe("Ativa");
     expect(escrita[I_PROCESSOS]).toBe("908/2024");
+    expect(escrita[I_ENVIADO]).toBe("Sim");
+  });
+
+  it("não marca 'E-mail enviado?' sem processo em curso", async () => {
+    planilhaCom([]);
+
+    await adicionarCandidatoNaPlanilha(CANDIDATO);
+
+    const escrita = mocks.appendMock.mock.calls[0]![0].requestBody.values[0];
+    expect(escrita[I_ENVIADO]).toBe("");
   });
 
   it("marca Situação como 'Ativa' mesmo sem processo em curso", async () => {
@@ -299,12 +310,19 @@ describe("Situação e Processos Cotação", () => {
     expect(r.jaExistente).toBe(true);
     // Não cria linha nova...
     expect(mocks.appendMock).not.toHaveBeenCalled();
-    // ...mas atualiza a célula acumulando os dois processos.
-    expect(mocks.updateMock).toHaveBeenCalledTimes(1);
-    const chamada = mocks.updateMock.mock.calls[0]![0];
-    expect(chamada.requestBody.values[0][0]).toBe("908/2024, 13137/2024");
-    // Linha 2 da planilha (1 = cabeçalho), coluna K (índice 10).
-    expect(chamada.range).toContain("K2");
+    // ...mas atualiza a célula acumulando os dois processos, e marca "E-mail enviado?".
+    const escritas = mocks.updateMock.mock.calls.map((c) => ({
+      range: c[0].range as string,
+      valor: c[0].requestBody.values[0][0] as string,
+    }));
+
+    // Linha 2 da planilha (1 = cabeçalho), coluna K (índice 10) = Processos Cotação.
+    const processos = escritas.find((e) => e.range.includes("K2"));
+    expect(processos?.valor).toBe("908/2024, 13137/2024");
+
+    // Coluna L (índice 11) = E-mail enviado?
+    const enviado = escritas.find((e) => e.range.includes("L2"));
+    expect(enviado?.valor).toBe("Sim");
   });
 
   it("não reescreve quando a empresa já tem aquele mesmo processo", async () => {

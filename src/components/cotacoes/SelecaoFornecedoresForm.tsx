@@ -85,6 +85,7 @@ export function SelecaoFornecedoresForm({
   const [categoriasSugeridas, setCategoriasSugeridas] = useState<string[] | null>(null);
   const [candidatos, setCandidatos] = useState<CandidatoSugerido[] | null>(null);
   const [totalCandidatos, setTotalCandidatos] = useState(0);
+  const [locaisCandidatos, setLocaisCandidatos] = useState(0);
   const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
   const [candidatosSelecionados, setCandidatosSelecionados] = useState<Set<string>>(new Set());
   const [adicionandoPlanilha, setAdicionandoPlanilha] = useState(false);
@@ -148,15 +149,18 @@ export function SelecaoFornecedoresForm({
     }
     setBuscandoCandidatos(true);
     try {
-      const r = await sugerirCandidatosParaObjeto(processo.objeto);
+      const r = await sugerirCandidatosParaObjeto(processo.objeto, processo.numero);
       setCandidatos(r.candidatos);
       setTotalCandidatos(r.totalEncontrado);
+      setLocaisCandidatos(r.locais);
       // Nada vem pré-selecionado: a lista chega com até 500 empresas e marcar todas faria o
       // analista enviar cotação em massa sem revisar (§9.40 — a UI não pode prometer o que a
       // conferência da IN 65/2021 exige que seja conferido).
       setCandidatosSelecionados(new Set());
       if (r.candidatos.length === 0) {
-        toast.warning("Nenhuma empresa encontrada para o objeto deste processo.");
+        toast.warning(
+          "Nenhuma empresa nova para este processo — as que casam com o objeto já estão na planilha.",
+        );
       } else {
         toast.success(`${r.candidatos.length} empresa(s) encontrada(s). Revise e selecione.`);
       }
@@ -461,8 +465,16 @@ export function SelecaoFornecedoresForm({
               {totalCandidatos > candidatos.length
                 ? `${totalCandidatos.toLocaleString("pt-BR")} empresas casaram com o objeto; mostrando as ${candidatos.length} mais relevantes (Baixada Santista primeiro).`
                 : `${candidatos.length} empresa(s), Baixada Santista primeiro.`}{" "}
-              Estas empresas <strong>não</strong> estão no cadastro — revise antes de consultar.
+              Empresas já adicionadas neste processo não aparecem de novo — clique outra vez para
+              buscar as próximas.
             </p>
+            {locaisCandidatos < candidatos.length && (
+              <p className="mb-3 text-sm">
+                {locaisCandidatos === 0
+                  ? "As empresas da Baixada Santista para este objeto já foram trabalhadas neste processo — a lista agora traz o restante do estado."
+                  : `${locaisCandidatos} da Baixada Santista; as demais são de outras cidades de SP.`}
+              </p>
+            )}
             <p className="mb-3 text-xs text-muted-foreground">
               Clique para selecionar uma. <kbd className="rounded border px-1">Shift</kbd>+clique
               seleciona o intervalo desde a última;{" "}

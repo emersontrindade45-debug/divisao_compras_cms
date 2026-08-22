@@ -27,4 +27,6 @@ export interface ResultadoSugestaoCandidatos {
   candidatos: CandidatoSugerido[];
   /** Quantos casaram com os CNAEs antes de aplicar o teto — para a UI dizer que houve corte. */
   totalEncontrado: number;
+  /** Quantos dos devolvidos são da Baixada Santista — a UI avisa quando a busca sai da região. */
+  locais: number;
 }

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   requireAuth: vi.fn(),
   registrarAuditoria: vi.fn(),
   sugerirCnaesParaObjeto: vi.fn(),
+  lerJaConsultados: vi.fn(),
 }));
 
 vi.mock("@/lib/dbCandidatos", () => ({ dbCandidatos: mocks.dbCandidatos }));
@@ -18,6 +19,9 @@ vi.mock("@/lib/auth/rbac", () => ({ requireAuth: mocks.requireAuth }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("@/lib/ia/sugerirCnaesParaObjeto", () => ({
   sugerirCnaesParaObjeto: mocks.sugerirCnaesParaObjeto,
+}));
+vi.mock("@/lib/sheets/lerConsultasPorProcesso", () => ({
+  lerCnpjsJaConsultadosNoProcesso: mocks.lerJaConsultados,
 }));
 
 // `vi.resetModules()` + import dinâmico porque o cache do catálogo é estado de módulo (§9.34):
@@ -50,6 +54,7 @@ describe("sugerirCandidatosParaObjeto", () => {
       { cnaePrincipalCodigo: "4761003", cnaePrincipalDescricao: "Papelaria" },
     ]);
     mocks.dbCandidatos.empresaCandidataFornecedor.count.mockResolvedValue(0);
+    mocks.lerJaConsultados.mockResolvedValue(new Set<string>());
   });
 
   it("exige autenticação", async () => {
@@ -61,7 +66,7 @@ describe("sugerirCandidatosParaObjeto", () => {
   it("retorna vazio sem chamar a IA quando o objeto está em branco", async () => {
     const r = await sugerirCandidatosParaObjeto("   ");
 
-    expect(r).toEqual({ cnaesSugeridos: [], candidatos: [], totalEncontrado: 0 });
+    expect(r).toEqual({ cnaesSugeridos: [], candidatos: [], totalEncontrado: 0, locais: 0 });
     expect(mocks.sugerirCnaesParaObjeto).not.toHaveBeenCalled();
   });
 
@@ -183,7 +188,61 @@ describe("sugerirCandidatosParaObjeto", () => {
     await sugerirCandidatosParaObjeto("caneta");
 
     const args = mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mock.calls[0][0];
-    expect(args.take).toBeLessThanOrEqual(2000);
+    // Folga acima do teto de 500 (a ordenação e a exclusão por processo acontecem depois da
+    // leitura), mas longe de varrer a tabela inteira.
+    expect(args.take).toBeLessThanOrEqual(4000);
     expect(args.take).toBeGreaterThanOrEqual(500);
+  });
+
+  it("exclui empresas já consultadas NESTE processo", async () => {
+    mocks.sugerirCnaesParaObjeto.mockResolvedValue(["4761003"]);
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
+      candidato({ id: "1", cnpj: "11111111000111" }),
+      candidato({ id: "2", cnpj: "22222222000122" }),
+    ]);
+    // A planilha guarda o CNPJ mascarado.
+    mocks.lerJaConsultados.mockResolvedValue(new Set(["11.111.111/0001-11"]));
+
+    const r = await sugerirCandidatosParaObjeto("caneta", "908/2024");
+
+    expect(r.candidatos.map((c) => c.id)).toEqual(["2"]);
+    expect(mocks.lerJaConsultados).toHaveBeenCalledWith("908/2024");
+  });
+
+  it("não filtra nada quando não há processo em curso", async () => {
+    mocks.sugerirCnaesParaObjeto.mockResolvedValue(["4761003"]);
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
+      candidato({ id: "1" }),
+    ]);
+
+    const r = await sugerirCandidatosParaObjeto("caneta");
+
+    expect(r.candidatos).toHaveLength(1);
+    expect(mocks.lerJaConsultados).not.toHaveBeenCalled();
+  });
+
+  it("falha ao ler a planilha não derruba a busca (degrada sem filtrar)", async () => {
+    mocks.sugerirCnaesParaObjeto.mockResolvedValue(["4761003"]);
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
+      candidato({ id: "1" }),
+    ]);
+    mocks.lerJaConsultados.mockRejectedValue(new Error("Sheets fora do ar"));
+
+    const r = await sugerirCandidatosParaObjeto("caneta", "908/2024");
+
+    expect(r.candidatos).toHaveLength(1);
+  });
+
+  it("conta quantos são da Baixada Santista para a UI avisar sobre a região", async () => {
+    mocks.sugerirCnaesParaObjeto.mockResolvedValue(["4761003"]);
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
+      candidato({ id: "1", municipio: "Santos" }),
+      candidato({ id: "2", municipio: "Guarujá" }),
+      candidato({ id: "3", municipio: "Campinas" }),
+    ]);
+
+    const r = await sugerirCandidatosParaObjeto("caneta");
+
+    expect(r.locais).toBe(2);
   });
 });

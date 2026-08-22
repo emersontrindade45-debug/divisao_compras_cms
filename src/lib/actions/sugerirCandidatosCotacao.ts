@@ -5,6 +5,9 @@ import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { sugerirCnaesParaObjeto, type ClasseCnae } from "@/lib/ia/sugerirCnaesParaObjeto";
 import { ordenarCandidatosCotacao } from "@/lib/domain/ordenarCandidatosCotacao";
+import { CAMADAS_GEOGRAFICAS } from "@/lib/domain/camadaGeografica";
+import { lerCnpjsJaConsultadosNoProcesso } from "@/lib/sheets/lerConsultasPorProcesso";
+import { mascararCnpj } from "@/lib/domain/cnpj";
 import {
   TETO_CANDIDATOS,
   type CandidatoSugerido,
@@ -12,6 +15,10 @@ import {
 } from "@/lib/domain/candidatoSugerido";
 
 const ESTADO_IMPORTADO = "SP";
+
+const CIDADES_BAIXADA = new Set(
+  CAMADAS_GEOGRAFICAS.find((c) => c.nome === "baixada_santista")?.cidades ?? [],
+);
 
 // Cache em memória do processo para o catálogo de CNAEs — mesmo padrão de
 // `listarMunicipiosComCandidatos` (candidatosCnpj.ts), e pelo mesmo motivo: o `groupBy` que o monta
@@ -65,10 +72,16 @@ async function obterCatalogoCnaes(): Promise<ClasseCnae[]> {
  */
 export async function sugerirCandidatosParaObjeto(
   objeto: string,
+  numeroProcesso?: string,
 ): Promise<ResultadoSugestaoCandidatos> {
   const user = await requireAuth();
 
-  const vazio: ResultadoSugestaoCandidatos = { cnaesSugeridos: [], candidatos: [], totalEncontrado: 0 };
+  const vazio: ResultadoSugestaoCandidatos = {
+    cnaesSugeridos: [],
+    candidatos: [],
+    totalEncontrado: 0,
+    locais: 0,
+  };
   if (!objeto.trim()) return vazio;
 
   // Catálogo de subclasses realmente presentes na base — a IA só pode escolher entre estas, e usar
@@ -96,15 +109,24 @@ export async function sugerirCandidatosParaObjeto(
       cnaePrincipalCodigo: true,
       cnaePrincipalDescricao: true,
     },
-    // Janela acima do teto da UI: a ordenação por localidade precisa enxergar mais que os 500
-    // finais, senão o corte aconteceria antes de priorizar a Baixada e devolveria 500 empresas
-    // arbitrárias do estado inteiro. 4x (2.000 linhas, ~600 KB) em vez de 20x: medido que 10.000
-    // linhas trafegam ~3 MB do VPS em Campinas até `iad1` a cada clique, e a Baixada Santista cabe
-    // folgadamente nessa janela.
-    take: TETO_CANDIDATOS * 4,
+    // Janela acima do teto da UI por dois motivos: a ordenação por localidade precisa enxergar
+    // mais que os 500 finais (senão o corte viria antes de priorizar a Baixada), e as empresas já
+    // consultadas neste processo são descartadas DEPOIS da leitura — sem folga, a segunda ou
+    // terceira busca do mesmo processo devolveria menos de 500 mesmo havendo candidatos de sobra.
+    // 8x (4.000 linhas, ~1,2 MB) equilibra isso contra o tráfego do VPS em Campinas até `iad1`.
+    take: TETO_CANDIDATOS * 8,
   });
 
-  const comEmail = encontrados.filter((c): c is typeof c & { email: string } => Boolean(c.email));
+  // Empresas já trabalhadas NESTE processo saem da lista — é o que permite clicar de novo e
+  // receber empresas diferentes. A exclusão é por processo (ver lerCnpjsJaConsultadosNoProcesso):
+  // a mesma empresa volta a aparecer num processo novo.
+  const jaConsultados = numeroProcesso
+    ? await lerCnpjsJaConsultadosNoProcesso(numeroProcesso).catch(() => new Set<string>())
+    : new Set<string>();
+
+  const comEmail = encontrados
+    .filter((c): c is typeof c & { email: string } => Boolean(c.email))
+    .filter((c) => !jaConsultados.has(mascararCnpj(c.cnpj)));
 
   // Total real, não o tamanho da janela lida acima: `encontrados` está limitado por `take`, então
   // usar o comprimento dele faria a tela anunciar "10.000 empresas" sempre que houvesse mais que
@@ -149,5 +171,10 @@ export async function sugerirCandidatosParaObjeto(
     detalhes: { cnaesSugeridos, totalEncontrado, devolvidos: candidatos.length },
   });
 
-  return { cnaesSugeridos, candidatos, totalEncontrado };
+  // A ordenação já põe a Baixada Santista primeiro, então a lista "sai da região" naturalmente
+  // quando as empresas locais acabam — não é preciso uma segunda consulta. O que falta é DIZER
+  // isso: sem aviso, o analista vê Campinas e Ribeirão no meio da lista sem entender por quê.
+  const locais = candidatos.filter((c) => CIDADES_BAIXADA.has(c.municipio)).length;
+
+  return { cnaesSugeridos, candidatos, totalEncontrado, locais };
 }

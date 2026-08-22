@@ -77,6 +77,7 @@ const ALIASES_CAMPO: Record<string, string[]> = {
   // em `FornecedorPlanilhaRow` nem no sync do M24, que segue com a mesma forma de antes.
   situacao: ["situacao"],
   processosCotacao: ["processos cotacao"],
+  emailEnviado: ["e-mail enviado?", "email enviado?", "e-mail enviado", "email enviado"],
 };
 
 /**
