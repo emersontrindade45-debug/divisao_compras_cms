@@ -13,6 +13,10 @@ dev-out.log
 dev-err.log
 # relatórios da régua de avaliação da busca (scripts/avaliar-busca-pncp.ts)
 .avaliacao/
+# MCP local com token de API (Hostinger etc.) — nunca versionar
+.mcp.json
+# chave SSH privada do VPS + senha do Postgres — nunca versionar
+.ssh-vps/
 
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 

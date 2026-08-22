@@ -588,7 +588,13 @@ model EmpresaCandidataFornecedor {
   importadoEm            DateTime  @default(now())
   atualizadoEm           DateTime  @updatedAt
 
-  @@index([estado, municipio])
+  // `cnpj` no fim é o que faz a busca da UI funcionar: `buscarCandidatosCnpj`
+  // filtra por `[estado, municipio]` mas ordena/pagina por `cnpj`. Com índice só
+  // em `[estado, municipio]`, o planner preferia varrer o unique de `cnpj` (já
+  // ordenado, evita o sort) filtrando município linha a linha — em 8,66M linhas
+  // isso estourava o `statement_timeout` em produção (erro 57014). Com a coluna
+  // de ordenação no índice, o mesmo SELECT caiu para ~1ms.
+  @@index([estado, municipio, cnpj])
   @@index([categoriaSugerida], type: Gin)
   @@map("empresas_candidatas_fornecedor")
 }
