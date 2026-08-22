@@ -976,3 +976,40 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     Regra: ao escrever um objeto/linha a partir de campos nomeados, o teste de regressão precisa
     cobrir **todo** campo da interface de entrada contra um cabeçalho que os contenha todos — não
     só os campos que o autor lembrou de testar na hora.
+80. **Antes de otimizar um banco, provar que é ELE que a aplicação usa — "o servidor onde rodei o
+    import" não é sinônimo de "o banco de produção".** Em 2026-08-21 gastei uma sessão inteira
+    corrigindo `/fornecedores/descobrir` no Postgres do VPS: criei índice composto, reescrevi
+    query com skip scan, apliquei migration, medi `EXPLAIN (ANALYZE)` em 1,3ms e 182ms. Todas as
+    medições eram verdadeiras e **nenhuma delas tocava o banco que a app lia** — a `DATABASE_URL`
+    de produção apontava para o Supabase, e o erro seguia idêntico depois de cada "correção".
+    A evidência que teria fechado o diagnóstico em minutos existia desde o primeiro erro:
+    `statement_timeout` no VPS era **`0` (desativado)**, ou seja aquele banco era fisicamente
+    incapaz de emitir o `57014` que a aplicação recebia. Duas checagens baratas, ambas puladas:
+    (a) `SHOW statement_timeout` — quando a mensagem de erro nomeia um limite, conferir se o
+    limite sequer existe naquele servidor; (b) `SELECT client_addr FROM pg_stat_activity` durante
+    um acesso real — se nenhuma conexão da app aparece, a app não fala com aquele banco. Vale a
+    §9.31 de novo, agora invertida: lá o CLI funcionava e a app não; aqui eu fazia a app "melhorar"
+    num banco que ela nunca consultou. **Regra: a primeira pergunta ao diagnosticar produção não é
+    "por que a query é lenta", é "esta query está saindo de onde eu acho que está saindo".**
+81. **Sintoma que persiste idêntico depois de uma correção medida e correta é sinal de premissa
+    errada, não de correção insuficiente.** Nesta mesma sessão, corrigi o timeout três vezes
+    (índice → skip scan → …) e a tela continuou em branco nas três. Cada correção era legítima e
+    verificada isoladamente; o que não mudava era o resultado do usuário. Tratei isso como "falta
+    corrigir mais uma query" quando era "estou corrigindo no lugar errado" — a §9.24 já registrava
+    que a segunda tentativa falhando pela mesma razão manda **parar e investigar** em vez de tentar
+    a terceira variação. O marcador prático: se a métrica que eu meço melhora e a experiência que o
+    usuário relata não muda **em nada**, os dois provavelmente não estão olhando o mesmo sistema.
+82. **Separar uma tabela gigante em banco próprio é decisão de fronteira, não de tamanho — o
+    critério é acoplamento.** `EmpresaCandidataFornecedor` (8,66M linhas / 5,2GB) foi movida para
+    um Postgres no VPS porque não cabe no plano do Supabase, e a separação é segura por três
+    propriedades que valem checar antes de fatiar qualquer tabela: é **derivada de fonte externa**
+    (dump da Receita — se perder, reimporta), é **somente-leitura na operação** (só o script de
+    ingestão escreve) e **nenhuma foreign key entra ou sai dela**. `Fornecedor`, em contraste,
+    fica no transacional: tem relação com `Cotacao`/`Proposta`/`QualificacaoFornecedor` e carrega
+    a trilha de auditoria da IN 65/2021 — separá-la quebraria integridade referencial e
+    conformidade. Corolários de implementação: (a) a credencial da app no banco separado tem
+    **apenas `SELECT`** na única tabela, com a de escrita existindo só na máquina do operador
+    (`DATABASE_CANDIDATOS_ADMIN_URL`, nunca na Vercel); (b) o teste que protege a fronteira olha
+    **qual cliente Prisma recebeu cada consulta**, porque trocar os bancos não quebra tipo nem
+    asserção de resultado — confirmado por mutação; (c) certificado auto-assinado exige
+    `sslmode=no-verify`, não `require` (§9.57).
