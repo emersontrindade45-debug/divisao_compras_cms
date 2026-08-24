@@ -5,7 +5,11 @@ import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { carregarPlanilha, extrairObjetoDoTitulo } from "@/lib/sheets/googleSheets";
-import { parsePlanilha, estatisticaDoItem } from "@/lib/sheets/parsePlanilha";
+import {
+  parsePlanilha,
+  estatisticaDoItem,
+  explicarAusenciaDeItens,
+} from "@/lib/sheets/parsePlanilha";
 
 export interface SincronizacaoResultado {
   numero: string;
@@ -53,7 +57,7 @@ export async function sincronizarPlanilha(
 
   const { itens } = parsePlanilha(carregada.rows);
   if (itens.length === 0) {
-    return { error: "Nenhum item encontrado na planilha." };
+    return { error: explicarAusenciaDeItens(carregada.rows) };
   }
 
   // Preferência: parte descritiva do título do arquivo do Google Sheets.

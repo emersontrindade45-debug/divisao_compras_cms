@@ -46,9 +46,7 @@ export function extrairNumeroProcesso(titulo: string | null): string | null {
 export function extrairObjetoDoTitulo(titulo: string | null): string | null {
   if (!titulo) return null;
   // Remove o trecho do número de processo e separadores adjacentes
-  const semNumero = titulo
-    .replace(/\s*[-–_]?\s*proc[._\s-]*\d{1,6}\s*\/\s*\d{2,4}/gi, "")
-    .trim();
+  const semNumero = titulo.replace(/\s*[-–_]?\s*proc[._\s-]*\d{1,6}\s*\/\s*\d{2,4}/gi, "").trim();
   // Remove separadores residuais no final
   const limpo = semNumero.replace(/[-–_\s]+$/, "").trim();
   // Muito curto ou apenas "Pesquisa de Preços" → genérico demais
@@ -76,6 +74,7 @@ function extrairAbas(html: string): Array<{ name: string; gid: string }> {
 export async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, {
     redirect: "follow",
+    cache: "no-store",
     headers: { "User-Agent": "Mozilla/5.0 (compatible; DivisaoComprasBot/1.0)" },
   });
   if (!res.ok) {
