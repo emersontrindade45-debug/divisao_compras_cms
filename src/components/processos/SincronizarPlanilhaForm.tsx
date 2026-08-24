@@ -12,9 +12,8 @@ import { useAssistente } from "@/components/assistente/AssistenteDock";
 const REGRAS_FORMATO = [
   'A planilha deve estar compartilhada como "qualquer pessoa com o link pode visualizar".',
   "A aba de dados precisa ter o cabeçalho MATERIAL em alguma coluna.",
-  "Cada linha de item deve ter texto na coluna MATERIAL e um número (pode ser 0) na coluna MEDIANA.",
-  "Linhas de grupo/lote (sem número na coluna MEDIANA) são usadas como agrupadores dos itens seguintes.",
-  'Linhas de legenda e rodapé ("Em conformidade...", "Preços Válidos" etc.) são ignoradas automaticamente.',
+  "Cada linha com texto na coluna MATERIAL vira um item — sem outra condição (mediana, preço ou legenda).",
+  "Linhas sem texto em MATERIAL (lote/grupo, rodapé) são ignoradas.",
   'O título do processo vem do nome do arquivo no Google Sheets — inclua uma descrição antes do número (ex.: "e-CPF e e-CNPJ - Proc_2433/2025").',
   "O número do processo é extraído do nome do arquivo (formato: Proc_NNNN/AAAA).",
   'Para o preço público voltar à planilha automaticamente, a aba precisa ter ao menos uma coluna cujo cabeçalho comece com "Preço Público" (ex.: "Preço Público I"); sem essa coluna, o valor não é escrito em lugar nenhum.',

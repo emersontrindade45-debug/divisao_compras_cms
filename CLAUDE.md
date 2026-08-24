@@ -1045,3 +1045,15 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     Corolário de refinamento: quando o usuário revisa uma proposta automática, reprocessar **não
     pode descartar a revisão já feita** — código que ele desmarcou não volta marcado, e item que
     ele acrescentou sobrevive (confirmado por mutação).
+86. **Linha de item da planilha de pesquisa se reconhece pela coluna MATERIAL, não pela mediana.**
+    `parsePlanilha` distinguia item de grupo pela presença de um número na coluna B (mediana).
+    Planilha nova (pesquisa ainda não feita) deixa a mediana vazia ou com `#N/A`/`#DIV/0!` da
+    fórmula `=MEDIAN(...)` sem preços — `parseNumberBR` devolve NaN, `ehLinhaDeDados` ficava
+    falso, e a sincronização respondia "Nenhum item encontrado na planilha" mesmo com MATERIAL
+    preenchido. O teste que deveria ter pego isso (§9.10) usava `"0,00"`, não célula vazia —
+    mesmo modo de falha do §9.53/§9.63 (fixture que não reflete a premissa real). Na
+    planilha-modelo da Câmara, grupo/lote tem MATERIAL vazio (nome na coluna A); item tem texto
+    em MATERIAL. Mediana vazia ou erro de fórmula conta como 0. Sem filtro extra de legenda/
+    rodapé: se MATERIAL tem texto, a linha entra. Corolário: quando a heurística de "é linha de
+    dados?" depende de um campo calculado, o caso inicial (campo ainda sem valor) precisa de
+    fixture próprio — zero preenchido não é o mesmo que célula em branco.
