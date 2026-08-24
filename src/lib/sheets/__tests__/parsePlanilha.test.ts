@@ -5,8 +5,13 @@ import {
   parsePlanilha,
   estatisticaDoItem,
   isDataSheet,
+  explicarAusenciaDeItens,
 } from "../parsePlanilha";
-import { extrairSpreadsheetId, extrairNumeroProcesso, extrairObjetoDoTitulo } from "../googleSheets";
+import {
+  extrairSpreadsheetId,
+  extrairNumeroProcesso,
+  extrairObjetoDoTitulo,
+} from "../googleSheets";
 
 // CSV real exportado da planilha do processo (aba "Modelo"), com cabeçalho
 // multilinha ("QTDE.\nMÍN") e colunas deslocadas por células mescladas.
@@ -153,6 +158,95 @@ describe("parsePlanilha — estatística zerada (§9.10)", () => {
     // linha de legenda não deve virar item — confirmar por mutação:
     // se removêssemos o filtro LEGEND_PATTERNS, teríamos 3 itens
     expect(itens).toHaveLength(2);
+  });
+});
+
+// Planilha-modelo da Câmara no estado inicial REAL: cabeçalho mesclado
+// (LIMITE/MEDIANA sem texto na linha do MATERIAL) e células de estatística
+// VAZIAS — não "0,00". O teste §9.10 acima usava "0,00" e por isso não
+// pegava o bug: parseNumberBR("") é NaN, e exigir mediana finita descartava
+// todas as linhas → "Nenhum item encontrado na planilha."
+const csvMedianaVaziaCabecalhoMesclado = [
+  '"","","","","","QTDE.\nMÍN","","MATERIAL","PREÇO PÚBLICO I","PREÇO PÚBLICO II","PREÇO PÚBLICO III","PREÇO PÚBLICO IV","PREÇO PÚBLICO V"',
+  '"","","","","1","","1","Tronco IP SIP","","","","",""',
+  '"","","","","2","","75","Ramais DDR","","","","",""',
+  '"","","","","3","","227","Ramais sem DDR","","","","",""',
+  '"Em conformidade com o inciso III do Art. 57 do ato 17/2023 da Câmara Municipal de Santos","","","","","","","","","","","",""',
+].join("\n");
+
+const csvErroFormulaMediana = [
+  '"LIMITE INFERIOR","MEDIANA","LIMITE SUPERIOR","","ITEM","QTDE.","MATERIAL"',
+  '"#DIV/0!","#N/A","#NUM!","","1","15","e-CPF Tipo A3 c/ Token – Validade Mínima de 36 meses"',
+  '"#VALUE!","","#REF!","","2","6","e-CNPJ Tipo A3 c/ Token – Validade Mínima de 36 meses"',
+].join("\n");
+
+describe("parsePlanilha — mediana vazia / erro de fórmula (planilha nova)", () => {
+  it("importa itens com MATERIAL preenchido mesmo com mediana em branco e cabeçalho mesclado", () => {
+    const { itens } = parsePlanilha(parseCsv(csvMedianaVaziaCabecalhoMesclado));
+    expect(itens).toHaveLength(3);
+    expect(itens.map((it) => it.material)).toEqual([
+      "Tronco IP SIP",
+      "Ramais DDR",
+      "Ramais sem DDR",
+    ]);
+    expect(itens[0]!.quantidade).toBe(1);
+    expect(itens[1]!.quantidade).toBe(75);
+    expect(itens[2]!.quantidade).toBe(227);
+    expect(itens.every((it) => it.mediana === 0 && it.limiteInferior === 0)).toBe(true);
+  });
+
+  it("importa itens quando a mediana é erro de fórmula (#N/A, #DIV/0!, #NUM!)", () => {
+    const { itens } = parsePlanilha(parseCsv(csvErroFormulaMediana));
+    expect(itens).toHaveLength(2);
+    expect(itens[0]!.material).toContain("e-CPF");
+    expect(itens[1]!.material).toContain("e-CNPJ");
+    expect(itens[0]!.mediana).toBe(0);
+    expect(itens[0]!.limiteInferior).toBe(0);
+  });
+
+  it("a mutação inversa: exigir mediana finita voltaria a devolver 0 itens", () => {
+    // Garante que este teste cai se alguém reintroduzir
+    // `material.length > 0 && Number.isFinite(mediana)` como pré-condição.
+    const rows = parseCsv(csvMedianaVaziaCabecalhoMesclado);
+    const { itens } = parsePlanilha(rows);
+    expect(itens.length).toBeGreaterThan(0);
+    const medianaDaPrimeira = rows[1]![1];
+    expect(medianaDaPrimeira).toBe("");
+    expect(Number.isNaN(parseNumberBR(medianaDaPrimeira))).toBe(true);
+  });
+
+  it("lê MEDIANA/LIMITES pelo nome do cabeçalho quando a coluna não está em A/B/C", () => {
+    // Fallback posicional seria A=ITEM (1) e B=LIMITE INFERIOR (700) como
+    // "mediana" — o nome no cabeçalho é o que acerta os três campos.
+    const csv = [
+      '"ITEM","LIMITE INFERIOR","LIMITE SUPERIOR","MEDIANA","","QTDE","MATERIAL","PREÇO PÚBLICO I"',
+      '"1","700,00","1.300,00","1.000,00","","10","Caneta esferográfica","998,00"',
+    ].join("\n");
+    const { itens } = parsePlanilha(parseCsv(csv));
+    expect(itens).toHaveLength(1);
+    expect(itens[0]!.material).toBe("Caneta esferográfica");
+    expect(itens[0]!.mediana).toBe(1000);
+    expect(itens[0]!.limiteInferior).toBe(700);
+    expect(itens[0]!.limiteSuperior).toBe(1300);
+    expect(itens[0]!.precos).toHaveLength(1);
+    expect(itens[0]!.precos[0]!.valor).toBe(998);
+  });
+});
+
+describe("explicarAusenciaDeItens", () => {
+  it("explica quando o cabeçalho MATERIAL existe mas nenhuma linha tem descrição", () => {
+    const rows = parseCsv(
+      '"LIMITE INFERIOR","MEDIANA","MATERIAL"\n"LOTE 01","",""\n"Em conformidade com o Art. 57","","x"',
+    );
+    const msg = explicarAusenciaDeItens(rows);
+    expect(msg).toMatch(/nenhuma linha com descrição/i);
+    expect(msg).toMatch(/MATERIAL/);
+  });
+
+  it("distingue ausência de cabeçalho", () => {
+    expect(explicarAusenciaDeItens(parseCsv('"LEGENDA","x"\n"a","b"'))).toMatch(
+      /não foi encontrado o cabeçalho MATERIAL/i,
+    );
   });
 });
 

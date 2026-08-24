@@ -82,6 +82,21 @@ function findHeaderRow(rows: string[][]): { headerIndex: number; materialCol: nu
   return null;
 }
 
+/**
+ * Localiza coluna de estatística pelo nome do cabeçalho; se a célula estiver
+ * vazia (cabeçalho mesclado da planilha-modelo da Câmara), cai no índice
+ * clássico A/B/C (LIMITE INFERIOR / MEDIANA / LIMITE SUPERIOR).
+ */
+function indiceEstatistica(headerRow: string[], nomes: string[], fallback: number): number {
+  const alvos = new Set(nomes.map((n) => n.trim().toUpperCase()));
+  const idx = headerRow.findIndex((c) => alvos.has((c ?? "").trim().toUpperCase()));
+  return idx >= 0 ? idx : fallback;
+}
+
+function finitoOuZero(n: number): number {
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** Indica se as linhas contêm uma aba de dados (cabeçalho MATERIAL presente). */
 export function isDataSheet(rows: string[][]): boolean {
   return findHeaderRow(rows) !== null;
@@ -114,6 +129,9 @@ export function parsePlanilha(rows: string[][]): PlanilhaParseResult {
 
   const { headerIndex, materialCol } = header;
   const headerRow = rows[headerIndex] ?? [];
+  const medianaCol = indiceEstatistica(headerRow, ["MEDIANA"], 1);
+  const limiteInfCol = indiceEstatistica(headerRow, ["LIMITE INFERIOR"], 0);
+  const limiteSupCol = indiceEstatistica(headerRow, ["LIMITE SUPERIOR"], 2);
   const itens: ItemPlanilha[] = [];
   let grupoAtual: string | undefined;
 
@@ -125,23 +143,25 @@ export function parsePlanilha(rows: string[][]): PlanilhaParseResult {
     // ignora linhas de legenda/rodapé
     if (LEGEND_PATTERNS.test(linhaToda)) continue;
 
-    const mediana = parseNumberBR(row[1]);
-    // §9.10: tolerar linhas com estatística zerada (pesquisa ainda não feita).
-    // Distinguimos linha de dados de cabeçalho de grupo pela presença de um
-    // número finito na coluna de mediana — mesmo que seja 0.
-    const ehLinhaDeDados = material.length > 0 && Number.isFinite(mediana);
+    const mediana = parseNumberBR(row[medianaCol]);
+    // Item = texto na coluna MATERIAL. Grupo/lote (ex.: "LOTE 01") vive em
+    // outra coluna, com MATERIAL vazio — medido na planilha-modelo da Câmara.
+    // NÃO exigir número na mediana: planilha nova deixa a célula vazia ou com
+    // #N/A/#DIV/0! da fórmula =MEDIAN(...) sem preços, e isso devolve NaN
+    // (CLAUDE.md §9.10 era incompleto: o teste usava "0,00", não célula vazia).
+    const ehLinhaDeDados = material.length > 0;
 
     if (!ehLinhaDeDados) {
-      // possível linha de grupo (texto mesclado, sem mediana numérica)
-      const textoGrupo = (material || row.find((c) => (c ?? "").trim().length > 0) || "").trim();
+      // possível linha de grupo (texto mesclado, sem descrição em MATERIAL)
+      const textoGrupo = (row.find((c) => (c ?? "").trim().length > 0) || "").trim();
       if (textoGrupo && !Number.isFinite(parseNumberBR(textoGrupo))) {
         grupoAtual = textoGrupo;
       }
       continue;
     }
 
-    const limiteInferior = parseNumberBR(row[0]);
-    const limiteSuperior = parseNumberBR(row[2]);
+    const limiteInferior = parseNumberBR(row[limiteInfCol]);
+    const limiteSuperior = parseNumberBR(row[limiteSupCol]);
 
     // ITEM e QTDE são as colunas inteiras entre LIMITE SUPERIOR (col 2) e MATERIAL
     const inteiros: number[] = [];
@@ -179,14 +199,46 @@ export function parsePlanilha(rows: string[][]): PlanilhaParseResult {
       material,
       ...(grupoAtual ? { grupo: grupoAtual } : {}),
       quantidade,
-      limiteInferior: Number.isFinite(limiteInferior) ? limiteInferior : 0,
-      mediana,
-      limiteSuperior: Number.isFinite(limiteSuperior) ? limiteSuperior : 0,
+      limiteInferior: finitoOuZero(limiteInferior),
+      mediana: finitoOuZero(mediana),
+      limiteSuperior: finitoOuZero(limiteSuperior),
       precos,
     });
   }
 
   return { itens };
+}
+
+/**
+ * Mensagem amigável para quando `parsePlanilha` devolve 0 itens mesmo com
+ * cabeçalho MATERIAL presente — o caso que a UI mostra como
+ * "Nenhum item encontrado na planilha."
+ */
+export function explicarAusenciaDeItens(rows: string[][]): string {
+  const header = findHeaderRow(rows);
+  if (!header) {
+    return "Não foi encontrado o cabeçalho MATERIAL.";
+  }
+  let comMaterial = 0;
+  let legendas = 0;
+  for (let i = header.headerIndex + 1; i < rows.length; i++) {
+    const row = rows[i] ?? [];
+    const material = (row[header.materialCol] ?? "").trim();
+    const linhaToda = row.map((c) => (c ?? "").trim()).join(" ");
+    if (LEGEND_PATTERNS.test(linhaToda)) {
+      legendas++;
+      continue;
+    }
+    if (material) comMaterial++;
+  }
+  if (comMaterial === 0) {
+    return (
+      "A aba tem o cabeçalho MATERIAL, mas nenhuma linha com descrição de item nessa coluna. " +
+      (legendas > 0 ? `${legendas} linha(s) de legenda/rodapé foram ignoradas. ` : "") +
+      "Preencha a coluna MATERIAL em cada item (linhas só de lote/grupo, sem descrição, são ignoradas)."
+    );
+  }
+  return "Nenhum item pôde ser importado da planilha.";
 }
 
 /** Estatística simples calculada a partir dos preços incluídos (para a série de preços). */
@@ -210,8 +262,7 @@ export function estatisticaDoItem(item: ItemPlanilha): EstatisticaItem | null {
     sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
   const mediana = item.mediana > 0 ? item.mediana : medianaCalc;
   const menorValor = Math.min(...incluidos);
-  const variance =
-    incluidos.reduce((acc, v) => acc + (v - media) ** 2, 0) / incluidos.length;
+  const variance = incluidos.reduce((acc, v) => acc + (v - media) ** 2, 0) / incluidos.length;
   const cv = media > 0 ? (Math.sqrt(variance) / media) * 100 : 0;
   const round = (n: number) => Math.round(n * 100) / 100;
   return {

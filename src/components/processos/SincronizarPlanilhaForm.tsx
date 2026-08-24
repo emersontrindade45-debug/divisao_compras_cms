@@ -12,8 +12,8 @@ import { useAssistente } from "@/components/assistente/AssistenteDock";
 const REGRAS_FORMATO = [
   'A planilha deve estar compartilhada como "qualquer pessoa com o link pode visualizar".',
   "A aba de dados precisa ter o cabeçalho MATERIAL em alguma coluna.",
-  "Cada linha de item deve ter texto na coluna MATERIAL e um número (pode ser 0) na coluna MEDIANA.",
-  "Linhas de grupo/lote (sem número na coluna MEDIANA) são usadas como agrupadores dos itens seguintes.",
+  "Cada linha de item precisa de texto na coluna MATERIAL. A mediana pode estar vazia, zerada ou com erro de fórmula (pesquisa ainda não feita) — o item entra mesmo assim.",
+  "Linhas de grupo/lote (nome em outra coluna, MATERIAL vazio) são usadas como agrupadores dos itens seguintes.",
   'Linhas de legenda e rodapé ("Em conformidade...", "Preços Válidos" etc.) são ignoradas automaticamente.',
   'O título do processo vem do nome do arquivo no Google Sheets — inclua uma descrição antes do número (ex.: "e-CPF e e-CNPJ - Proc_2433/2025").',
   "O número do processo é extraído do nome do arquivo (formato: Proc_NNNN/AAAA).",

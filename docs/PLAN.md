@@ -2562,3 +2562,24 @@ e-mail, mas era inalcançável: filtrar por tag cobre 11,8% dos registros, e o C
   operação truncou o lote em 89 de 500. Deveria pular a falha e continuar, reportando no fim.
 - Senha do papel `postgres` do VPS trafegou pelo chat (sessão anterior) — trocar.
 - M26: ~107 fornecedores em falha temporária do BrasilAPI — sem mudança.
+
+---
+
+## Sessão 2026-08-24 — Sincronização da planilha de processo sem itens
+
+A sincronização em `/processos` respondia "Nenhum item encontrado na planilha" em planilha nova
+(pesquisa ainda não feita): o parser só aceitava linha de item se a coluna B (mediana) tivesse
+um número finito. Célula vazia ou erro de fórmula (`#N/A`, `#DIV/0!` do `=MEDIAN(...)` sem
+preços) virava NaN, a linha era tratada como grupo, e a action saía com 0 itens — mesmo com a
+coluna MATERIAL preenchida. O teste do §9.10 cobria só `"0,00"`, não o branco.
+
+### Correção
+
+- Item = texto na coluna MATERIAL. Grupo/lote continua com MATERIAL vazio.
+- Mediana/limites vazios ou com erro de fórmula entram como 0.
+- Estatística localizada pelo nome do cabeçalho quando ele existe; fallback A/B/C para o
+  cabeçalho mesclado da planilha-modelo.
+- Mensagem de erro passa a dizer que o cabeçalho MATERIAL existe mas não há descrição de item.
+- `fetch` da leitura pública (`gviz`) com `cache: "no-store"`.
+
+Lição: [CLAUDE.md §9.86](../CLAUDE.md).
