@@ -133,6 +133,11 @@ export interface AdicionarCandidatoResultado {
  * tolera CNPJ/e-mail ausentes, comum nos candidatos da Receita). Erro da
  * Sheets API propaga sem retry, mesmo padrão de `preencherPrecosPublicos`
  * (chamado de `promoverFonte.ts`) — vira `{ error }` amigável para a UI.
+ *
+ * A coluna "Tags" vem de `candidato.categoriaSugerida`, calculada por CNAE (não por objeto de
+ * processo) em `categorizarCandidatosCnae.ts` — decisão do usuário (2026-08-24): o CNAE da própria
+ * empresa é a referência, não o cadastro pré-existente de `Fornecedor.categoria` nem o objeto do
+ * processo que a trouxe à busca (a mesma empresa pode aparecer em processos de objetos diferentes).
  */
 export async function adicionarCandidatoAPlanilha(
   candidatoId: string,

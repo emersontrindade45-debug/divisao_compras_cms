@@ -1,9 +1,8 @@
 // Sem `import "server-only"` deliberadamente (CLAUDE.md §9.62): scripts/categorizar-candidatos-cnpj.ts
 // precisa importar este módulo fora do bundler do Next, onde `server-only` sempre lança. Não é
 // alcançável a partir de `components/` — só pelo script administrativo.
-import { db as dbTransacional } from "@/lib/db";
 import { dbCandidatos as db } from "@/lib/dbCandidatos";
-import { sugerirCategoriasParaObjeto } from "@/lib/ia/categorizarObjeto";
+import { gerarTagCnae } from "@/lib/ia/categorizarObjeto";
 import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorrencia";
 
 /**
@@ -13,10 +12,16 @@ import { processarComConcorrencia } from "@/lib/similaridade/processarComConcorr
  * empresas, então basta classificar o código uma vez e propagar.
  *
  * Parte A: para cada código CNAE presente em `EmpresaCandidataFornecedor` que ainda não tem entrada
- * em `CategoriaSugeridaPorCnae`, chama `sugerirCategoriasParaObjeto` (mesmo filtro anti-alucinação
- * do M25 — só escolhe entre categorias já cadastradas em `Fornecedor.categoria`) e grava o
- * resultado no cache via upsert (aceitável linha a linha aqui — no máximo ~1.300 linhas, muito
- * longe do volume de milhões que exigiria SQL em lote, CLAUDE.md §9.72).
+ * em `CategoriaSugeridaPorCnae`, chama `gerarTagCnae` e grava o resultado no cache via upsert
+ * (aceitável linha a linha aqui — no máximo ~1.300 linhas, muito longe do volume de milhões que
+ * exigiria SQL em lote, CLAUDE.md §9.72).
+ *
+ * **Sem filtro anti-alucinação contra `Fornecedor.categoria` (mudança de 2026-08-24, decisão do
+ * usuário):** a versão anterior só aceitava categoria já cadastrada na planilha, e isso deixava a
+ * maioria dos CNAEs sem nenhuma tag — não por falta de categoria plausível, mas por falta de
+ * categoria já existente que casasse (medido: 116 de 1.313 CNAEs, ~9%). `gerarTagCnae` tem o
+ * próprio CNAE como referência e gera um rótulo livre, então não depende mais do banco
+ * TRANSACIONAL (`Fornecedor`) — só do banco de candidatos.
  *
  * Parte B: aplica o cache em `EmpresaCandidataFornecedor.categoriaSugerida` com um ÚNICO
  * `UPDATE ... FROM` (não um update por CNAE) — a tabela de candidatos não tem índice em
@@ -78,16 +83,6 @@ export async function categorizarCandidatosCnae(
   const novos = distintos.filter((d) => !cacheadosSet.has(d.cnaeCodigo));
   const alvo = opcoes.limite !== undefined ? novos.slice(0, opcoes.limite) : novos;
 
-  // `Fornecedor` vive no banco TRANSACIONAL, não no de candidatos — a lista de categorias
-  // reais do cadastro da Câmara é o que limita a escolha da IA (filtro anti-alucinação do
-  // M25). Lida do `db` errado, viria vazia (o banco de candidatos não tem fornecedor
-  // nenhum) e as ~1.300 chamadas de IA produziriam zero categoria, em silêncio.
-  const fornecedoresAtivos = await dbTransacional.fornecedor.findMany({
-    where: { status: "ativo" },
-    select: { categoria: true },
-  });
-  const categoriasDisponiveis = [...new Set(fornecedoresAtivos.flatMap((f) => f.categoria))];
-
   const resultado: ResultadoCategorizacaoCnae = {
     cnaesEncontrados: distintos.length,
     cnaesJaCacheados: distintos.length - novos.length,
@@ -104,7 +99,7 @@ export async function categorizarCandidatosCnae(
     async (cnae) => {
       resultado.cnaesProcessados++;
 
-      const categorias = await sugerirCategoriasParaObjeto(cnae.cnaeDescricao, categoriasDisponiveis);
+      const categorias = await gerarTagCnae(cnae.cnaeDescricao);
       if (categorias.length > 0) resultado.cnaesComCategoria++;
       else resultado.cnaesSemCategoria++;
 

@@ -51,3 +51,52 @@ export async function sugerirCategoriasParaObjeto(
   const disponiveisSet = new Set(categoriasDisponiveis);
   return categorias.filter((c) => disponiveisSet.has(c));
 }
+
+function montarPromptTagCnae(cnaeDescricao: string): string {
+  return `Você ajuda a Divisão de Compras a organizar fornecedores por categoria numa planilha de
+pesquisa de preços. Dada a descrição oficial de uma atividade CNAE (Receita Federal), gere um
+rótulo curto de categoria de fornecedor que resuma essa atividade — o tipo de bem/serviço que uma
+empresa com esse CNAE fornece.
+
+DESCRIÇÃO OFICIAL DO CNAE:
+${cnaeDescricao}
+
+Regras:
+- 1 a 2 palavras (raramente 3), em português, minúsculas (exceto siglas como "TI", "EPI").
+- Não copie a descrição inteira — resuma o SUBSTANTIVO principal (ex.: "Comércio varejista de
+  artigos de iluminação" → "elétrica"; "Locação de automóveis sem condutor" → "automóvel";
+  "Provedores de acesso às redes de comunicações" → "telecomunicações").
+- SEMPRE gere um rótulo, mesmo para atividade pouco comum em compra pública (ex.: "Cultivo de
+  mamona" → "agricultura") — nunca responda vazio.
+- Não se prenda a nenhuma lista de categorias pré-existente: o rótulo pode ser novo.
+
+Responda com um objeto JSON no formato { "categorias": ["rótulo"] } (normalmente 1 item, no
+máximo 2 se a atividade cobrir claramente dois ramos distintos).`;
+}
+
+/**
+ * Gera, via IA, um rótulo curto de categoria a partir da descrição oficial de um CNAE — sem
+ * restringir a escolha a uma lista pré-cadastrada (ao contrário de `sugerirCategoriasParaObjeto`).
+ *
+ * Existe porque o casamento contra `Fornecedor.categoria` (só ~75 tags reais, cadastradas à mão ao
+ * longo do tempo) deixava a grande maioria dos ~1.300 CNAEs distintos da base de candidatos CNPJ
+ * sem categoria — não por falta de categoria PLAUSÍVEL, mas por falta de categoria já cadastrada
+ * que casasse. Decisão do usuário (2026-08-24): a Tag da planilha deve ter o CNAE como referência,
+ * não o cadastro atual — mesmo que isso crie tags novas, porque a alternativa é a maioria das
+ * empresas descobertas via CNAE ficar sem Tag nenhuma.
+ */
+export async function gerarTagCnae(cnaeDescricao: string): Promise<string[]> {
+  if (!cnaeDescricao.trim()) return [];
+
+  const ai = getOpenAIClient();
+  const response = await ai.chat.completions.create({
+    model: OPENAI_MODEL,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [{ role: "user", content: montarPromptTagCnae(cnaeDescricao) }],
+  });
+
+  const texto = response.choices[0]?.message?.content ?? "{}";
+  const { categorias } = parseJsonResponse(texto, categoriasSugeridasSchema, "gerarTagCnae");
+  return categorias.map((c) => c.trim()).filter((c) => c.length > 0);
+}

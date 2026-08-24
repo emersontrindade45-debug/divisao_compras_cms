@@ -14,7 +14,7 @@ const METODOS_DE_ESCRITA = [
   "deleteMany",
 ] as const;
 
-const MODELS_MOCK = ["empresaCandidataFornecedor", "categoriaSugeridaPorCnae", "fornecedor"] as const;
+const MODELS_MOCK = ["empresaCandidataFornecedor", "categoriaSugeridaPorCnae"] as const;
 
 const mocks = vi.hoisted(() => {
   const METODOS_ESCRITA = [
@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => {
     "delete",
     "deleteMany",
   ];
-  const MODELS = ["empresaCandidataFornecedor", "categoriaSugeridaPorCnae", "fornecedor"];
+  const MODELS = ["empresaCandidataFornecedor", "categoriaSugeridaPorCnae"];
 
   const db: Record<string, Record<string, ReturnType<typeof vi.fn>>> & {
     $executeRaw: ReturnType<typeof vi.fn>;
@@ -39,25 +39,14 @@ const mocks = vi.hoisted(() => {
     for (const metodo of METODOS_ESCRITA) db[model]![metodo] = vi.fn();
   }
 
-  // Cliente do banco transacional: só `Fornecedor` é lido de lá.
-  const dbTransacional: Record<string, Record<string, ReturnType<typeof vi.fn>>> = {} as never;
-  for (const model of MODELS) {
-    dbTransacional[model] = { findMany: vi.fn(), groupBy: vi.fn() };
-    for (const metodo of METODOS_ESCRITA) dbTransacional[model]![metodo] = vi.fn();
-  }
-
-  return { db, dbTransacional, sugerirCategoriasParaObjeto: vi.fn() };
+  return { db, gerarTagCnae: vi.fn() };
 });
 
-// Dois clientes distintos de propósito: `Fornecedor` (a lista de categorias reais que limita
-// a escolha da IA) mora no transacional; candidatos e o cache de CNAE moram no banco de
-// candidatos. Mockar separado é o que faz o teste abaixo detectar a troca — com um mock só,
-// ler `Fornecedor` do banco errado passaria despercebido e gastaria ~1.300 chamadas de IA
-// para produzir zero categoria.
-vi.mock("@/lib/db", () => ({ db: mocks.dbTransacional }));
+// Um banco só (candidatos) desde 2026-08-24: a tag vem do próprio CNAE via `gerarTagCnae`, sem
+// depender de `Fornecedor.categoria` no banco transacional (ver categorizarCandidatosCnae.ts).
 vi.mock("@/lib/dbCandidatos", () => ({ dbCandidatos: mocks.db }));
 vi.mock("@/lib/ia/categorizarObjeto", () => ({
-  sugerirCategoriasParaObjeto: mocks.sugerirCategoriasParaObjeto,
+  gerarTagCnae: mocks.gerarTagCnae,
 }));
 
 import { categorizarCandidatosCnae } from "../categorizarCandidatosCnae";
@@ -70,26 +59,9 @@ describe("categorizarCandidatosCnae", () => {
     vi.clearAllMocks();
     mocks.db.empresaCandidataFornecedor.groupBy.mockResolvedValue([CNAE_A, CNAE_B]);
     mocks.db.categoriaSugeridaPorCnae.findMany.mockResolvedValue([]);
-    mocks.dbTransacional.fornecedor.findMany.mockResolvedValue([{ categoria: ["ferragens"] }, { categoria: ["elétrica"] }]);
     mocks.db.categoriaSugeridaPorCnae.upsert.mockResolvedValue({});
     mocks.db.$executeRaw.mockResolvedValue(0);
-    mocks.sugerirCategoriasParaObjeto.mockResolvedValue([]);
-  });
-
-  // Defeito real, pego antes de rodar: ao separar candidatos em banco próprio, este módulo teve
-  // o `db` inteiro trocado por `dbCandidatos` — e junto foi a leitura de `Fornecedor`, que não
-  // existe naquele banco. A lista de categorias viria vazia, a IA não teria entre o que escolher
-  // e as ~1.300 chamadas produziriam zero categoria, sem erro nenhum: o script terminaria
-  // "com sucesso" e o filtro da UI continuaria inerte.
-  it("lê Fornecedor do transacional e candidatos do banco de candidatos, nunca trocados", async () => {
-    await categorizarCandidatosCnae({ dryRun: true });
-
-    expect(mocks.dbTransacional.fornecedor.findMany).toHaveBeenCalledTimes(1);
-    expect(mocks.db.empresaCandidataFornecedor.groupBy).toHaveBeenCalledTimes(1);
-    // O banco de candidatos não tem `Fornecedor` populado — pedir a lista de categorias a ele
-    // devolveria vazio e a IA classificaria contra nada.
-    expect(mocks.db.fornecedor.findMany).not.toHaveBeenCalled();
-    expect(mocks.dbTransacional.empresaCandidataFornecedor.groupBy).not.toHaveBeenCalled();
+    mocks.gerarTagCnae.mockResolvedValue([]);
   });
 
   it("não chama a IA de novo para CNAE já cacheado (evita custo repetido)", async () => {
@@ -97,18 +69,15 @@ describe("categorizarCandidatosCnae", () => {
 
     const resultado = await categorizarCandidatosCnae();
 
-    expect(mocks.sugerirCategoriasParaObjeto).toHaveBeenCalledTimes(1);
-    expect(mocks.sugerirCategoriasParaObjeto).toHaveBeenCalledWith(
-      CNAE_B.cnaePrincipalDescricao,
-      expect.arrayContaining(["ferragens", "elétrica"]),
-    );
+    expect(mocks.gerarTagCnae).toHaveBeenCalledTimes(1);
+    expect(mocks.gerarTagCnae).toHaveBeenCalledWith(CNAE_B.cnaePrincipalDescricao);
     expect(resultado.cnaesEncontrados).toBe(2);
     expect(resultado.cnaesJaCacheados).toBe(1);
     expect(resultado.cnaesProcessados).toBe(1);
   });
 
   it("chama a IA para CNAE novo e grava o resultado no cache via upsert", async () => {
-    mocks.sugerirCategoriasParaObjeto.mockImplementation(async (descricao: string) =>
+    mocks.gerarTagCnae.mockImplementation(async (descricao: string) =>
       descricao === CNAE_A.cnaePrincipalDescricao ? ["ferragens"] : [],
     );
 
@@ -146,7 +115,7 @@ describe("categorizarCandidatosCnae", () => {
   });
 
   it("dry-run não grava nada — varre toda a superfície de escrita do Prisma usada pelo módulo", async () => {
-    mocks.sugerirCategoriasParaObjeto.mockResolvedValue(["ferragens"]);
+    mocks.gerarTagCnae.mockResolvedValue(["ferragens"]);
 
     await categorizarCandidatosCnae({ dryRun: true });
 
@@ -162,7 +131,7 @@ describe("categorizarCandidatosCnae", () => {
   });
 
   it("dry-run ainda reporta quantos CNAEs seriam processados", async () => {
-    mocks.sugerirCategoriasParaObjeto.mockResolvedValue(["ferragens"]);
+    mocks.gerarTagCnae.mockResolvedValue(["ferragens"]);
 
     const resultado = await categorizarCandidatosCnae({ dryRun: true });
 
@@ -173,12 +142,12 @@ describe("categorizarCandidatosCnae", () => {
   it("respeita --limite amostrando só os primeiros CNAEs novos", async () => {
     const resultado = await categorizarCandidatosCnae({ limite: 1 });
 
-    expect(mocks.sugerirCategoriasParaObjeto).toHaveBeenCalledTimes(1);
+    expect(mocks.gerarTagCnae).toHaveBeenCalledTimes(1);
     expect(resultado.cnaesProcessados).toBe(1);
   });
 
   it("registra erro por CNAE sem interromper os demais", async () => {
-    mocks.sugerirCategoriasParaObjeto.mockImplementation(async (descricao: string) => {
+    mocks.gerarTagCnae.mockImplementation(async (descricao: string) => {
       if (descricao === CNAE_A.cnaePrincipalDescricao) throw new Error("falha simulada da IA");
       return ["elétrica"];
     });
@@ -200,10 +169,7 @@ describe("categorizarCandidatosCnae", () => {
     const resultado = await categorizarCandidatosCnae();
 
     expect(resultado.cnaesEncontrados).toBe(1);
-    expect(mocks.sugerirCategoriasParaObjeto).toHaveBeenCalledWith(
-      CNAE_A.cnaePrincipalDescricao,
-      expect.any(Array),
-    );
+    expect(mocks.gerarTagCnae).toHaveBeenCalledWith(CNAE_A.cnaePrincipalDescricao);
   });
 });
 

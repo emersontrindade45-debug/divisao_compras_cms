@@ -310,6 +310,11 @@ export function SelecaoFornecedoresForm({
               value={dataLimite}
               onChange={(e) => setDataLimite(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">
+              SLA = até quando o fornecedor tem para responder. Ex.: cotação enviada hoje com
+              prazo 31/08 — depois dessa data sem resposta, o Painel de controle marca a cotação
+              como atrasada.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -345,6 +350,20 @@ export function SelecaoFornecedoresForm({
             </Badge>
           </div>
         </CardHeader>
+        <CardContent className="pt-0 pb-3">
+          <p className="text-xs text-muted-foreground">
+            Fornecedores do seu cadastro próprio (diferente da busca por CNAE acima, que só
+            grava na planilha). Marque quem vai ser consultado e clique <strong>Registrar</strong>{" "}
+            (mais abaixo) — isso cria a Cotação rastreada com o prazo (SLA) do card acima. Ex.:
+            marcar 3 fornecedores de &ldquo;elétrica&rdquo; e Registrar faz os três aparecerem no Painel de
+            controle, cada um com o prazo; quem não responder até lá é sinalizado como atrasado.
+            <span className="block mt-1">
+              <strong>Score</strong> e <strong>taxa de resposta</strong> vêm do histórico de
+              cotações anteriores — quanto mais alto, mais esse fornecedor costuma responder
+              dentro do prazo.
+            </span>
+          </p>
+        </CardContent>
         {categoriasSugeridas !== null && (
           <CardContent className="pt-0 pb-3">
             <p className="text-xs text-muted-foreground">
