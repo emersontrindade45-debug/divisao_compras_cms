@@ -2575,11 +2575,12 @@ coluna MATERIAL preenchida. O teste do §9.10 cobria só `"0,00"`, não o branco
 
 ### Correção
 
-- Item = texto na coluna MATERIAL. Grupo/lote continua com MATERIAL vazio.
+- Item = texto na coluna MATERIAL — **única condição**. Sem filtro de mediana, preço ou
+  legenda/rodapé. Grupo/lote e rodapé só são ignorados quando MATERIAL está vazio.
 - Mediana/limites vazios ou com erro de fórmula entram como 0.
 - Estatística localizada pelo nome do cabeçalho quando ele existe; fallback A/B/C para o
   cabeçalho mesclado da planilha-modelo.
-- Mensagem de erro passa a dizer que o cabeçalho MATERIAL existe mas não há descrição de item.
+- Mensagem de erro: cabeçalho MATERIAL existe mas nenhuma linha tem texto nessa coluna.
 - `fetch` da leitura pública (`gviz`) com `cache: "no-store"`.
 
 Lição: [CLAUDE.md §9.86](../CLAUDE.md).

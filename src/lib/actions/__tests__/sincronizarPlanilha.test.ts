@@ -58,7 +58,7 @@ describe("sincronizarPlanilha", () => {
     const res = await sincronizarPlanilha("https://docs.google.com/spreadsheets/d/abc/edit");
 
     expect(res.data).toBeUndefined();
-    expect(res.error).toMatch(/nenhuma linha com descrição/i);
+    expect(res.error).toMatch(/nenhuma linha com texto nessa coluna/i);
     expect(mocks.db.processo.upsert).not.toHaveBeenCalled();
   });
 

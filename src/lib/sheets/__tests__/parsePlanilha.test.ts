@@ -154,9 +154,9 @@ describe("parsePlanilha — estatística zerada (§9.10)", () => {
     expect(itens[0]!.precos).toHaveLength(0);
   });
 
-  it("ignora o rodapé de conformidade mesmo com zeros", () => {
-    // linha de legenda não deve virar item — confirmar por mutação:
-    // se removêssemos o filtro LEGEND_PATTERNS, teríamos 3 itens
+  it("ignora o rodapé quando MATERIAL está vazio", () => {
+    // rodapé de conformidade não vira item porque a coluna MATERIAL está vazia,
+    // não por filtro de legenda
     expect(itens).toHaveLength(2);
   });
 });
@@ -231,16 +231,23 @@ describe("parsePlanilha — mediana vazia / erro de fórmula (planilha nova)", (
     expect(itens[0]!.precos).toHaveLength(1);
     expect(itens[0]!.precos[0]!.valor).toBe(998);
   });
+
+  it("importa a linha se MATERIAL tem texto, mesmo parecendo legenda", () => {
+    const csv = [
+      '"LIMITE INFERIOR","MEDIANA","MATERIAL"',
+      '"","","Em conformidade com o Art. 57 — descrição do item"',
+    ].join("\n");
+    const { itens } = parsePlanilha(parseCsv(csv));
+    expect(itens).toHaveLength(1);
+    expect(itens[0]!.material).toMatch(/Em conformidade/);
+  });
 });
 
 describe("explicarAusenciaDeItens", () => {
-  it("explica quando o cabeçalho MATERIAL existe mas nenhuma linha tem descrição", () => {
-    const rows = parseCsv(
-      '"LIMITE INFERIOR","MEDIANA","MATERIAL"\n"LOTE 01","",""\n"Em conformidade com o Art. 57","","x"',
-    );
+  it("explica quando o cabeçalho MATERIAL existe mas nenhuma linha tem texto nessa coluna", () => {
+    const rows = parseCsv('"LIMITE INFERIOR","MEDIANA","MATERIAL"\n"LOTE 01","",""');
     const msg = explicarAusenciaDeItens(rows);
-    expect(msg).toMatch(/nenhuma linha com descrição/i);
-    expect(msg).toMatch(/MATERIAL/);
+    expect(msg).toMatch(/nenhuma linha com texto nessa coluna/i);
   });
 
   it("distingue ausência de cabeçalho", () => {
