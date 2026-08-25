@@ -1057,3 +1057,34 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     rodapé: se MATERIAL tem texto, a linha entra. Corolário: quando a heurística de "é linha de
     dados?" depende de um campo calculado, o caso inicial (campo ainda sem valor) precisa de
     fixture próprio — zero preenchido não é o mesmo que célula em branco.
+87. **Métrica de qualidade cujo denominador é "o que a busca achou" MELHORA quando a busca piora —
+    comparar razão, nunca contagem bruta.** Ao medir o ranqueamento do assistente (M28,
+    2026-08-25), a taxa de "descartados visíveis na tela" subiu de 49% para 81% depois de uma
+    correção que era boa, e a leitura ingênua disso seria "regredi". O baseline de 49% era
+    lisonjeiro por um motivo constrangedor: a busca estava tão quebrada que devolvia 3 candidatos
+    onde depois devolvia 36–75 — **não se pode exibir um descarte que nunca foi encontrado**. Na
+    comparação like-for-like (só termos com status `ok` nas duas rodadas, razão entre visíveis e
+    ACHADOS) o número real foi 100% → 98%, com os candidatos devolvidos subindo de 73 para 190.
+    Regra: antes de ler qualquer taxa como progresso ou regressão, perguntar **o que mudou no
+    denominador**; se o denominador é ele próprio um resultado do sistema sob teste, a contagem
+    bruta é incomparável entre rodadas. Corolário operacional: descartar da comparação os termos
+    que ficaram `indeterminado` (falha de rede) em qualquer das rodadas, senão a amostra muda de
+    tamanho junto com a métrica.
+88. **Régua de avaliação que não passa pelo mesmo caminho do código de produção mede outra coisa —
+    e fica cega justamente para o que existe para julgar.** `scripts/avaliar-busca-pncp.ts`
+    chamava `buscarContratosPNCP` direto e media a ordem de CHEGADA do PNCP, enquanto a tela do
+    analista via o resultado depois de `ordenarResultadoBusca` e `demoverJaDescartados`. Ou seja: a
+    régua criada para julgar o ranqueamento não aplicava o ranqueamento. Ao construir instrumento
+    de medição, mapear explicitamente quais etapas do pipeline real ele reproduz e quais não —
+    e documentar as ausências deliberadas com o motivo (aqui, a demoção fica fora de propósito:
+    ela lê o banco do processo aberto e todo negativo do gabarito é, por definição, um descarte,
+    então incluí-la faria a régua medir a si mesma).
+89. **Teste de ordenação cujos casos também diferem em relevância passa pelo FILTRO, não pelo
+    `sort` — a mutação é que separa os dois.** O primeiro teste de `ordenarResultadoBusca` usava
+    switch/impressora contra um link dedicado: removi o `.sort()` inteiro e os 8 testes seguiram
+    verdes, porque o filtro de aderência já eliminava os irrelevantes e o resultado esperado
+    aparecia de qualquer jeito. Para provar ORDEM, todos os candidatos do caso precisam sobreviver
+    ao filtro (casar ao menos um token) e diferir só no GRAU de aderência, com a asserção sobre o
+    array inteiro (`toEqual`), não sobre `[0]`. Vale a §9.35/§9.39 num eixo novo: quando uma função
+    faz duas coisas (filtrar e ordenar), cada uma precisa da sua própria mutação, senão uma cobre
+    a outra e o teste passa pelo motivo errado.

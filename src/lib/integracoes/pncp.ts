@@ -65,12 +65,13 @@ const RESERVA_LOTE_MS = 2_000;
  * custaram 15,6s. O custo vem de quantos editais a busca textual devolve e de
  * quantos itens cada um tem, não do tamanho do termo.
  *
- * Era 120 (12 editais); aumentado para 150 (15 editais) junto com a busca em
- * duas páginas paralelas. Com pool de 40 editais, o ranqueador por IDF escolhe
- * os 15 mais aderentes, em vez de 12 de 20 — mesma linha de custo de tempo
- * (~7,5s efetivos após busca textual + reserva de lote). A busca nunca exibe
- * mais que `MAX_SUGESTOES_POR_BUSCA` (25) candidatos — consultar mais que isso
- * é trabalho jogado fora.
+ * Era 120 (12 editais); aumentado para 150 junto com a busca em duas páginas
+ * paralelas. O que este teto compra em EDITAIS depende de
+ * `MAX_ITENS_RELEVANTES_POR_COMPRA`: com 10 itens/compra eram 15 editais, com 4
+ * são ~37 — cobrindo quase todo o pool de 40 que as duas páginas devolvem.
+ * A busca nunca exibe mais que `MAX_SUGESTOES_POR_BUSCA` (25) candidatos, mas
+ * os 25 precisam ser escolhidos de um conjunto amplo o bastante para conter os
+ * bons: quem faz a escolha é `ordenarResultadoBusca`, no assistente.
  */
 const MAX_RESULTADOS_POR_BUSCA = 150;
 
@@ -85,10 +86,23 @@ const ITENS_MAX_PAGINAS = 20;
 // Cada item relevante custa uma requisição a mais (o valor homologado vive em endpoint
 // separado). O teto evita que uma única compra gigante monopolize o orçamento de tempo
 // da função serverless. Era 40: com 20 editais possíveis isso autorizava 800 consultas
-// a `/resultados` numa busca que exibe no máximo 25 candidatos. 10 por compra ainda dá
-// mais candidatos do que cabe na tela, por uma fração do custo.
+// a `/resultados` numa busca que exibe no máximo 25 candidatos.
+//
+// **Era 10, baixado para 4 em 2026-08-25 — o orçamento estava invertido.** Com 10 itens
+// por compra, os 150 `/resultados` do teto global se esgotavam em 15 editais, e a tela de
+// 25 vagas era preenchida pelos ~3 primeiros: um candidato ótimo no 7º edital nunca
+// aparecia. Medido na régua (`scripts/avaliar-busca-pncp.ts`) contra o gabarito de cliques
+// do analista: dos 8 editais que ele aprovou como fonte, 3 estavam nas posições 18, 18 e
+// 23 da relevância do PNCP — fora do alcance. Profundidade dentro de um edital é o eixo
+// errado quando o corte final é de 25 candidatos vindos de editais diferentes; o mesmo
+// orçamento agora alcança ~37 editais.
+//
+// O que se perde: uma ata de registro de preços com muitos itens comparáveis passa a
+// entregar 4 deles em vez de 10. É recuperável na tela — o picker de "outros itens desta
+// licitação" (`listarItensDaCompraPNCP`) lista a ata inteira sob demanda, sem gastar
+// orçamento de busca.
 const LOTE_BUSCA_RESULTADOS = 5;
-const MAX_ITENS_RELEVANTES_POR_COMPRA = 10;
+const MAX_ITENS_RELEVANTES_POR_COMPRA = 4;
 
 /**
  * Janela de plausibilidade da data de referência. O PNCP devolve data-sentinela em

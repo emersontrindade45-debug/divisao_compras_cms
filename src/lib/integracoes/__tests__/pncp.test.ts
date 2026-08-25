@@ -500,8 +500,10 @@ describe("relevância: ranqueamento decide o gasto do orçamento", () => {
     await buscarContratosPNCP("cadeira giratoria");
 
     const consultados = urls.filter((u) => u.includes("/resultados"));
-    // O teto por compra continua valendo: 11 casam, 10 são consultados.
-    expect(consultados).toHaveLength(10);
+    // O teto por compra continua valendo: 11 casam, MAX_ITENS_RELEVANTES_POR_COMPRA
+    // (4) são consultados. É justamente por o teto ser apertado que a ORDEM
+    // importa — com 4 vagas, o item aderente tem de estar entre elas.
+    expect(consultados).toHaveLength(4);
     // O item 11 casa "cadeira" + "giratoria"; os outros só "cadeira".
     expect(consultados[0]).toContain("/itens/11/resultados");
   });
@@ -911,13 +913,16 @@ describe("tetos de tempo", () => {
   });
 
   it("respeita o teto global de consultas a /resultados", async () => {
-    const processos = Array.from({ length: 20 }, (_, i) => ({
+    // 40 editais é o pool real das duas páginas de busca textual. Com o teto por
+    // compra em 4, são necessários mais editais que os 20 de antes para o teto
+    // GLOBAL ser o que corta — que é o que este teste existe para provar.
+    const processos = Array.from({ length: 40 }, (_, i) => ({
       ...processoPadrao,
       numero_controle_pncp: `ctrl-${i}`,
       numero_sequencial: String(i + 1),
     }));
-    // 30 itens relevantes por compra; o teto por compra corta em 10, e o teto
-    // global (120) corta na décima segunda compra.
+    // 30 itens relevantes por compra; o teto por compra corta em 4, e o teto
+    // global (150) corta quando a próxima compra não cabe inteira.
     const muitosItens = Array.from({ length: 30 }, (_, i) => itemDe({ numeroItem: i + 1 }));
 
     const urls: string[] = [];
@@ -932,10 +937,15 @@ describe("tetos de tempo", () => {
     await buscarContratosPNCP("cadeira");
 
     const consultasResultado = urls.filter((u) => u.includes("/resultados"));
-    // Sem os dois tetos seriam 20 × 30 = 600 requisições, numa busca que exibe
-    // no máximo 25 candidatos. Com MAX_RESULTADOS_POR_BUSCA = 150 e 10 itens
-    // por compra: 15 compras × 10 = 150.
-    expect(consultasResultado).toHaveLength(150);
+    // Sem os dois tetos seriam 40 × 30 = 1200 requisições, numa busca que exibe
+    // no máximo 25 candidatos. Com MAX_RESULTADOS_POR_BUSCA = 150 e 4 itens por
+    // compra, o orçamento se espalha por 37 editais (148) em vez de se esgotar
+    // em 15 — o mesmo custo, distribuído em ~2,5x mais editais.
+    //
+    // 148 e não 150 porque `reservarResultados` é tudo-ou-nada: a 38ª compra
+    // precisaria de 4 e só restam 2, então ela não gasta requisição nenhuma em
+    // vez de ser lida pela metade e descartada depois.
+    expect(consultasResultado).toHaveLength(148);
     expect(
       warnSpy.mock.calls.some((args) => String(args[0]).includes("Orçamento de resultados")),
     ).toBe(true);

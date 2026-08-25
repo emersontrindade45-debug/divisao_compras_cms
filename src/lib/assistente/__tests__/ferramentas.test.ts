@@ -278,7 +278,10 @@ describe("registry de ferramentas do assistente", () => {
         candidato({ fonteUrl: "https://pncp.gov.br/app/editais/C" }),
       ]);
       mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
-        { fonteUrl: "https://pncp.gov.br/app/editais/A" },
+        {
+          fonteUrl: "https://pncp.gov.br/app/editais/A",
+          fonteDescricao: "Cadeira giratória ergonômica",
+        },
       ]);
       const registry = montarRegistry(CTX_PROCESSO);
 
@@ -301,7 +304,10 @@ describe("registry de ferramentas do assistente", () => {
 
       expect(mocks.db.resultadoSimilaridade.findMany).toHaveBeenCalledWith({
         where: { item: { processoId: "proc-1" }, descartado: true, fonteUrl: { not: null } },
-        select: { fonteUrl: true },
+        // A descrição entra na chave porque `fonteUrl` é a URL do EDITAL,
+        // compartilhada por todos os itens da mesma compra: sem ela, descartar
+        // um item demovia os irmãos bons junto.
+        select: { fonteUrl: true, fonteDescricao: true },
       });
     });
 

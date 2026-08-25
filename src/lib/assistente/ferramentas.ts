@@ -6,6 +6,7 @@ import { MIN_FORNECEDORES_PESQUISA_DIRETA } from "@/lib/domain/in65Rules";
 import { CV_ANALISE_CRITICA } from "@/lib/domain/priceStats";
 import { filtrarPorValor } from "@/lib/integracoes/pncp";
 import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPublicos";
+import { ordenarResultadoBusca } from "@/lib/similaridade/ordenarResultadoBusca";
 import {
   buscarWebPerplexity,
   perplexityConfigurada,
@@ -452,7 +453,23 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
    * por derrubar a visibilidade de candidatos-fonte com correspondência
    * textual fraca — ver histórico do commit), este não tem como confundir
    * "texto parecido pouco" com "já julgado ruim".
+   *
+   * **A chave é (URL do edital + descrição do item), não a URL sozinha.**
+   * `fonteUrl` de um candidato do PNCP é a URL do EDITAL
+   * (`/app/editais/{cnpj}/{ano}/{seq}`), compartilhada por todos os itens da
+   * mesma compra — ver `montarUrlEdital` em `integracoes/pncp.ts`. Enquanto a
+   * chave era só a URL, descartar UM item de uma ata demovia todos os irmãos
+   * dele junto, inclusive os bons: numa ata de registro de preços com dezenas
+   * de itens comparáveis, um único descarte empurrava a ata inteira para o fim
+   * da lista. `numeroItem` seria a chave exata, mas `ResultadoSimilaridade` não
+   * tem essa coluna e criá-la exigiria migration (CLAUDE.md §9.19/§9.46); a
+   * descrição já distingue itens dentro do mesmo edital com as colunas que
+   * existem hoje.
    */
+  function chaveDescarte(fonteUrl: string | null, fonteDescricao: string): string {
+    return `${fonteUrl ?? ""} ${fonteDescricao.trim().toLowerCase()}`;
+  }
+
   async function demoverJaDescartados(
     processoId: string | null,
     candidatos: CandidatoSimilaridade[],
@@ -461,16 +478,42 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
 
     const descartados = await db.resultadoSimilaridade.findMany({
       where: { item: { processoId }, descartado: true, fonteUrl: { not: null } },
-      select: { fonteUrl: true },
+      select: { fonteUrl: true, fonteDescricao: true },
     });
-    const urlsDescartadas = new Set(
-      descartados.map((d) => d.fonteUrl).filter((u): u is string => Boolean(u)),
+    const chavesDescartadas = new Set(
+      descartados.map((d) => chaveDescarte(d.fonteUrl, d.fonteDescricao)),
     );
-    if (urlsDescartadas.size === 0) return candidatos;
+    if (chavesDescartadas.size === 0) return candidatos;
 
-    const novos = candidatos.filter((c) => !c.fonteUrl || !urlsDescartadas.has(c.fonteUrl));
-    const jaDescartados = candidatos.filter((c) => c.fonteUrl && urlsDescartadas.has(c.fonteUrl));
+    const foiDescartado = (c: CandidatoSimilaridade) =>
+      Boolean(c.fonteUrl) && chavesDescartadas.has(chaveDescarte(c.fonteUrl ?? null, c.fonteDescricao));
+
+    const novos = candidatos.filter((c) => !foiDescartado(c));
+    const jaDescartados = candidatos.filter((c) => foiDescartado(c));
     return [...novos, ...jaDescartados];
+  }
+
+  /**
+   * Natureza do item para a janela de recência da IN 65/2021. O `itemId` vem do
+   * modelo e nem sempre é um id real — no uso medido em produção ele já chegou
+   * como `"1"`, `"item-1"` e `"0908/2022"` (número do processo). Um id que não
+   * resolve devolve `null`, que é a janela mais permissiva (730 dias): degrada
+   * para o comportamento anterior em vez de falhar a busca.
+   */
+  async function naturezaDoItem(
+    itemId: string | null,
+  ): Promise<"bem_consumo" | "servico_continuo" | null> {
+    if (!itemId) return null;
+    const item = await db.item.findUnique({
+      // `select` explícito, nunca `include`: coluna nova no schema quebraria a
+      // consulta em produção antes da migration rodar (CLAUDE.md §9.46).
+      where: { id: itemId },
+      select: { natureza: true, processoId: true },
+    });
+    if (!item) return null;
+    // Item de outro processo não governa a janela desta conversa.
+    if (ctx.processoId && item.processoId !== ctx.processoId) return null;
+    return item.natureza;
   }
 
   async function buscarPncp(
@@ -484,7 +527,16 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
     });
     const filtrados = filtrarPorValor(buscados, { valorMinimo, valorMaximo });
-    const encontrados = await demoverJaDescartados(ctx.processoId, filtrados);
+
+    // Ranqueia ANTES de demover: a demoção precisa ter a última palavra sobre
+    // candidato já rejeitado pelo analista, senão a aderência textual o traria
+    // de volta para o topo — era exatamente o defeito de ordenar por texto que
+    // levou à demoção existir (ver `demoverJaDescartados`).
+    const ordenados = ordenarResultadoBusca(filtrados, termo, {
+      naturezaObjeto: await naturezaDoItem(itemIdSugerido),
+      minimoExibido: MAX_SUGESTOES_POR_BUSCA,
+    });
+    const encontrados = await demoverJaDescartados(ctx.processoId, ordenados);
 
     // Nenhum candidato é excluído por já ter sido descartado numa busca
     // anterior — o card continua podendo aparecer, e o analista pode mudar de

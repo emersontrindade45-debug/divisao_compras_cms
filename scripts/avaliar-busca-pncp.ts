@@ -8,6 +8,7 @@ import { Client } from "pg";
 import { buscarContratosPNCP } from "../src/lib/integracoes/pncp";
 import { MAX_SUGESTOES_POR_BUSCA } from "../src/lib/assistente/sugestoes";
 import { processarComConcorrencia } from "../src/lib/similaridade/processarComConcorrencia";
+import { ordenarResultadoBusca } from "../src/lib/similaridade/ordenarResultadoBusca";
 import type { CandidatoSimilaridade } from "../src/lib/ia/types";
 
 /**
@@ -344,7 +345,19 @@ async function avaliarTermo(termo: string, linhas: LinhaRotulada[]): Promise<Res
     try {
       // Sem filtro de valor: ver a nota no cabeçalho deste arquivo.
       const execucao = await comDeteccaoDeFalha(() => buscarContratosPNCP(termo));
-      devolvidos = execucao.valor;
+      // Mesma ordenação que o assistente aplica antes do corte de 25
+      // (`buscarPncp` em `lib/assistente/ferramentas.ts`). Sem isto a régua
+      // mede a ordem de CHEGADA do PNCP e fica cega justamente para o
+      // ranqueamento que ela existe para julgar — a posição medida não seria a
+      // posição que o analista vê na tela.
+      //
+      // A demoção de descartados (`demoverJaDescartados`) continua de fora, e
+      // de propósito: ela lê o banco do processo aberto, enquanto a régua julga
+      // o termo contra o gabarito inteiro. Incluí-la faria a régua medir a si
+      // mesma — todo negativo do gabarito é, por definição, um descarte.
+      devolvidos = ordenarResultadoBusca(execucao.valor, termo, {
+        minimoExibido: MAX_SUGESTOES_POR_BUSCA,
+      });
       falhasDeRede = execucao.falhasDeRede;
     } catch (e) {
       erro = e instanceof Error ? e.message : String(e);
