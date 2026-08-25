@@ -1,6 +1,7 @@
 import { Download, FileText } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
 import { TabelaSeriePrecos } from "@/components/cotacoes/TabelaSeriePrecos";
+import { ConsolidarSerieButton } from "@/components/processos/ConsolidarSerieButton";
 import { buttonVariants } from "@/components/ui/button";
 import type { SeriePrecoFixture } from "@/lib/fixtures/seriePrecos";
 import { cn } from "@/lib/utils";
@@ -14,9 +15,11 @@ import { cn } from "@/lib/utils";
 export function EtapaConsolidacao({
   processoId,
   serie,
+  podeConsolidar = false,
 }: {
   processoId: string;
   serie?: SeriePrecoFixture;
+  podeConsolidar?: boolean;
 }) {
   if (!serie) {
     return (
@@ -28,9 +31,20 @@ export function EtapaConsolidacao({
     );
   }
 
+  // Mesma condição usada por `TabelaSeriePrecos` para o aviso: preços já
+  // registrados, mas as estatísticas (`totalPrecos`/`precosIncluidos`) ainda
+  // não foram calculadas porque o passo explícito de consolidação não rodou.
+  const naoConsolidada = serie.totalPrecos === 0 && serie.precos.length > 0;
+
   return (
     <div className="space-y-4">
       <TabelaSeriePrecos serie={serie} />
+
+      {naoConsolidada && podeConsolidar && serie.id && (
+        <div className="flex justify-end">
+          <ConsolidarSerieButton serieId={serie.id} />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-4 py-3">
         <p className="mr-auto text-sm text-muted-foreground">

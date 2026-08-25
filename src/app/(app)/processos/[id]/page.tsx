@@ -56,6 +56,7 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
   const { id } = await params;
   const [user, processo] = await Promise.all([requireAuth(), obterProcessoDetalhado(id)]);
   const podeRevisarStatus = hasPermission(user.role, "revisao");
+  const podeConsolidar = hasPermission(user.role, "pesquisa");
 
   if (!processo) {
     return (
@@ -112,6 +113,7 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
 
   const serie: SeriePrecoFixture | undefined = serieDb
     ? {
+        id: serieDb.id,
         processoId: processo.id,
         metodo: serieDb.metodo === "menor_valor" ? "menor-valor" : serieDb.metodo,
         valorEstimado: Number(serieDb.valorEstimado),
@@ -201,6 +203,7 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
         fontes={fontes}
         cotacoes={cotacoes}
         serie={serie}
+        podeConsolidar={podeConsolidar}
         fontesSimilaridade={<FontesSimilaridadeList processoId={processo.id} />}
         itens={itensResumo}
       />

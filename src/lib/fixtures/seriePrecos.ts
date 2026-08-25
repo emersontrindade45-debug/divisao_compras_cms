@@ -15,6 +15,8 @@ export interface PrecoFixture {
 }
 
 export interface SeriePrecoFixture {
+  /** Ausente nas fixtures de exemplo; presente quando a série vem do Prisma. */
+  id?: string;
   processoId: string;
   metodo: MetodoConsolidacao;
   valorEstimado: number;

@@ -42,6 +42,7 @@ export function ProcessoTabs({
   fontes = [],
   cotacoes = [],
   serie,
+  podeConsolidar = false,
   fontesSimilaridade,
   itens = [],
 }: {
@@ -50,6 +51,7 @@ export function ProcessoTabs({
   fontes?: FonteResumo[];
   cotacoes?: CotacaoResumo[];
   serie?: SeriePrecoFixture;
+  podeConsolidar?: boolean;
   fontesSimilaridade?: ReactNode;
   itens?: { id: string; descricao: string }[];
 }) {
@@ -132,7 +134,11 @@ export function ProcessoTabs({
       </TabsContent>
 
       <TabsContent value="consolidacao">
-        <EtapaConsolidacao processoId={processo.id} serie={serie} />
+        <EtapaConsolidacao
+          processoId={processo.id}
+          serie={serie}
+          podeConsolidar={podeConsolidar}
+        />
       </TabsContent>
     </Tabs>
   );
