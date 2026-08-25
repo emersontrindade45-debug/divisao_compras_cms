@@ -358,6 +358,33 @@ describe("registry de ferramentas do assistente", () => {
       expect(urls).toEqual(["https://pncp.gov.br/app/editais/link"]);
     });
 
+    it("devolve VAZIO quando a IA reprova todos — não ressuscita o lixo", async () => {
+      // Defeito real em produção (2026-08-25): `[]` da IA era lido como falha e
+      // o fallback devolvia os 25 reprovados. A busca "banda dedicada 900 mbps"
+      // encheu a tela de EXAME GENÉTICO (casou "bandas") e o modelo ainda
+      // escolheu um "melhor candidato" entre eles.
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({ fonteDescricao: "EXAME GENETICO - CARIOTIPO COM BANDAS" }),
+        candidato({
+          fonteDescricao: "PRESTACAO DE SERVICO DE JARDINAGEM - GRAMADOS",
+          fonteUrl: "https://pncp.gov.br/app/editais/jardim",
+        }),
+      ]);
+      mocks.rankearCandidatos.mockResolvedValue([]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "banda dedicada 900 mbps",
+        itemId: "item-1",
+      });
+
+      expect(resposta.candidatos).toEqual([]);
+      expect(resposta.total).toBe(0);
+      // E o modelo precisa saber que foi reprovação de aderência, não busca
+      // vazia — senão orienta o próximo passo errado.
+      expect(String(resposta.observacao)).toContain("NENHUM é comparável");
+    });
+
     it("mantém a ordem lexical quando o ranqueamento de IA falha por inteiro", async () => {
       // Falha de infraestrutura não pode esvaziar a tela do analista.
       mocks.buscarCandidatosPublicos.mockResolvedValue([

@@ -556,15 +556,26 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
    * API real reduziu 25 candidatos a 9, eliminando switch, impressora e licença
    * de software de uma busca por link dedicado.
    *
-   * **Três caminhos de degradação, todos deliberados:**
+   * **Dois caminhos de degradação, e um que NÃO é degradação:**
    * - Sem item resolvido (`itemTR` nulo): não há contra o quê ranquear — devolve
    *   a ordem lexical. É o caso do `itemId` inválido que o modelo às vezes manda.
    * - Ranqueamento indisponível (todos os lotes falharam, `null`): devolve a
    *   ordem lexical. Falha de infraestrutura não pode esvaziar a tela.
-   * - Ranqueamento OK mas nada passou no corte (`[]`): devolve a ordem lexical
-   *   **completa**, sinalizando pelo campo `nenhumRelevante` na resposta. Uma
-   *   tela vazia esconde do analista que a busca até encontrou coisas — ele
-   *   decide, não o modelo (mesma lógica do `minimoExibido`).
+   * - **Ranqueamento OK e nada passou no corte (`[]`): devolve VAZIO.** Isto é
+   *   resposta legítima, não falha, e tratá-la como falha foi um defeito real em
+   *   produção (2026-08-25): `if (ranqueados.length === 0) return candidatos`
+   *   fazia a busca por "banda dedicada 900 mbps" despejar 25 cartões de EXAME
+   *   GENÉTICO (casaram "bandas") e a de "serviço de internet 900 mbps dedicado"
+   *   despejar SERVIÇO DE JARDINAGEM a R$ 0,15/m². A IA tinha rejeitado os 25
+   *   corretamente — confirmado chamando a API com esses mesmos textos, que
+   *   devolve 0 sobreviventes — e o fallback ressuscitava exatamente o lixo que
+   *   ele existe para remover, com o agravante de o modelo então descrever no
+   *   chat um "melhor candidato" escolhido entre eles.
+   *
+   *   Zero candidato relevante é informação útil: o termo errou o alvo e o
+   *   caminho é trocar o termo, que é o que a `observacao` da resposta orienta.
+   *   Mostrar 25 irrelevantes em vez disso não dá ao analista nenhuma decisão a
+   *   tomar — só custa a leitura de 25 cartões para concluir o mesmo.
    */
   async function filtrarPorRelevanciaIA(
     candidatos: CandidatoSimilaridade[],
@@ -579,7 +590,9 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       getProvedorIA(),
       natureza,
     );
-    if (ranqueados === null || ranqueados.length === 0) return candidatos;
+    // `null` (todos os lotes falharam) cai para a ordem lexical; `[]` (a IA
+    // avaliou e rejeitou tudo) é resultado, e passa adiante como vazio.
+    if (ranqueados === null) return candidatos;
 
     return ranqueados.map((r) => r.candidato);
   }
@@ -625,18 +638,27 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     // ideia. `demoverJaDescartados` só reordena: candidatos já descartados vão
     // para o fim, para não ocupar o corte de 25 na frente de algo nunca visto.
     if (encontrados.length === 0) {
+      // Duas causas MUITO diferentes para uma tela vazia, e o modelo precisa
+      // saber qual foi para orientar o próximo passo. Dizer "nenhuma fonte
+      // devolveu nada" quando a busca achou 25 e a IA rejeitou todos seria
+      // falso, e mandaria o modelo trocar o termo por outro igualmente amplo.
+      const buscaVeioVazia = priorizados.length === 0;
+      const observacao = buscaVeioVazia
+        ? temFiltroValor
+          ? "Nenhuma fonte pública devolveu nada para este termo dentro da faixa de valor " +
+            "informada. Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
+          : "Nenhuma fonte pública (PNCP, Painel de Preços, Compras.gov, SINAPI) devolveu nada " +
+            "para este termo. Tente outro recorte: troque o substantivo-núcleo, remova " +
+            "qualificadores ou use o nome comercial do produto."
+        : `A busca encontrou ${priorizados.length} itens, mas NENHUM é comparável ao objeto ` +
+          "deste item — a checagem de aderência (descrição, especificação e unidade) reprovou " +
+          "todos. Isso quase sempre significa que o termo casou por uma palavra ambígua (ex.: " +
+          "'banda' trazendo exame genético). NÃO descreva nem cite esses itens: eles não " +
+          "apareceram na tela do usuário. Reformule o termo com o substantivo-núcleo do objeto " +
+          "e um qualificador técnico que só exista nesse domínio.";
+
       return {
-        resposta: {
-          termo,
-          total: 0,
-          candidatos: [],
-          observacao: temFiltroValor
-            ? "Nenhuma fonte pública devolveu nada para este termo dentro da faixa de valor " +
-              "informada. Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
-            : "Nenhuma fonte pública (PNCP, Painel de Preços, Compras.gov, SINAPI) devolveu nada " +
-              "para este termo. Tente outro recorte: troque o substantivo-núcleo, remova " +
-              "qualificadores ou use o nome comercial do produto.",
-        },
+        resposta: { termo, total: 0, candidatos: [], observacao },
         sugestoes: [] as CandidatoSugerido[],
       };
     }

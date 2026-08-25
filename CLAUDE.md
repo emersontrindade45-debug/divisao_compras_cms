@@ -1122,3 +1122,23 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     seria incorreta. Ao paralelizar, `allSettled` e não `all`: um lote que falha não pode derrubar
     os outros, e "todos falharam" (devolve `null`) precisa ser distinguível de "nada passou no
     corte" (devolve `[]`) — o primeiro cai para a ordem anterior, o segundo é resultado legítimo.
+93. **"Resultado vazio" e "falha" são estados diferentes — colapsar os dois num fallback ressuscita
+    exatamente o que o filtro existe para remover.** O corte por IA de `buscar_pncp` degradava com
+    `if (ranqueados === null || ranqueados.length === 0) return candidatos`. O `null` (todos os
+    lotes falharam) justifica o fallback; o `[]` NÃO — ele é a IA dizendo "avaliei os 25 e nenhum é
+    comparável". Em produção (2026-08-25) isso fez a busca por "banda dedicada 900 mbps" despejar
+    25 cartões de EXAME GENÉTICO (casaram "bandas") e a de "serviço de internet 900 mbps dedicado"
+    despejar SERVIÇO DE JARDINAGEM a R$ 0,15/m² — e o modelo, vendo os cartões, ainda escolheu um
+    "melhor candidato" entre eles no chat. A IA tinha acertado; o fallback é que a sobrescrevia.
+    Regra: ao escrever degradação, enumerar os estados de retorno e perguntar de CADA um "isto é
+    uma falha ou uma resposta?" — só o primeiro grupo cai para o comportamento anterior. Corolário
+    de UX: tela vazia legítima precisa dizer QUAL das duas causas ocorreu ("a busca não achou nada"
+    vs. "achou N e nenhum é comparável"), porque o próximo passo é diferente em cada caso.
+94. **Duração gravada por chamada é o jeito barato de saber QUAL versão do código rodou em
+    produção.** Ao investigar as "duas rodadas horríveis", a dúvida era se o deploy tinha chegado.
+    Sem CLI da Vercel nem token, a resposta veio de `MensagemAssistente.ferramentasUsadas`: toda
+    `buscar_pncp` até 15:43 custou ~12,9s (só busca) e a partir das 17:40 custou 21–29s (busca +
+    ranqueamento de IA). O corte é nítido porque a mudança acrescentou uma etapa cara e SÍNCRONA.
+    Vale a recíproca como alerta: se a duração NÃO tivesse mudado, "o fix está no ar" seria falso
+    por mais verde que o build estivesse (§9.21, §9.30). Guardar duração por ferramenta é barato e
+    responde perguntas de versão que a infraestrutura não responde.
