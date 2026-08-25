@@ -1088,3 +1088,37 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     array inteiro (`toEqual`), não sobre `[0]`. Vale a §9.35/§9.39 num eixo novo: quando uma função
     faz duas coisas (filtrar e ordenar), cada uma precisa da sua própria mutação, senão uma cobre
     a outra e o teste passa pelo motivo errado.
+90. **Instrumento de medição que alonga o que ele mede altera o resultado — e a régua atribui o
+    efeito ao lugar errado.** Ao medir o corte por IA (M28, 2026-08-25), ligar `--ia` na régua fez
+    cada termo passar de 10–12s para 16–38s; a janela maior de martelamento no PNCP elevou as
+    recusas de rede de 0–2 para 2–7 por termo, a BUSCA passou a ler 5 editais em vez de 11, e o
+    relatório creditou ao "corte da IA" positivos que a busca **nem trouxe** (`editalVoltou:
+    false`). Conclusão medida e falsa: "a IA cortou 100% dos aprovados". A separação exigiu um
+    segundo instrumento (`scripts/medir-corte-ia.ts`) que ranqueia um conjunto FIXO vindo do banco,
+    sem rede — e aí o corte apareceu como é: mantém 14/17 dos aprovados e elimina 5/7 dos
+    descartados. Regra: quando a medição de A muda o custo de B e os dois compartilham um recurso
+    limitado (rate limit, orçamento de tempo, conexão), o experimento **não isola nada** — fixar B
+    (dados gravados, fixture, gravação de tráfego) antes de julgar A. Sintoma diagnóstico: a métrica
+    piora justamente na dimensão que a mudança não deveria tocar.
+91. **Ordem entre "cortar N" e "reordenar" decide se o descarte libera vaga — cortar primeiro
+    torna o descarte inócuo.** `buscar_pncp` fazia `slice(0, 25)` antes de `demoverJaDescartados`:
+    o já descartado ocupava uma das 25 vagas e a demoção só o reordenava DENTRO da tela, então o
+    analista descartava e nada novo subia — havia lista atrás, mas o corte já a tinha jogado fora.
+    Invertendo (demover sobre o conjunto inteiro, cortar depois), cada descarte puxa um candidato
+    inédito para dentro do corte, que é o que o botão promete. Regra geral: filtro/reordenação que
+    existe para PRIORIZAR precisa rodar sobre o conjunto completo, antes de qualquer truncamento;
+    caso contrário ele opera só sobre o que sobreviveu ao truncamento e vira decoração. O teste que
+    protege isso precisa de mais candidatos que o corte (26 para um corte de 25) — com 3 candidatos
+    e corte de 25 ele passa nas duas ordens e não prova nada.
+92. **Latência de chamada de IA cresce com o tamanho do LOTE, e o limite prático é o relógio, não o
+    de tokens.** `MAX_CANDIDATOS_POR_CHAMADA` (30, em `rankearCandidatos`) foi dimensionado para o
+    limite de tokens de saída e é seguro por esse critério — mas medido contra a API real
+    (gpt-4o-mini, 2026-08-25): 5 candidatos = 8,1s, 8 = 9,6s, 12 = 15,3s, **25 = estouro do timeout
+    de 20s do cliente**. O custo é dominado pela GERAÇÃO (um objeto de avaliação por candidato),
+    então não se resolve aumentando o timeout dentro de uma função com `maxDuration`. A saída é
+    lotear pequeno e disparar em PARALELO: 3 lotes de ~8 custaram 10,5s de parede — o tempo do mais
+    lento, não a soma. Só vale quando a pontuação é ABSOLUTA (candidato × item); se o prompt
+    pontuasse por comparação relativa dentro do lote, dividir mudaria as notas e a paralelização
+    seria incorreta. Ao paralelizar, `allSettled` e não `all`: um lote que falha não pode derrubar
+    os outros, e "todos falharam" (devolve `null`) precisa ser distinguível de "nada passou no
+    corte" (devolve `[]`) — o primeiro cai para a ordem anterior, o segundo é resultado legítimo.

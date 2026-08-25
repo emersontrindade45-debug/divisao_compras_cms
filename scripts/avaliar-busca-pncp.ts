@@ -9,6 +9,8 @@ import { buscarContratosPNCP } from "../src/lib/integracoes/pncp";
 import { MAX_SUGESTOES_POR_BUSCA } from "../src/lib/assistente/sugestoes";
 import { processarComConcorrencia } from "../src/lib/similaridade/processarComConcorrencia";
 import { ordenarResultadoBusca } from "../src/lib/similaridade/ordenarResultadoBusca";
+import { rankearEmLotesParalelos } from "../src/lib/similaridade/rankearEmLotesParalelos";
+import { OpenAIProvider } from "../src/lib/ia/openaiProvider";
 import type { CandidatoSimilaridade } from "../src/lib/ia/types";
 
 /**
@@ -52,6 +54,7 @@ import type { CandidatoSimilaridade } from "../src/lib/ia/types";
  *
  *   npx tsx --conditions=react-server scripts/avaliar-busca-pncp.ts
  *   npx tsx --conditions=react-server scripts/avaliar-busca-pncp.ts --termos=5
+ *   npx tsx --conditions=react-server scripts/avaliar-busca-pncp.ts --ia   (aplica o corte por IA; custa chamadas)
  *   npx tsx --conditions=react-server scripts/avaliar-busca-pncp.ts --comparar=.avaliacao/<arquivo>.json
  *
  * Só lê o banco (`AVALIACAO_DB_URL` ou `PROD_READ_URL`) e a API pública do PNCP;
@@ -327,6 +330,61 @@ function resumir(termos: ResultadoTermo[]): Resumo {
 }
 
 /**
+ * `--ia`: aplica o corte de relevância por IA (fix C). Ver uso em `avaliarTermo`.
+ *
+ * **Cuidado ao ler o resultado com esta flag ligada.** Medido em 2026-08-25: a
+ * chamada de IA alonga cada termo (10–12s -> 16–38s), o que estende a janela em
+ * que a régua martela o PNCP e faz as recusas de rede subirem junto (0–2 -> 2–7
+ * falhas por termo). O efeito colateral é a BUSCA piorar — menos editais lidos —
+ * e o relatório atribuir ao corte da IA um positivo que a busca sequer trouxe
+ * (`editalVoltou: false`). Os dois efeitos ficam confundidos e o número de
+ * positivos vira ruído.
+ *
+ * Isso é artefato da RÉGUA, não de produção: no assistente uma `buscar_pncp`
+ * roda por turno, sem termos em rajada disputando o mesmo rate limit. Para
+ * julgar o corte da IA isoladamente, use `scripts/medir-corte-ia.ts`, que
+ * ranqueia um conjunto FIXO vindo do banco (sem rede) e responde direto: dos
+ * candidatos que o analista aprovou, quantos a IA mantém.
+ */
+const COM_IA = process.argv.includes("--ia");
+
+/**
+ * Ranqueia com IA contra o item real do gabarito.
+ *
+ * O `itemDescricao` das linhas rotuladas é a descrição do item do TR que o
+ * analista estava pesquisando — é contra ele que o assistente ranqueia em
+ * produção. Todas as linhas de um mesmo termo vêm do mesmo item, então a
+ * primeira serve de referência.
+ *
+ * A especificação técnica não está no gabarito (a query só traz a descrição),
+ * então a régua ranqueia com especificação vazia. Isso torna a medição
+ * CONSERVADORA: em produção a IA recebe mais contexto do que aqui, e tende a
+ * separar melhor — não menos.
+ */
+async function rankearComIA(
+  candidatos: CandidatoSimilaridade[],
+  linhas: LinhaRotulada[],
+): Promise<CandidatoSimilaridade[]> {
+  const descricaoItem = linhas[0]?.itemDescricao;
+  if (!descricaoItem || candidatos.length === 0) return candidatos;
+
+  const ranqueados = await rankearEmLotesParalelos(
+    {
+      descricao: descricaoItem,
+      especificacaoTecnica: "",
+      unidade: "unidade",
+      quantidade: 1,
+    },
+    candidatos,
+    new OpenAIProvider(),
+  );
+  // Mesma degradação do assistente: falha total ou corte vazio devolve a ordem
+  // lexical, para a régua não confundir "IA fora do ar" com "nada é relevante".
+  if (ranqueados === null || ranqueados.length === 0) return candidatos;
+  return ranqueados.map((r) => r.candidato);
+}
+
+/**
  * Reexecuta o termo até obter uma resposta que não esteja contaminada por falha
  * de rede. Só o par (vazio + falha de rede observada) motiva nova tentativa:
  * vazio limpo é resultado legítimo e precisa ser medido como tal, senão a régua
@@ -355,9 +413,16 @@ async function avaliarTermo(termo: string, linhas: LinhaRotulada[]): Promise<Res
       // de propósito: ela lê o banco do processo aberto, enquanto a régua julga
       // o termo contra o gabarito inteiro. Incluí-la faria a régua medir a si
       // mesma — todo negativo do gabarito é, por definição, um descarte.
-      devolvidos = ordenarResultadoBusca(execucao.valor, termo, {
+      const ordenados = ordenarResultadoBusca(execucao.valor, termo, {
         minimoExibido: MAX_SUGESTOES_POR_BUSCA,
       });
+      // Com `--ia`, aplica também o corte de relevância por IA que o assistente
+      // roda sobre o lote que vai à tela — é a única forma de a régua medir o
+      // efeito do fix C. Fica atrás de flag porque custa dinheiro (uma chamada
+      // por lote de 8, por termo) e a régua roda com frequência.
+      devolvidos = COM_IA
+        ? await rankearComIA(ordenados.slice(0, MAX_SUGESTOES_POR_BUSCA), linhas)
+        : ordenados;
       falhasDeRede = execucao.falhasDeRede;
     } catch (e) {
       erro = e instanceof Error ? e.message : String(e);

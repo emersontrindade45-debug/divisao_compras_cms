@@ -7,12 +7,14 @@ import { CV_ANALISE_CRITICA } from "@/lib/domain/priceStats";
 import { filtrarPorValor } from "@/lib/integracoes/pncp";
 import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPublicos";
 import { ordenarResultadoBusca } from "@/lib/similaridade/ordenarResultadoBusca";
+import { rankearEmLotesParalelos } from "@/lib/similaridade/rankearEmLotesParalelos";
+import { getProvedorIA } from "@/lib/ia";
 import {
   buscarWebPerplexity,
   perplexityConfigurada,
   type ResultadoWeb,
 } from "@/lib/integracoes/perplexity";
-import type { CandidatoSimilaridade } from "@/lib/ia/types";
+import type { CandidatoSimilaridade, ItemExtraidoTR } from "@/lib/ia/types";
 import { filtrarResultadosWeb, resumirDescartes } from "./guardas";
 import type { ChamadaFerramenta, ExecutorFerramenta, ResultadoFerramenta } from "./laco";
 import {
@@ -488,32 +490,98 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     const foiDescartado = (c: CandidatoSimilaridade) =>
       Boolean(c.fonteUrl) && chavesDescartadas.has(chaveDescarte(c.fonteUrl ?? null, c.fonteDescricao));
 
+    // Todos os inéditos primeiro, os já descartados depois. Como o chamador só
+    // corta em `MAX_SUGESTOES_POR_BUSCA` DEPOIS desta função, na prática cada
+    // descarte libera uma vaga para um candidato inédito — e um já descartado só
+    // reaparece na tela quando não há inéditos suficientes para preenchê-la, que
+    // é a garantia de que o analista nunca fica sem nada para ver.
     const novos = candidatos.filter((c) => !foiDescartado(c));
     const jaDescartados = candidatos.filter((c) => foiDescartado(c));
     return [...novos, ...jaDescartados];
   }
 
   /**
-   * Natureza do item para a janela de recência da IN 65/2021. O `itemId` vem do
-   * modelo e nem sempre é um id real — no uso medido em produção ele já chegou
-   * como `"1"`, `"item-1"` e `"0908/2022"` (número do processo). Um id que não
-   * resolve devolve `null`, que é a janela mais permissiva (730 dias): degrada
-   * para o comportamento anterior em vez de falhar a busca.
+   * Item real por trás do `itemId` que o modelo informou — natureza (janela de
+   * recência da IN 65/2021) e texto (base do ranqueamento por IA).
+   *
+   * O `itemId` vem do modelo e nem sempre é um id real: no uso medido em
+   * produção ele já chegou como `"1"`, `"item-1"` e `"0908/2022"` (número do
+   * processo). Um id que não resolve devolve `null`, e a busca degrada para o
+   * comportamento anterior (janela de 730 dias, sem ranqueamento de IA) em vez
+   * de falhar.
    */
-  async function naturezaDoItem(
-    itemId: string | null,
-  ): Promise<"bem_consumo" | "servico_continuo" | null> {
+  async function itemDaBusca(itemId: string | null): Promise<{
+    natureza: "bem_consumo" | "servico_continuo" | null;
+    itemTR: ItemExtraidoTR;
+  } | null> {
     if (!itemId) return null;
     const item = await db.item.findUnique({
       // `select` explícito, nunca `include`: coluna nova no schema quebraria a
       // consulta em produção antes da migration rodar (CLAUDE.md §9.46).
       where: { id: itemId },
-      select: { natureza: true, processoId: true },
+      select: {
+        natureza: true,
+        processoId: true,
+        descricao: true,
+        caracteristicasTecnicas: true,
+        unidade: true,
+        quantidade: true,
+      },
     });
     if (!item) return null;
     // Item de outro processo não governa a janela desta conversa.
     if (ctx.processoId && item.processoId !== ctx.processoId) return null;
-    return item.natureza;
+    return {
+      natureza: item.natureza,
+      itemTR: {
+        descricao: item.descricao,
+        especificacaoTecnica: item.caracteristicasTecnicas ?? "",
+        unidade: item.unidade,
+        quantidade: item.quantidade,
+      },
+    };
+  }
+
+  /**
+   * Aplica o ranqueador de IA — o mesmo corte de qualidade do pipeline
+   * automático (score ≥70 e descrição ≥60, ver `rankearCandidatos`) — ao
+   * conjunto que iria para a tela.
+   *
+   * **Por que isto existe.** A ordenação lexical (`ordenarResultadoBusca`)
+   * empurra o ruído para baixo mas não o elimina: candidato descartado pelo
+   * analista costuma sê-lo por motivo que o TEXTO não enxerga — unidade errada,
+   * escala errada, valor que é total e não unitário. Medido pela régua depois
+   * da ordenação lexical, descartes ainda ocupavam ~98% das vagas encontradas.
+   * A IA compara especificação e unidade, não só palavras, e no teste contra a
+   * API real reduziu 25 candidatos a 9, eliminando switch, impressora e licença
+   * de software de uma busca por link dedicado.
+   *
+   * **Três caminhos de degradação, todos deliberados:**
+   * - Sem item resolvido (`itemTR` nulo): não há contra o quê ranquear — devolve
+   *   a ordem lexical. É o caso do `itemId` inválido que o modelo às vezes manda.
+   * - Ranqueamento indisponível (todos os lotes falharam, `null`): devolve a
+   *   ordem lexical. Falha de infraestrutura não pode esvaziar a tela.
+   * - Ranqueamento OK mas nada passou no corte (`[]`): devolve a ordem lexical
+   *   **completa**, sinalizando pelo campo `nenhumRelevante` na resposta. Uma
+   *   tela vazia esconde do analista que a busca até encontrou coisas — ele
+   *   decide, não o modelo (mesma lógica do `minimoExibido`).
+   */
+  async function filtrarPorRelevanciaIA(
+    candidatos: CandidatoSimilaridade[],
+    itemTR: ItemExtraidoTR | null,
+    natureza: "bem_consumo" | "servico_continuo" | null,
+  ): Promise<CandidatoSimilaridade[]> {
+    if (!itemTR || candidatos.length === 0) return candidatos;
+
+    const ranqueados = await rankearEmLotesParalelos(
+      itemTR,
+      candidatos,
+      getProvedorIA(),
+      natureza,
+    );
+    if (ranqueados === null || ranqueados.length === 0) return candidatos;
+
+    return ranqueados.map((r) => r.candidato);
   }
 
   async function buscarPncp(
@@ -523,20 +591,34 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     valorMaximo?: number,
   ) {
     const temFiltroValor = valorMinimo !== undefined || valorMaximo !== undefined;
+    const item = await itemDaBusca(itemIdSugerido);
     const buscados = await buscarCandidatosPublicos(termo, {
       timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
     });
     const filtrados = filtrarPorValor(buscados, { valorMinimo, valorMaximo });
 
-    // Ranqueia ANTES de demover: a demoção precisa ter a última palavra sobre
-    // candidato já rejeitado pelo analista, senão a aderência textual o traria
-    // de volta para o topo — era exatamente o defeito de ordenar por texto que
-    // levou à demoção existir (ver `demoverJaDescartados`).
+    // Ordenação lexical primeiro: é ela que decide QUAIS candidatos valem a
+    // chamada de IA. Ranquear os 190 devolvidos custaria 24 lotes; ranquear os
+    // 25 que a tela comporta custa 4 e roda em ~10s (ver
+    // `rankearEmLotesParalelos`).
     const ordenados = ordenarResultadoBusca(filtrados, termo, {
-      naturezaObjeto: await naturezaDoItem(itemIdSugerido),
+      naturezaObjeto: item?.natureza ?? null,
       minimoExibido: MAX_SUGESTOES_POR_BUSCA,
     });
-    const encontrados = await demoverJaDescartados(ctx.processoId, ordenados);
+
+    // Demove ANTES de cortar o lote que vai à IA. A ordem importa e custou uma
+    // iteração: enquanto o corte de 25 vinha primeiro, os já descartados
+    // ocupavam as vagas e a demoção só os reordenava DENTRO da tela — o
+    // analista descartava e nada novo subia, porque não havia nada atrás deles.
+    // Demovendo antes, cada descarte empurra um candidato inédito para dentro do
+    // corte, que é o comportamento que o descarte promete.
+    const priorizados = await demoverJaDescartados(ctx.processoId, ordenados);
+
+    const encontrados = await filtrarPorRelevanciaIA(
+      priorizados.slice(0, MAX_SUGESTOES_POR_BUSCA),
+      item?.itemTR ?? null,
+      item?.natureza ?? null,
+    );
 
     // Nenhum candidato é excluído por já ter sido descartado numa busca
     // anterior — o card continua podendo aparecer, e o analista pode mudar de

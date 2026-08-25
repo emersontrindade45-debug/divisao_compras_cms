@@ -105,7 +105,14 @@ describe("registry de ferramentas do assistente", () => {
     mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([]);
     mocks.db.resultadoSimilaridade.createMany.mockResolvedValue({ count: 1 });
     mocks.buscarCandidatosPublicos.mockResolvedValue([candidato()]);
-    mocks.rankearCandidatos.mockResolvedValue([RANQUEADO]);
+    // Passa-tudo por padrão: `buscar_pncp` agora ranqueia com IA em lotes
+    // (`rankearEmLotesParalelos`, que chama este mock uma vez por lote de 8), e
+    // um retorno fixo faria toda busca colapsar num candidato só. Os testes que
+    // exercitam o CORTE da IA sobrescrevem este comportamento.
+    mocks.rankearCandidatos.mockImplementation(
+      async (_item: unknown, lote: CandidatoSimilaridade[]) =>
+        lote.map((c) => ({ ...RANQUEADO, candidato: c })),
+    );
   });
 
   // As invariantes de origem do preço e de score migraram para
@@ -295,6 +302,93 @@ describe("registry de ferramentas do assistente", () => {
       ]);
       // Nada foi excluído: os 3 continuam no total.
       expect(resposta.total).toBe(3);
+    });
+
+    it("libera vaga: cada descarte puxa um candidato inédito para dentro do corte", async () => {
+      // O ponto do descarte é abrir espaço. Enquanto o corte de 25 era aplicado
+      // ANTES da demoção, o descartado só era reordenado dentro da tela e nada
+      // novo subia — o analista descartava e a tela não mudava.
+      //
+      // 26 candidatos, o PRIMEIRO já descartado: sem liberar vaga, ele ocuparia
+      // uma das 25 e o inédito de índice 25 ficaria de fora.
+      const muitos = Array.from({ length: 26 }, (_, i) =>
+        candidato({ fonteUrl: `https://pncp.gov.br/app/editais/${i}` }),
+      );
+      mocks.buscarCandidatosPublicos.mockResolvedValue(muitos);
+      mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+        {
+          fonteUrl: "https://pncp.gov.br/app/editais/0",
+          fonteDescricao: "Cadeira giratória ergonômica",
+        },
+      ]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      const urls = (resposta.candidatos as Array<{ url: string }>).map((c) => c.url);
+      expect(urls).toHaveLength(25);
+      // O inédito que só cabe porque o descartado saiu da frente.
+      expect(urls).toContain("https://pncp.gov.br/app/editais/25");
+      // E o descartado não gastou vaga.
+      expect(urls).not.toContain("https://pncp.gov.br/app/editais/0");
+    });
+
+    it("aplica o corte de relevância da IA, tirando o ruído da tela", async () => {
+      // O que a ordenação lexical não resolve: switch e impressora casam tokens
+      // ("fibra", "900") mas não são o produto. A IA compara especificação e
+      // unidade, e é ela que os elimina.
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/link", fonteDescricao: "Link dedicado 900 Mbps" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/switch", fonteDescricao: "Switch 24 portas fibra 900W" }),
+      ]);
+      mocks.rankearCandidatos.mockImplementation(
+        async (_item: unknown, lote: CandidatoSimilaridade[]) =>
+          lote
+            .filter((c) => c.fonteDescricao.startsWith("Link"))
+            .map((c) => ({ ...RANQUEADO, candidato: c })),
+      );
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "link dedicado",
+        itemId: "item-1",
+      });
+
+      const urls = (resposta.candidatos as Array<{ url: string }>).map((c) => c.url);
+      expect(urls).toEqual(["https://pncp.gov.br/app/editais/link"]);
+    });
+
+    it("mantém a ordem lexical quando o ranqueamento de IA falha por inteiro", async () => {
+      // Falha de infraestrutura não pode esvaziar a tela do analista.
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/A" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/B" }),
+      ]);
+      mocks.rankearCandidatos.mockRejectedValue(new Error("OpenAI fora do ar"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        itemId: "item-1",
+      });
+
+      expect(resposta.candidatos).toHaveLength(2);
+    });
+
+    it("não chama a IA quando o itemId do modelo não resolve", async () => {
+      // O modelo manda "1", "item-1", "0908/2022"... sem item real não há contra
+      // o quê ranquear, e a busca degrada para a ordem lexical.
+      mocks.db.item.findUnique.mockResolvedValue(null);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        itemId: "1",
+      });
+
+      expect(mocks.rankearCandidatos).not.toHaveBeenCalled();
+      expect(resposta.candidatos).toHaveLength(1);
     });
 
     it("consulta os descartes só deste processo, com URL não nula", async () => {

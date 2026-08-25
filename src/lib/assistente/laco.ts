@@ -38,6 +38,16 @@ export const MAX_PASSOS_POR_TURNO = 8;
  * passos: pede fechamento ao modelo e marca `orcamentoEsgotado`, que a UI
  * transforma no botão "Continuar procurando".
  *
+ * **Custo de uma `buscar_pncp` depois do ranqueamento por IA (M28, 2026-08-25):**
+ * busca (~10–22s, teto interno de 12s por provedor) + ranqueamento em lotes
+ * paralelos (~10s medidos contra a API real). Ou seja ~22s no caso típico — uma
+ * busca cabe com folga, DUAS não cabem, e a segunda é barrada pelo orçamento
+ * antes de começar. Isso é deliberado e é a troca certa: uma busca cujos 25
+ * candidatos foram filtrados por especificação e unidade vale mais que duas
+ * buscas devolvendo ruído ordenado por texto (era o estado anterior, medido em
+ * 0% de candidatos aprovados visíveis). O botão "Continuar procurando" cobre
+ * quem precisa da segunda.
+ *
  * O orçamento é conferido ANTES de cada ferramenta, então ele não interrompe uma
  * ferramenta já em curso — quem limita essa ponta são os tetos internos de cada
  * integração (ver `TEMPO_MAX_BUSCA_MS` no PNCP). A combinação cobre o caso comum
