@@ -2641,3 +2641,46 @@ analista), P5 (SINAPI ligado com `precos_referencia` vazia — ingerir ou desabi
 sobre ingestão do PNCP). Contratos ficaram **descartados por medição**: `/contratos/{ano}/{seq}/itens`
 responde 404 e o registro só traz valor global — e o caminho `/compras/{seq}/itens` montado com o
 sequencial do contrato responde 200 **com a compra errada**.
+
+---
+
+## Sessão 2026-08-26 (parte 2) — P3: atas de registro de preços
+
+Terceira frente do plano de cobertura. A ata é indexada à parte do edital no PNCP e é o único
+caminho para uma fatia das compras: medido em 3 termos, **cerca de metade das atas devolvidas
+aponta para compra que a busca por edital não alcança**, e **8 em 10 dessas compras inéditas
+renderam preço homologado** — coerente com o fato de que uma ata só existe depois da homologação.
+
+### Quatro decisões medidas antes de codar
+
+1. **`numero_sequencial` da ata NÃO é o da compra.** O caminho de itens precisa de
+   `numero_sequencial_compra_ata`. Montar com o sequencial errado cai na armadilha do §9.96: no
+   PNCP esse caminho responde **200 com os itens de outra compra**. `buscarPorTexto` normaliza o
+   campo, e ata sem ele é descartada (medido: presente em 59/59).
+2. **A chave de deduplicação tinha de mudar.** O edital vem como `…-000777/2026` e a ata da mesma
+   compra como `…-000777/2026-000001`: deduplicar por `numero_controle_pncp` detectou **0**
+   sobreposições num termo real, contra 2 pela identidade da compra (`chaveCompra`). Sem a troca, a
+   mesma compra seria lida duas vezes e geraria candidato duplicado.
+3. **`temJulgamento` não pode valer para ata.** Medido: o índice de atas devolve `tem_resultado:
+   null` em 100% dos casos. Hoje o filtro as deixaria passar por acidente (`null !== false`);
+   a condição virou explícita por tipo para que um `false` futuro do PNCP não apague as atas em
+   silêncio.
+4. **Intercalar, não concatenar.** O orçamento (`MAX_RESULTADOS_POR_BUSCA`) já é a restrição que
+   morde — as 4 páginas de edital sozinhas entregam ~58 compras para um teto de ~37. Concatenar as
+   atas no fim seria pagar 2 requisições de busca por uma fila que nunca chega ao fim (§9.40).
+   A intercalação divide o orçamento sem precisar afirmar qual origem rende mais, o que seria
+   palpite: as duas medições de rendimento que tenho usaram tetos de itens diferentes e não são
+   comparáveis (§9.69).
+
+`PAGINAS_BUSCA_ATA = 2` (não 4) pelo mesmo motivo do item 4: descobrir mais compras não ajuda
+enquanto o teto de resultados for o limitante.
+
+### Verificação
+
+1.288 testes (129 arquivos) verdes, typecheck e ESLint limpos, `next build` compilado. 6 testes
+novos, e **cada uma das quatro decisões confirmada por mutação**: não normalizar o sequencial
+derruba 4 testes; aplicar `temJulgamento` à ata derruba 1; deduplicar por `numero_controle_pncp`
+derruba 2; concatenar em vez de intercalar derruba 1.
+
+A URL de evidência montada a partir da ata foi validada contra a API real (§9.8): as 3 amostradas
+resolvem, e a descrição do item da compra bate com a da ata.

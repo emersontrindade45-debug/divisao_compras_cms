@@ -1173,3 +1173,20 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     conteúdo devolvido descreve o mesmo objeto (comparar descrição, órgão, valor), nunca só que o
     HTTP foi 200 (§9.8, §9.75). Registrado também o resultado: contratos do PNCP **não** servem
     como fonte de preço unitário — só trazem `valor_global`, sem quantidade.
+97. **Quando a mesma entidade aparece em dois índices da mesma API, o id "natural" é do ÍNDICE, não
+    da entidade — deduplicar por ele detecta zero colisões e parece funcionar.** Ao acrescentar as
+    atas de registro de preços à busca (P3, 2026-08-26), a deduplicação existente usava
+    `numero_controle_pncp`. O edital da compra vem como `…-000777/2026` e a ata da MESMA compra como
+    `…-000777/2026-000001`, com sufixo do sequencial da própria ata: medido num termo real, a chave
+    antiga detectou **0** sobreposições onde a identidade da compra (`cnpj/ano/sequencial`) detectou
+    2. O sintoma seria mudo — a compra lida duas vezes, orçamento gasto em dobro e candidato
+    duplicado para o mesmo item, sem erro em lugar nenhum. Ao integrar um índice novo de uma API que
+    já se consome, perguntar **"esta chave identifica a coisa ou a linha do índice?"** e medir a
+    sobreposição contra o índice antigo antes de confiar — zero colisões entre duas fontes que
+    deveriam se sobrepor é sinal de chave errada, não de ausência de duplicata.
+    **Corolário sobre orçamento saturado:** fonte nova acrescentada ao FIM de uma fila que já não
+    termina é a §9.40 outra vez (o recurso existe, custa requisição e nunca roda). Quando o
+    limitante é orçamento e não descoberta, a pergunta não é "de onde trago mais candidatos" e sim
+    "como divido o orçamento entre as origens" — aqui, intercalando. E dividir sem afirmar qual
+    origem rende mais foi deliberado: as duas medições de rendimento que eu tinha usavam tetos de
+    itens diferentes e não eram comparáveis entre si (§9.69).

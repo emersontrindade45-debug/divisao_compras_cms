@@ -30,6 +30,25 @@ const TAMANHO_PAGINA = 20;
  */
 const PAGINAS_BUSCA_TEXTUAL = 4;
 
+/**
+ * Páginas do índice de ATAS DE REGISTRO DE PREÇOS lidas em paralelo com as de
+ * edital. A ata é indexada à parte no PNCP, e é a única forma de alcançar
+ * compras que a busca por edital não devolve.
+ *
+ * Medido contra a API real em 2026-08-26, em 3 termos: cerca de **metade das
+ * atas aponta para compras que a busca por edital não alcançou** (10 a 12
+ * inéditas na página 1 de cada termo). Dessas compras inéditas, **8 em 10
+ * renderam preço homologado** — rendimento alto, coerente com o fato de que uma
+ * ata só existe depois da homologação.
+ *
+ * São 2 páginas, não 4, porque o limitante aqui não é descobrir compras e sim o
+ * orçamento de `MAX_RESULTADOS_POR_BUSCA`: as 4 páginas de edital já entregam
+ * mais compras processáveis do que o orçamento comporta. A página 2 de ata ainda
+ * rendeu 7 a 18 inéditas por termo; ampliar depois é barato, mas só faz sentido
+ * junto com o teto de resultados.
+ */
+const PAGINAS_BUSCA_ATA = 2;
+
 // O PNCP derruba conexões (ECONNRESET) ou responde 429 sob rajadas de requisições —
 // comum ao processar cotações com muitos itens, cada um exigindo ≥3 preços. Retry com
 // backoff absorve o throttling transitório; o lote limita a rajada de buscas de itens.
@@ -248,8 +267,19 @@ interface PNCPSearchItem {
   /**
    * O edital já tem julgamento publicado. Vem na resposta da busca textual, de
    * graça — ver `temJulgamento`, que é quem decide o que fazer com ele.
+   *
+   * Medido: no índice de ATAS este campo vem `null` em 100% dos casos, e por
+   * isso o descarte por julgamento não se aplica a elas (ver `buscarPorTexto`).
    */
-  tem_resultado?: boolean;
+  tem_resultado?: boolean | null;
+  /**
+   * Só no índice de atas: o sequencial da COMPRA que originou a ata — diferente
+   * de `numero_sequencial`, que ali é o sequencial da própria ata. É por ele que
+   * se chega aos itens e ao preço homologado; `buscarPorTexto` normaliza o
+   * `numero_sequencial` a partir daqui para que o resto do fluxo não precise
+   * saber de qual índice o resultado veio.
+   */
+  numero_sequencial_compra_ata?: string;
 }
 
 interface PNCPItemResponse {
@@ -323,24 +353,50 @@ function temJulgamento(item: PNCPSearchItem): boolean {
 }
 
 /**
+ * Identidade da COMPRA por trás de um resultado da busca textual — a chave de
+ * deduplicação correta.
+ *
+ * **`numero_controle_pncp` NÃO serve para isso**, e usá-lo foi o primeiro
+ * desenho: o edital vem como `25107525000151-1-000047/2024` e a ata da mesma
+ * compra como `00394452000103-1-018722/2024-000001`, com um sufixo de sequencial
+ * da própria ata. Medido em 2026-08-26 num termo real: deduplicar por
+ * `numero_controle_pncp` detectou **0** sobreposições entre editais e atas,
+ * enquanto a identidade da compra detectou 2 — ou seja, a mesma compra seria
+ * lida duas vezes, gastando orçamento em dobro e gerando candidato duplicado
+ * para o mesmo item.
+ *
+ * Também colapsa corretamente várias atas da mesma compra (uma compra com N
+ * fornecedores registrados publica N atas, todas apontando para a mesma
+ * `numero_sequencial_compra_ata`).
+ */
+function chaveCompra(item: PNCPSearchItem): string {
+  return `${item.orgao_cnpj}/${item.ano}/${item.numero_sequencial}`;
+}
+
+/**
  * Busca textual real do PNCP (mesmo endpoint usado pelo site oficial em
  * pncp.gov.br/busca). A API de Consulta (/api/consulta) não suporta texto
  * livre — esse endpoint é o que permite encontrar processos relevantes ao
  * termo do item, em vez de uma amostra aleatória de publicações recentes.
- */
-/**
- * Busca textual para uma página específica da API. Chamada em paralelo para
- * todas as `PAGINAS_BUSCA_TEXTUAL` em `buscarContratosPNCP`; expõe o parâmetro
- * para que os testes possam asserir que todas as páginas são pedidas.
+ *
+ * Chamada em paralelo para todas as páginas de cada tipo de documento em
+ * `buscarContratosPNCP`; expõe `pagina` e `tipo` para que os testes possam
+ * asserir o que é pedido.
+ *
+ * **Sobre `tipo: "ata"`.** A ata é indexada à parte, mas os itens e o preço
+ * homologado vivem na compra-mãe — por isso o retorno é normalizado para a
+ * identidade da COMPRA (`numero_sequencial_compra_ata`), e daí para frente o
+ * fluxo é idêntico ao do edital. Ver `PAGINAS_BUSCA_ATA`.
  */
 async function buscarPorTexto(
   termo: string,
   ctx: ContextoBusca,
   pagina = 1,
+  tipo: "edital" | "ata" = "edital",
 ): Promise<PNCPSearchItem[]> {
   const params = new URLSearchParams({
     q: termo,
-    tipos_documento: "edital",
+    tipos_documento: tipo,
     // Relevância, não data: a recência já é garantida depois pelo filtroRecencia
     // (corte de 365 dias); ordenar por data aqui só traz os editais mais recentes
     // que casam vagamente com o termo, sacrificando os realmente relevantes.
@@ -352,19 +408,44 @@ async function buscarPorTexto(
   const url = `${PNCP_SEARCH_BASE_URL}/?${params.toString()}`;
   const res = await fetchComRetry(url, ctx);
   if (!res.ok) {
-    console.error(`[PNCP] Falha na busca textual ("${termo}"): HTTP ${res.status}`);
+    console.error(`[PNCP] Falha na busca textual ${tipo} ("${termo}"): HTTP ${res.status}`);
     return [];
   }
 
   const body = (await res.json()) as { items?: PNCPSearchItem[] };
-  const itens = body.items ?? [];
+  const brutos = body.items ?? [];
+
+  // A ata aponta para a compra-mãe por um campo próprio; sem esta normalização,
+  // `numero_sequencial` seria o sequencial da ATA e todos os caminhos de
+  // `/orgaos/{cnpj}/compras/{ano}/{seq}/...` cairiam em outra compra ou em 404 —
+  // exatamente a armadilha medida nos contratos (CLAUDE.md §9.96). Medido em 59
+  // atas: `numero_sequencial_compra_ata` estava presente em todas.
+  const itens =
+    tipo === "ata"
+      ? brutos.flatMap((item) =>
+          item.numero_sequencial_compra_ata
+            ? [{ ...item, numero_sequencial: item.numero_sequencial_compra_ata }]
+            : [],
+        )
+      : brutos;
 
   // Exclusão do próprio órgão e descarte de edital sem julgamento aplicados aqui
   // (e não no chamador) para que qualquer consumidor futuro da busca textual
   // herde as duas regras automaticamente.
+  //
+  // O descarte por julgamento vale SÓ para edital. Medido em 59 atas: o índice
+  // de atas devolve `tem_resultado: null` em 100% delas — o campo simplesmente
+  // não é preenchido para esse tipo de documento. Hoje `temJulgamento` deixaria
+  // todas passar por acidente (`null !== false`), e depender disso seria frágil:
+  // bastaria o PNCP passar a mandar `false` ali para as atas sumirem inteiras,
+  // em silêncio. A condição explícita também diz a coisa certa sobre o domínio —
+  // uma ata de registro de preços só existe DEPOIS da homologação, então "não
+  // tem julgamento" não é um estado possível para ela.
   const proprio = cnpjOrgaoProprio();
   return itens.filter(
-    (item) => normalizarCnpj(item.orgao_cnpj) !== proprio && temJulgamento(item),
+    (item) =>
+      normalizarCnpj(item.orgao_cnpj) !== proprio &&
+      (tipo === "ata" || temJulgamento(item)),
   );
 }
 
@@ -685,6 +766,11 @@ export function filtrarPorValor(
  * de cada um. Deve ser chamada por item (descrição/palavras-chave), não uma
  * única vez por processo — o termo é o que torna os candidatos relevantes.
  *
+ * Cobre dois índices do PNCP: **editais** e **atas de registro de preços**. A
+ * ata é o único caminho para uma parte das compras — metade das atas devolvidas
+ * aponta para compra que a busca por edital não alcança (medido em 2026-08-26).
+ * Uma vez resolvida a compra-mãe, o tratamento é idêntico para as duas origens.
+ *
  * Devolve **apenas preços homologados**: o valor estimado do edital é o orçamento
  * feito antes do certame e não serve como referência de preço praticado.
  */
@@ -696,23 +782,50 @@ export async function buscarContratosPNCP(
 
   const ctx = criarContextoBusca();
   try {
-    // Todas as páginas em paralelo — ver PAGINAS_BUSCA_TEXTUAL para por que são
-    // 4 e por que isso não custa tempo de parede. Cada uma já chega sem os
-    // editais do próprio órgão e sem os que não têm julgamento (`buscarPorTexto`).
-    const paginas = await Promise.all(
-      Array.from({ length: PAGINAS_BUSCA_TEXTUAL }, (_, i) =>
-        buscarPorTexto(termo, ctx, i + 1),
+    // Editais e atas, todas as páginas em paralelo — ver PAGINAS_BUSCA_TEXTUAL e
+    // PAGINAS_BUSCA_ATA. Não custa tempo de parede (o gargalo é latência), e cada
+    // página já chega sem o próprio órgão e, no caso dos editais, sem os que não
+    // têm julgamento (`buscarPorTexto`).
+    const [paginasEdital, paginasAta] = await Promise.all([
+      Promise.all(
+        Array.from({ length: PAGINAS_BUSCA_TEXTUAL }, (_, i) =>
+          buscarPorTexto(termo, ctx, i + 1, "edital"),
+        ),
       ),
-    );
-    // Deduplicação por número de controle — um edital não pode aparecer em
-    // duas páginas da busca (a API ordena por relevância sem repetição), mas
-    // o check é defensivo.
+      Promise.all(
+        Array.from({ length: PAGINAS_BUSCA_ATA }, (_, i) =>
+          buscarPorTexto(termo, ctx, i + 1, "ata"),
+        ),
+      ),
+    ]);
+
+    // **Intercalar, não concatenar.** O orçamento (`MAX_RESULTADOS_POR_BUSCA`) já
+    // é a restrição que morde: as 4 páginas de edital sozinhas entregam ~58
+    // compras processáveis para um teto de ~37. Concatenar as atas no fim seria
+    // acrescentá-las a uma fila que nunca chega ao fim — elas custariam 2
+    // requisições de busca e não seriam lidas nunca, que é o modo de falha da
+    // §9.40 (a feature existe e não faz nada). Concatenar na frente teria o
+    // problema simétrico, expulsando editais.
+    //
+    // A intercalação divide o orçamento entre as duas origens sem precisar
+    // afirmar qual rende mais — o que seria palpite: as duas medições de
+    // rendimento que tenho foram feitas com tetos de itens diferentes e não são
+    // comparáveis entre si (§9.69).
     const vistos = new Set<string>();
     const processos: PNCPSearchItem[] = [];
-    for (const item of paginas.flat()) {
-      if (!vistos.has(item.numero_controle_pncp)) {
-        vistos.add(item.numero_controle_pncp);
-        processos.push(item);
+    const filaEdital = paginasEdital.flat();
+    const filaAta = paginasAta.flat();
+    for (let i = 0; i < Math.max(filaEdital.length, filaAta.length); i++) {
+      for (const item of [filaEdital[i], filaAta[i]]) {
+        // Deduplicação pela identidade da COMPRA, não por `numero_controle_pncp`:
+        // é o que faz a ata e o edital da mesma compra colidirem (ver
+        // `chaveCompra` — medido, a chave antiga detectava 0 sobreposições).
+        if (!item) continue;
+        const chave = chaveCompra(item);
+        if (!vistos.has(chave)) {
+          vistos.add(chave);
+          processos.push(item);
+        }
       }
     }
     const itensPorProcesso: CandidatoSimilaridade[][] = [];

@@ -60,19 +60,32 @@ function resultadoDe(over: Record<string, unknown> = {}) {
  */
 function mockPncp(opcoes: {
   processos: unknown[] | ((pagina: number) => unknown[]);
+  /**
+   * Resposta do índice de ATAS (`tipos_documento=ata`). Ausente = índice vazio,
+   * que é o que mantém os testes de edital medindo só o que se propõem a medir.
+   */
+  atas?: unknown[] | ((pagina: number) => unknown[]);
   itens?: unknown[] | ((pagina: number) => unknown[]);
   resultados?: unknown[] | ((numeroItem: number) => unknown[]);
   onUrl?: (url: string) => void;
 }) {
-  const { processos, itens = [itemDe()], resultados = [resultadoDe()], onUrl } = opcoes;
+  const {
+    processos,
+    atas = [],
+    itens = [itemDe()],
+    resultados = [resultadoDe()],
+    onUrl,
+  } = opcoes;
 
   return vi.spyOn(global, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     onUrl?.(url);
 
     if (url.includes("/api/search/")) {
-      const paginaBusca = Number(new URL(url).searchParams.get("pagina") ?? 1);
-      const itensBusca = typeof processos === "function" ? processos(paginaBusca) : processos;
+      const params = new URL(url).searchParams;
+      const paginaBusca = Number(params.get("pagina") ?? 1);
+      const fonte = params.get("tipos_documento") === "ata" ? atas : processos;
+      const itensBusca = typeof fonte === "function" ? fonte(paginaBusca) : fonte;
       return mockBusca(itensBusca);
     }
 
@@ -162,9 +175,10 @@ describe("buscarContratosPNCP", () => {
     await vi.runAllTimersAsync();
     await promessa;
 
-    // Com as 4 páginas em paralelo: página 1 falha (chamadasBusca=1), páginas
-    // 2 a 4 sucedem (2, 3, 4) e o retry da página 1 sucede (5).
-    expect(chamadasBusca).toBe(5);
+    // 6 buscas textuais em paralelo (4 páginas de edital + 2 de ata): a primeira
+    // falha (chamadasBusca=1), as outras cinco sucedem (2..6) e o retry da que
+    // falhou sucede (7).
+    expect(chamadasBusca).toBe(7);
     vi.useRealTimers();
   });
 
@@ -181,8 +195,8 @@ describe("buscarContratosPNCP", () => {
     const resultado = await promessa;
 
     expect(resultado).toEqual([]);
-    // Quatro páginas em paralelo × 3 tentativas cada = 12 requisições totais.
-    expect(fetchSpy).toHaveBeenCalledTimes(12);
+    // 6 buscas textuais em paralelo (4 edital + 2 ata) × 3 tentativas = 18.
+    expect(fetchSpy).toHaveBeenCalledTimes(18);
     vi.useRealTimers();
   });
 
@@ -765,18 +779,18 @@ describe("tetos de tempo", () => {
     let relogio = 0;
     vi.spyOn(Date, "now").mockImplementation(() => relogio);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Cada requisição "gasta" 800ms. As 4 buscas textuais em paralelo custam
-    // 3,2s; o primeiro lote de 5 editais custa mais 8s (5 páginas + 5 resultados
-    // × 800ms) → 11,2s, dentro dos 12s. Sobram 0,8s, abaixo da reserva de 2s, e
-    // o segundo lote não começa.
-    // O custo por requisição precisa cair na janela 714 < c < 857: acima disso o
+    // Cada requisição "gasta" 700ms. As 6 buscas textuais em paralelo (4 edital +
+    // 2 ata) custam 4,2s; o primeiro lote de 5 editais custa mais 7s (5 páginas +
+    // 5 resultados × 700ms) → 11,2s, dentro dos 12s. Sobram 0,8s, abaixo da
+    // reserva de 2s, e o segundo lote não começa.
+    // O custo por requisição precisa cair na janela 625 < c < 750: acima disso o
     // próprio primeiro lote estoura os 12s e `ctx.vencido()` descarta o que ele
-    // achou; abaixo, sobra reserva e o segundo lote começa. Era 900ms quando as
-    // buscas textuais eram 2 (§ PAGINAS_BUSCA_TEXTUAL).
+    // achou; abaixo, sobra reserva e o segundo lote começa. A janela se estreita
+    // a cada busca textual acrescentada (era 714–857 com 4 buscas, 900ms com 2).
     mockPncp({
       processos,
       onUrl: () => {
-        relogio += 800;
+        relogio += 700;
       },
     });
 
@@ -801,23 +815,23 @@ describe("tetos de tempo", () => {
     vi.spyOn(Date, "now").mockImplementation(() => relogio);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const urls: string[] = [];
-    // 11,2s consumidos até o fim do primeiro lote (4 buscas textuais + 5 páginas
-    // + 5 resultados, a 800ms cada): sobra 0,8s, abaixo da reserva de 2s. Sem a
+    // 11,2s consumidos até o fim do primeiro lote (6 buscas textuais + 5 páginas
+    // + 5 resultados, a 700ms cada): sobra 0,8s, abaixo da reserva de 2s. Sem a
     // reserva o segundo lote começaria, pagaria 5 requisições de página e seria
     // descartado inteiro pelo prazo. Mesma janela de calibração do teste acima.
     mockPncp({
       processos,
       onUrl: (u) => {
         urls.push(u);
-        relogio += 800;
+        relogio += 700;
       },
     });
 
     await buscarContratosPNCP("cadeira");
 
-    // 4 buscas textuais + 5 páginas + 5 resultados = 14 requisições. Nenhuma do
+    // 6 buscas textuais + 5 páginas + 5 resultados = 16 requisições. Nenhuma do
     // segundo lote (que começaria pedindo /itens de ctrl-5).
-    expect(urls).toHaveLength(14);
+    expect(urls).toHaveLength(16);
     expect(urls.some((u) => u.includes("/compras/2026/6/itens"))).toBe(false);
   });
 
@@ -998,9 +1012,17 @@ describe("busca textual em quatro páginas paralelas", () => {
     await buscarContratosPNCP("cadeira");
 
     const urlsBusca = urls.filter((u) => u.includes("/api/search/"));
-    expect(urlsBusca).toHaveLength(4);
+    const urlsEdital = urlsBusca.filter((u) => u.includes("tipos_documento=edital"));
+    const urlsAta = urlsBusca.filter((u) => u.includes("tipos_documento=ata"));
+
+    expect(urlsEdital).toHaveLength(4);
     for (const pagina of [1, 2, 3, 4]) {
-      expect(urlsBusca.some((u) => u.includes(`pagina=${pagina}`))).toBe(true);
+      expect(urlsEdital.some((u) => u.includes(`pagina=${pagina}`))).toBe(true);
+    }
+    // O índice de atas é lido em paralelo com o de editais (PAGINAS_BUSCA_ATA).
+    expect(urlsAta).toHaveLength(2);
+    for (const pagina of [1, 2]) {
+      expect(urlsAta.some((u) => u.includes(`pagina=${pagina}`))).toBe(true);
     }
   });
 
@@ -1044,6 +1066,143 @@ describe("busca textual em quatro páginas paralelas", () => {
 // render preço homologado — gastavam orçamento de /itens e /resultados para
 // devolver nada.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Atas de registro de preços (P3, 2026-08-26).
+//
+// A ata é indexada à parte do edital no PNCP e é o único caminho para uma parte
+// das compras: medido em 3 termos, cerca de METADE das atas devolvidas aponta
+// para compra que a busca por edital não alcança, e 8 em 10 dessas compras
+// inéditas renderam preço homologado.
+//
+// Três diferenças em relação ao edital, todas medidas contra a API real, e todas
+// capazes de quebrar em silêncio se ignoradas.
+// ---------------------------------------------------------------------------
+
+/** Ata como o índice do PNCP devolve: sequencial próprio + o da compra-mãe. */
+function ataDe(over: Record<string, unknown> = {}) {
+  return {
+    // Formato real: sufixo com o sequencial da própria ata.
+    numero_controle_pncp: "00000000000100-1-000777/2026-000001",
+    orgao_nome: "Prefeitura da Ata",
+    orgao_cnpj: "00000000000100",
+    ano: "2026",
+    // O sequencial da ATA — nunca serve para montar o caminho de /compras.
+    numero_sequencial: "1",
+    // O sequencial da COMPRA — é este que resolve itens e preço homologado.
+    numero_sequencial_compra_ata: "777",
+    // Medido: o índice de atas devolve o campo nulo em 100% dos casos.
+    tem_resultado: null,
+    ...over,
+  };
+}
+
+describe("atas de registro de preços", () => {
+  it("consulta a compra-mãe da ata, não o sequencial da própria ata", async () => {
+    const urls: string[] = [];
+    mockPncp({ processos: [], atas: [ataDe()], onUrl: (u) => urls.push(u) });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    // O caminho tem de usar 777 (a compra), nunca 1 (a ata). Montar com o
+    // sequencial errado é a armadilha do §9.96: no PNCP esse caminho responde
+    // 200 com os itens de OUTRA compra, colando preço alheio no candidato.
+    expect(urls.some((u) => u.includes("/compras/2026/777/itens"))).toBe(true);
+    expect(urls.some((u) => u.includes("/compras/2026/1/itens"))).toBe(false);
+    expect(resultado).toHaveLength(1);
+  });
+
+  it("não aplica o descarte por julgamento às atas", async () => {
+    // `tem_resultado: null` é o que a API manda em toda ata. Se o descarte de
+    // edital valesse aqui, bastaria o PNCP passar a mandar `false` para as atas
+    // sumirem inteiras e em silêncio — por isso a condição é explícita por tipo.
+    mockPncp({ processos: [], atas: [ataDe({ tem_resultado: false })] });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toHaveLength(1);
+  });
+
+  it("descarta a ata que não informa o sequencial da compra-mãe", async () => {
+    // Sem esse campo não há como chegar aos itens; processar assim mesmo cairia
+    // no caminho errado. Medido em 59 atas reais: nunca aconteceu — mas o custo
+    // de errar aqui é um preço atribuído à compra errada.
+    mockPncp({ processos: [], atas: [ataDe({ numero_sequencial_compra_ata: undefined })] });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toEqual([]);
+  });
+
+  it("deduplica a compra que aparece como edital e como ata", async () => {
+    // A chave NÃO pode ser numero_controle_pncp: o edital vem como
+    // "...-000777/2026" e a ata da MESMA compra como "...-000777/2026-000001".
+    // Medido num termo real, deduplicar por ele detectou 0 sobreposições.
+    mockPncp({
+      processos: [{ ...processoPadrao, numero_sequencial: "777" }],
+      atas: [ataDe()],
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    // Uma única compra processada — não duas, e sem candidato duplicado.
+    expect(resultado).toHaveLength(1);
+  });
+
+  it("colapsa várias atas da mesma compra numa leitura só", async () => {
+    // Uma compra com N fornecedores registrados publica N atas, todas apontando
+    // para a mesma compra-mãe.
+    const urls: string[] = [];
+    mockPncp({
+      processos: [],
+      atas: [
+        ataDe({ numero_controle_pncp: "a-1", numero_sequencial: "1" }),
+        ataDe({ numero_controle_pncp: "a-2", numero_sequencial: "2" }),
+        ataDe({ numero_controle_pncp: "a-3", numero_sequencial: "3" }),
+      ],
+      onUrl: (u) => urls.push(u),
+    });
+
+    const resultado = await buscarContratosPNCP("cadeira");
+
+    expect(resultado).toHaveLength(1);
+    // `/itens?` e não `/itens`: a URL de resultados é
+    // `/compras/2026/777/itens/1/resultados` e casaria com o prefixo, contando
+    // duas requisições onde só houve uma listagem.
+    expect(urls.filter((u) => u.includes("/compras/2026/777/itens?"))).toHaveLength(1);
+  });
+
+  it("intercala editais e atas para que o orçamento alcance as duas origens", async () => {
+    // Concatenar as atas no fim as tornaria inalcançáveis: o orçamento de
+    // resultados já se esgota antes do fim da fila de editais (§9.40 — recurso
+    // que existe e nunca roda). A intercalação garante que ambas apareçam cedo.
+    const urls: string[] = [];
+    mockPncp({
+      processos: Array.from({ length: 6 }, (_, i) => ({
+        ...processoPadrao,
+        numero_controle_pncp: `ed-${i}`,
+        numero_sequencial: `${100 + i}`,
+      })),
+      atas: (pagina) =>
+        pagina === 1
+          ? Array.from({ length: 6 }, (_, i) => ataDe({
+              numero_controle_pncp: `at-${i}`,
+              numero_sequencial_compra_ata: `${200 + i}`,
+            }))
+          : [],
+      onUrl: (u) => urls.push(u),
+    });
+
+    await buscarContratosPNCP("cadeira");
+
+    // O primeiro lote de 5 compras tem de conter as duas origens.
+    const ordem = urls
+      .filter((u) => u.includes("/itens?"))
+      .map((u) => (/\/compras\/2026\/2\d\d\//.test(u) ? "ata" : "edital"));
+    expect(ordem.slice(0, 5)).toContain("ata");
+    expect(ordem.slice(0, 5)).toContain("edital");
+  });
+});
 
 describe("descarte de edital sem julgamento", () => {
   it("não gasta nenhuma requisição em edital com tem_resultado: false", async () => {
