@@ -2785,3 +2785,34 @@ do laço passava despercebida porque o roteiro do teste parava sozinho em vez de
 na ferramenta (§9.99).
 
 Lição em [CLAUDE.md §9.100](../CLAUDE.md).
+
+### Estado ao encerrar a sessao de 2026-08-26
+
+**No ar:** P1+P2 (`4c464cc`), P3 atas (`4c2fc57`), P4 recorte (`94f0636`), correcao dos turnos
+mortos (`75f192d`). Working tree limpo, tudo enviado a `main`.
+
+**Pendencias, em ordem de prioridade:**
+
+1. **Regra no prompt de sistema para o recorte do P4 - decisao do usuario pendente.** O prompt
+   NAO menciona `uf`/`esfera`/`status`; o modelo so os conhece pela descricao do schema. Compare
+   com a faixa de preco, que tem a regra 3b explicita em `promptSistema.ts`. Sem isso o P4 tende a
+   ficar inerte (§9.84 - existe, funciona, nao e encontravel). Opcoes apresentadas: (A) regra no
+   prompt espelhando a 3b - recomendada; (B) controles de UI ao lado do campo de mensagem.
+
+2. **Verificar em producao que os turnos pararam de morrer.** A correcao e do mecanismo; o efeito
+   real nao foi confirmado (§9.30). Contar mensagens de usuario sem resposta do assistente em
+   `mensagens_assistente` - eram 5 de 21 em 2026-08-26.
+
+3. **P3 e P4 nunca foram exercitados em producao.** Deploy as 14:08 e 14:30 UTC; a ultima busca
+   real foi 13:50. Todo o ganho de P1-P4 e medicao de laboratorio ate alguem pesquisar de novo.
+
+4. **P5 - SINAPI** habilitado no registry com `precos_referencia` vazia (0 linhas em producao).
+   Adiado por decisao do usuario. Ou rodar a ingestao, ou desabilitar o provedor: hoje e fonte
+   anunciada ao modelo e a tela que sempre devolve vazio.
+
+5. **Byte NUL literal em `ferramentas.ts`** (separador em `chaveDescarte`, anterior a esta sessao):
+   faz o `grep` tratar o arquivo como binario e buscas nele falharem em silencio - usar `grep -a`.
+
+**P6 (ingestao do PNCP): nao fazer agora**, com tres medicoes registradas na parte 3 desta sessao e
+no artefato. Reabrir so depois de medir P1-P4 em uso real; se cobertura ainda for o gargalo, o
+lever mais barato e `MAX_RESULTADOS_POR_BUSCA` / teto de tempo (configuracao), nao arquitetura.
