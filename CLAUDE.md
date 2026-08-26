@@ -1142,3 +1142,34 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     Vale a recíproca como alerta: se a duração NÃO tivesse mudado, "o fix está no ar" seria falso
     por mais verde que o build estivesse (§9.21, §9.30). Guardar duração por ferramenta é barato e
     responde perguntas de versão que a infraestrutura não responde.
+95. **"Ordenado por relevância" não é ordenado por utilidade — no PNCP a página 1 é a PIOR para
+    pesquisa de preço.** Medido em 2026-08-26: editais COM julgamento por página da busca textual
+    foram **5 · 12 · 9 · 16**, ou seja a última página lida rende 3x mais que a primeira. O motivo
+    é estrutural — `ordenacao=relevancia` favorece edital recente e ainda ABERTO, que por definição
+    não tem preço homologado. A busca lia só as páginas 1 e 2, exatamente onde o dado é mais pobre.
+    Regra geral: quando a ordenação de uma API otimiza um critério (relevância textual, recência) e
+    nós precisamos de outro (existir preço homologado), **medir a distribuição do NOSSO critério ao
+    longo do ranking dela** antes de decidir quantas páginas ler — a intuição de que "as primeiras
+    são as melhores" é herdada do critério deles, não do nosso.
+    **Corolário barato:** antes de gastar requisição para descobrir algo, conferir se a resposta que
+    já temos em mãos não traz. `tem_resultado` vinha em toda linha da busca textual e era ignorado;
+    34% dos editais lidos não tinham julgamento e consumiam `/itens` + `/resultados` para devolver
+    nada — preditor exato (6 preços em 10 requisições contra **zero** em 4), custo zero. Ao integrar
+    API, ler o schema inteiro da resposta e perguntar de cada campo "isto me pouparia trabalho
+    adiante?", em vez de mapear só os campos que o modelo de domínio já previa.
+    **E cuidado com o fail-safe invertido em filtro de campo opcional:** `=== true` teria
+    transformado uma futura mudança de contrato da API em busca que devolve zero candidatos em
+    silêncio. Medir se o campo é sempre presente (aqui: 15 `false` + 5 `true` em 20, nunca ausente)
+    e escolher a direção em que a ausência degrada para "consulta demais", nunca para "não acha
+    nada" — é a §9.45 aplicada a recall em vez de autenticação.
+96. **URL que responde 200 pode ser a resposta de OUTRO objeto — no PNCP o sequencial de contrato
+    e o de compra vivem em espaços de numeração diferentes.** Ao avaliar contratos como fonte de
+    preço (2026-08-26), `/orgaos/{cnpj}/contratos/{ano}/{seq}/itens` deu 404, e o caminho vizinho
+    `/orgaos/{cnpj}/compras/{ano}/{seq}/itens` com o MESMO sequencial respondeu **200 com itens de
+    outra compra**: um contrato de "Link de Internet Dedicado" devolveu itens de fornecimento de
+    água e tratamento de esgoto. Integrar sem conferir teria colado preço de saneamento em item de
+    telecom, com evidência e tudo — defeito invisível para qualquer teste com fixture. Ao montar
+    URL a partir de identificadores de um objeto para consultar OUTRO endpoint, validar que o
+    conteúdo devolvido descreve o mesmo objeto (comparar descrição, órgão, valor), nunca só que o
+    HTTP foi 200 (§9.8, §9.75). Registrado também o resultado: contratos do PNCP **não** servem
+    como fonte de preço unitário — só trazem `valor_global`, sem quantidade.

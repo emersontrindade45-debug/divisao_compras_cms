@@ -2584,3 +2584,60 @@ coluna MATERIAL preenchida. O teste do §9.10 cobria só `"0,00"`, não o branco
 - `fetch` da leitura pública (`gviz`) com `cache: "no-store"`.
 
 Lição: [CLAUDE.md §9.86](../CLAUDE.md).
+
+---
+
+## Sessão 2026-08-26 — Cobertura da busca no PNCP: P1 + P2
+
+Auditoria da abrangência do assistente motivada pela percepção do usuário de que a busca não
+alcança todas as contratações públicas (e de que outra plataforma, baseada em filtro e sem IA,
+encontra mais rápido). O diagnóstico está no artefato **"Onde a busca perde contratações"**.
+
+**Diagnóstico.** O gargalo não é falta de plataformas — é o desenho da consulta dentro do próprio
+PNCP. Para `cadeira giratoria ergonomica` o PNCP tem 5.023 editais e a busca lia 40 (0,8%), dos
+quais só 17 tinham julgamento.
+
+### P1 — Descarte de edital sem julgamento (`temJulgamento`)
+
+`tem_resultado` já vinha na resposta da busca textual e era ignorado. Filtrado agora em
+`buscarPorTexto`, no mesmo ponto da exclusão do CNPJ próprio, para que qualquer consumidor futuro
+herde a regra. Custo zero de rede.
+
+Medido contra a API real: 34% dos editais lidos não têm julgamento. Em amostra controlada, editais
+com o campo verdadeiro renderam 6 preços em 10 requisições; os demais renderam **zero** em 4 — é
+preditor exato, não heurística.
+
+`!== false` e não `=== true`: a API devolve o campo sempre presente e booleano (15 `false` + 5
+`true` em 20 editais), nunca ausente. Ausência só ocorreria numa mudança de contrato, e aí incluir
+é o lado seguro — `=== true` transformaria isso em busca que devolve zero em silêncio. Mesma
+escolha, pela mesma razão, do `temResultado` no nível do item.
+
+### P2 — Quatro páginas da busca textual, não duas
+
+Editais com julgamento por página, medidos: **5 · 12 · 9 · 16**. A página 1 é a **pior** das
+quatro. A `ordenacao=relevancia` favorece edital recente e ainda aberto, que por definição não tem
+preço homologado — relevância textual e utilidade para pesquisa de preço apontam em direções
+opostas neste endpoint. As 4 páginas correm em paralelo: mesmo tempo de parede que 1.
+
+### Efeito combinado, medido ao vivo
+
+Editais processáveis que entram no orçamento, em 5 termos: **139 → 289 (2,1×)**, variando de 1,9×
+a 2,5× por termo. Dos 200 editais antes lidos, 61 eram desperdício puro.
+
+Consequência registrada em `MAX_RESULTADOS_POR_BUSCA`: o limitante deixou de ser "quantos editais
+a busca encontra" (~28) e passou a ser "quantos cabem no orçamento" (~37), com pool médio agora em
+58. É a troca desejada, mas significa que mexer nesse teto agora tem efeito direto na cobertura.
+
+### Verificação
+
+1.282 testes (129 arquivos) verdes, typecheck e ESLint limpos, `next build` compilado. Ambas as
+mudanças confirmadas por **mutação**: remover o filtro `temJulgamento` derruba 2 testes; voltar
+`PAGINAS_BUSCA_TEXTUAL` para 2 derruba 5. Ganho combinado verificado contra a API ao vivo, não só
+por teste com mock.
+
+**Pendente do plano:** P3 (buscar atas de registro de preços — ~50% apontam para compras inéditas e
+8/10 delas rendem preço homologado), P4 (expor filtros `ufs`/`esferas`/`modalidades`/`status` ao
+analista), P5 (SINAPI ligado com `precos_referencia` vazia — ingerir ou desabilitar), P6 (decisão
+sobre ingestão do PNCP). Contratos ficaram **descartados por medição**: `/contratos/{ano}/{seq}/itens`
+responde 404 e o registro só traz valor global — e o caminho `/compras/{seq}/itens` montado com o
+sequencial do contrato responde 200 **com a compra errada**.

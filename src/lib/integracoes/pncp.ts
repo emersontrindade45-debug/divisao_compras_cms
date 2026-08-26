@@ -10,6 +10,26 @@ const PNCP_ITENS_BASE_URL = "https://pncp.gov.br/pncp-api/v1";
 
 const TAMANHO_PAGINA = 20;
 
+/**
+ * Páginas da busca textual lidas em paralelo. Custam o mesmo tempo de parede que
+ * uma só (~2,5s cada, todas simultâneas) porque o gargalo é latência, não banda.
+ *
+ * **Era 2, e a distribuição medida mostrou que 2 é onde o dado é pior.** Contado
+ * contra a API real em 2026-08-26 para "cadeira giratoria ergonomica", editais
+ * com julgamento por página: 5 · 12 · 9 · 16 — ou seja, a página 1 é a PIOR das
+ * quatro e a 4 é a melhor. Ler até a 4 leva de 17 para 42 os editais que podem
+ * render preço, 2,5x mais, sem custo de parede.
+ *
+ * O motivo é estrutural e vale registrar, porque contraria a intuição: a
+ * `ordenacao=relevancia` do PNCP favorece edital recente e ainda ABERTO, que por
+ * definição não tem preço homologado. Relevância textual e utilidade para
+ * pesquisa de preço apontam em direções opostas neste endpoint.
+ *
+ * Página além do fim volta vazia, sem custo de processamento — o teto não
+ * precisa se adaptar a termo com poucos resultados.
+ */
+const PAGINAS_BUSCA_TEXTUAL = 4;
+
 // O PNCP derruba conexões (ECONNRESET) ou responde 429 sob rajadas de requisições —
 // comum ao processar cotações com muitos itens, cada um exigindo ≥3 preços. Retry com
 // backoff absorve o throttling transitório; o lote limita a rajada de buscas de itens.
@@ -65,10 +85,22 @@ const RESERVA_LOTE_MS = 2_000;
  * custaram 15,6s. O custo vem de quantos editais a busca textual devolve e de
  * quantos itens cada um tem, não do tamanho do termo.
  *
- * Era 120 (12 editais); aumentado para 150 junto com a busca em duas páginas
+ * Era 120 (12 editais); aumentado para 150 junto com a busca em páginas
  * paralelas. O que este teto compra em EDITAIS depende de
  * `MAX_ITENS_RELEVANTES_POR_COMPRA`: com 10 itens/compra eram 15 editais, com 4
- * são ~37 — cobrindo quase todo o pool de 40 que as duas páginas devolvem.
+ * são ~37.
+ *
+ * **Desde 2026-08-26 este teto passou a ser a restrição que morde, e é onde
+ * está a próxima folga.** Enquanto a busca lia 2 páginas sem descartar edital
+ * sem julgamento, o pool processável era de ~28 editais e o teto de 37 sobrava;
+ * com 4 páginas e o descarte (`temJulgamento`), o pool medido contra a API real
+ * em 5 termos subiu para 139 → 289 editais, média de 58 por busca. Ou seja: o
+ * limitante deixou de ser "quantos editais a busca encontra" e passou a ser
+ * "quantos cabem no orçamento" — que é a troca desejada, mas significa que
+ * mexer neste número agora tem efeito direto na cobertura, ao contrário de
+ * antes. Só subir com medição de tempo junto: o teto de 12s (`TEMPO_MAX_BUSCA_MS`)
+ * continua sendo o corte real.
+ *
  * A busca nunca exibe mais que `MAX_SUGESTOES_POR_BUSCA` (25) candidatos, mas
  * os 25 precisam ser escolhidos de um conjunto amplo o bastante para conter os
  * bons: quem faz a escolha é `ordenarResultadoBusca`, no assistente.
@@ -213,6 +245,11 @@ interface PNCPSearchItem {
   orgao_cnpj: string;
   ano: string;
   numero_sequencial: string;
+  /**
+   * O edital já tem julgamento publicado. Vem na resposta da busca textual, de
+   * graça — ver `temJulgamento`, que é quem decide o que fazer com ele.
+   */
+  tem_resultado?: boolean;
 }
 
 interface PNCPItemResponse {
@@ -263,15 +300,38 @@ function limparDescricao(bruta: string): string {
 }
 
 /**
+ * Edital que pode render preço homologado — o único que vale gastar requisição.
+ *
+ * `tem_resultado` vem na resposta da busca textual que já é feita de qualquer
+ * forma, então este filtro **não custa nenhuma requisição a mais** e devolve ao
+ * orçamento de `/resultados` tudo que era gasto em edital ainda não julgado.
+ * Medido contra a API real em 2026-08-26, em 4 termos e 160 editais: só 66% dos
+ * editais lidos tinham julgamento. Numa amostra controlada, editais com o campo
+ * verdadeiro renderam 6 preços em 10 requisições e os demais renderam **zero**
+ * em 4 — é preditor exato, não heurística.
+ *
+ * **Por que `!== false` e não `=== true`.** Medido no mesmo dia: a API devolve o
+ * campo sempre presente e explicitamente booleano (15 `false` e 5 `true` em 20
+ * editais), nunca ausente. Ausência, portanto, só aconteceria se o contrato da
+ * API mudasse — e aí incluir é o lado seguro do erro: `=== true` transformaria
+ * uma mudança de contrato em busca que devolve zero candidatos em silêncio, que
+ * é o modo de falha mais caro que existe aqui. Mesma escolha, pela mesma razão,
+ * que `temResultado` no nível do item (ver `buscarItensDaCompra`).
+ */
+function temJulgamento(item: PNCPSearchItem): boolean {
+  return item.tem_resultado !== false;
+}
+
+/**
  * Busca textual real do PNCP (mesmo endpoint usado pelo site oficial em
  * pncp.gov.br/busca). A API de Consulta (/api/consulta) não suporta texto
  * livre — esse endpoint é o que permite encontrar processos relevantes ao
  * termo do item, em vez de uma amostra aleatória de publicações recentes.
  */
 /**
- * Busca textual para uma página específica da API. Chamada em paralelo para as
- * páginas 1 e 2 em `buscarContratosPNCP`; expõe o parâmetro para que os testes
- * possam asserir que ambas as páginas são pedidas.
+ * Busca textual para uma página específica da API. Chamada em paralelo para
+ * todas as `PAGINAS_BUSCA_TEXTUAL` em `buscarContratosPNCP`; expõe o parâmetro
+ * para que os testes possam asserir que todas as páginas são pedidas.
  */
 async function buscarPorTexto(
   termo: string,
@@ -299,10 +359,13 @@ async function buscarPorTexto(
   const body = (await res.json()) as { items?: PNCPSearchItem[] };
   const itens = body.items ?? [];
 
-  // Exclusão do próprio órgão aplicada aqui (e não no chamador) para que qualquer
-  // consumidor futuro da busca textual herde a regra automaticamente.
+  // Exclusão do próprio órgão e descarte de edital sem julgamento aplicados aqui
+  // (e não no chamador) para que qualquer consumidor futuro da busca textual
+  // herde as duas regras automaticamente.
   const proprio = cnpjOrgaoProprio();
-  return itens.filter((item) => normalizarCnpj(item.orgao_cnpj) !== proprio);
+  return itens.filter(
+    (item) => normalizarCnpj(item.orgao_cnpj) !== proprio && temJulgamento(item),
+  );
 }
 
 /**
@@ -633,21 +696,20 @@ export async function buscarContratosPNCP(
 
   const ctx = criarContextoBusca();
   try {
-    // Páginas 1 e 2 em paralelo — mesmo custo na parede que uma só (ambas
-    // levam ~2,5s mas correm ao mesmo tempo), mas dobra o pool de 20 para 40
-    // editais. O ranqueador por IDF então escolhe os 15 mais aderentes de 40,
-    // em vez de 12 de 20. A página 2 retorna vazio quando há menos de 20
-    // editais relevantes para o termo: sem custo extra de processamento.
-    const [pg1, pg2] = await Promise.all([
-      buscarPorTexto(termo, ctx, 1),
-      buscarPorTexto(termo, ctx, 2),
-    ]);
+    // Todas as páginas em paralelo — ver PAGINAS_BUSCA_TEXTUAL para por que são
+    // 4 e por que isso não custa tempo de parede. Cada uma já chega sem os
+    // editais do próprio órgão e sem os que não têm julgamento (`buscarPorTexto`).
+    const paginas = await Promise.all(
+      Array.from({ length: PAGINAS_BUSCA_TEXTUAL }, (_, i) =>
+        buscarPorTexto(termo, ctx, i + 1),
+      ),
+    );
     // Deduplicação por número de controle — um edital não pode aparecer em
     // duas páginas da busca (a API ordena por relevância sem repetição), mas
     // o check é defensivo.
     const vistos = new Set<string>();
     const processos: PNCPSearchItem[] = [];
-    for (const item of [...pg1, ...pg2]) {
+    for (const item of paginas.flat()) {
       if (!vistos.has(item.numero_controle_pncp)) {
         vistos.add(item.numero_controle_pncp);
         processos.push(item);
