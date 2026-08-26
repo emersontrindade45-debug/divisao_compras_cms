@@ -1271,3 +1271,32 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      sem o ponto final apareceram lado a lado no MESMO resultado de busca. Com `trim().toLowerCase()`
      sozinho elas contam como itens diferentes e toda a consolidação vaza. Tirar acento, caixa e
      pontuação, e colapsar espaço.
+102. **Tool HOSPEDADO (`web_search` da Responses API) resolve dentro da requisição e devolve texto
+     sem `chamadas` — logo ENCERRA o turno do laço, e nada que dependa de uma ferramenta nossa
+     acontece depois dele.** Ficou ligado por meses no assistente e o sintoma que o analista
+     relatou foi "ele não me traz em card, traz em texto". Mecanismo: `interpretarResposta` só
+     converte `function_call` em `chamadas`; o item `web_search_call` é descartado, `chamadas` volta
+     vazio e `executarTurno` faz `break`. Resultado medido em produção (2026-08-26, 15:42): uma
+     mensagem com **3 citações e ZERO ferramentas**, citando contratos do PNCP com
+     `?utm_source=openai` no link — nenhum `ResultadoSimilaridade` gravado, nenhum card, e o modelo
+     escrevendo um relatório convincente de uma pesquisa que o sistema não fez. A regra do prompt
+     que mandava "ao achar pela web, busque no PNCP no mesmo turno" era inalcançável por
+     construção: o laço já tinha morrido. E o defeito era invisível pela via normal —
+     `ferramentasUsadas` vazio parece "o modelo escolheu não buscar"; o que denuncia é a coluna
+     `citacoes` populada com `nf = 0`.
+     Antes de habilitar qualquer tool hospedado, perguntar: **(a)** o laço continua depois dele?
+     **(b)** o resultado dele passa pelas mesmas guardas das ferramentas próprias (aqui: lista
+     branca/vermelha de domínios e `filtrarResultadosWeb` — ele não passava, e ainda foi habilitado
+     sem `dominiosPermitidos`, isto é, sem bloquear marketplace)? **(c)** ele entra na trilha de
+     auditoria? **(d)** o que ele devolve pode virar fonte, ou é dado que o analista teria de
+     refazer à mão? Quatro "não" aqui. A alternativa certa era a que já existia: `buscar_web` sobre
+     a Perplexity é function tool, aplica as guardas, entra na auditoria e devolve o controle ao
+     laço. O teste que protege isso asserta o **payload enviado** (`tools` da requisição), não uma
+     flag intermediária — era exatamente na fronteira externa que a feature morria (§9.99).
+     **Corolário: instrução de prompt precisa caber no orçamento de tempo, senão é §9.40 em texto.**
+     A mesma regra 4 mandava emendar `buscar_pncp` logo depois da busca web. Com reserva de 30s
+     para `buscar_pncp` e `LIMITE_FERRAMENTAS_MS = 40s`, a busca só começa se `decorrido <= 10s` —
+     e web (7s medidos) + as duas leituras + as idas ao modelo já passam disso. A instrução
+     prometia um encadeamento que a guarda barra sempre. Ao escrever regra de prompt que encadeia
+     ferramentas, somar as RESERVAS delas e conferir contra o teto do turno, do mesmo jeito que se
+     confere um limite de memória.

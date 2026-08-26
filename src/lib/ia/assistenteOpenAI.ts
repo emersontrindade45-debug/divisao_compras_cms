@@ -10,11 +10,41 @@ import type {
 
 // Provedor de chat do assistente (M13).
 //
-// Usa a **Responses API**, não `chat.completions` como o resto de `lib/ia/`.
-// Motivo: só ela permite misturar, na mesma requisição, o tool hospedado
-// `web_search` (que devolve anotações `url_citation` com URL e título) com as
-// function tools do sistema. O pipeline de similaridade segue em
-// `chat.completions` — este módulo não o altera.
+// Usa a **Responses API**, não `chat.completions` como o resto de `lib/ia/`. O
+// pipeline de similaridade segue em `chat.completions` — este módulo não o
+// altera.
+//
+// **O tool hospedado `web_search` foi REMOVIDO em 2026-08-26. Não reintroduzir
+// sem resolver os quatro problemas abaixo.** Ele era atraente por vir pronto e
+// devolver anotações `url_citation`, e custou ao analista uma tarde inteira de
+// respostas sem card nenhum:
+//
+// 1. **Encerrava o turno.** A OpenAI executa o tool hospedado DENTRO da mesma
+//    requisição e devolve texto pronto; `interpretarResposta` não produz
+//    `chamadas`, e `executarTurno` faz `break` quando `chamadas.length === 0`.
+//    Logo `buscar_pncp` nunca rodava depois dele — nenhum candidato gravado,
+//    nenhum card na tela. Medido em produção (2026-08-26, 15:42): uma mensagem
+//    com 3 citações e ZERO ferramentas, citando contratos do PNCP com
+//    `?utm_source=openai` no link. A regra 4 do prompt de sistema ("ao achar
+//    pela web, busque no PNCP no mesmo turno") era inalcançável: o laço já
+//    tinha morrido.
+// 2. **Sem lista branca nem vermelha.** A rota o habilitava sem
+//    `dominiosPermitidos`, então marketplace não era bloqueado — e o resultado
+//    nunca passava por `filtrarResultadosWeb` (`assistente/guardas.ts`), que é
+//    onde a lista vermelha e a remoção de contratação da própria Câmara vivem.
+// 3. **Fora da trilha de auditoria.** Não aparecia em
+//    `MensagemAssistente.ferramentasUsadas`: não havia registro de qual busca
+//    foi feita nem quanto custou.
+// 4. **O achado não podia virar fonte de qualquer jeito.** Pela IN 65/2021,
+//    resultado de site exige data/hora do acesso e captura do arquivo, que só o
+//    módulo de Sites produz — então o texto que ele devolvia era, na melhor das
+//    hipóteses, uma pista que o analista teria de refazer à mão.
+//
+// A descoberta na web aberta continua existindo, e melhor: `buscar_web`
+// (Perplexity, em `assistente/ferramentas.ts`) é function tool de verdade —
+// aplica as duas listas, passa pelas guardas, entra na auditoria e devolve o
+// controle ao laço, que é o que permite ao modelo emendar um `buscar_pncp` e
+// transformar o achado em card.
 
 /**
  * Modelo do assistente, configurável por ambiente.
@@ -54,15 +84,6 @@ export interface Citacao {
 export interface OpcoesProvedorChat {
   instrucoesSistema: string;
   ferramentas: DefinicaoFerramenta[];
-  /**
-   * Lista branca para o `web_search` hospedado. O filtro da OpenAI só aceita
-   * allowlist — não há denylist —, então a lista vermelha (marketplaces) é
-   * aplicada em código, nas guardas, sobre os resultados. Ver
-   * `assistente/guardas.ts`.
-   */
-  dominiosPermitidos?: string[];
-  /** Habilita o tool hospedado de busca web. */
-  habilitarBuscaWeb?: boolean;
 }
 
 /** Acumula as citações do último `responder`, para persistir junto da mensagem. */
@@ -179,15 +200,11 @@ export class AssistenteOpenAI implements ModeloConversacional {
   ): Promise<RespostaModelo> {
     const ai = getOpenAIClient();
 
+    // Só function tools: nenhum tool hospedado. Um tool hospedado resolve dentro
+    // da própria requisição e devolve texto sem `chamadas`, o que encerra o
+    // turno e impede o card — ver o cabeçalho deste arquivo.
     const tools: Responses.Tool[] = [];
     if (permitirFerramentas) {
-      if (this.opcoes.habilitarBuscaWeb) {
-        const permitidos = this.opcoes.dominiosPermitidos ?? [];
-        tools.push({
-          type: "web_search",
-          ...(permitidos.length > 0 ? { filters: { allowed_domains: permitidos } } : {}),
-        });
-      }
       for (const ferramenta of this.opcoes.ferramentas) {
         tools.push({
           type: "function",

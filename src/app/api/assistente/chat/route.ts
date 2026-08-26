@@ -179,7 +179,6 @@ export async function POST(request: Request) {
   const instrucoesSistema = montarPromptSistema({
     instrucoesPesquisa: montarInstrucoesPesquisa(instrucoesDb),
     processoNumero: processo?.numero ?? null,
-    buscaWebOpenAI: true,
     buscaWebPerplexity: temPerplexity,
     maxPassos: MAX_PASSOS_POR_TURNO,
   });
@@ -191,7 +190,6 @@ export async function POST(request: Request) {
       descricao: d.descricao,
       parametros: d.parametros,
     })),
-    habilitarBuscaWeb: true,
   });
 
   const encoder = new TextEncoder();

@@ -5,7 +5,6 @@ function contexto(overrides: Partial<ContextoPrompt> = {}): ContextoPrompt {
   return {
     instrucoesPesquisa: "",
     processoNumero: null,
-    buscaWebOpenAI: true,
     buscaWebPerplexity: true,
     maxPassos: 8,
     ...overrides,
@@ -35,13 +34,29 @@ describe("montarPromptSistema", () => {
   });
 
   it("lista só as fontes de busca realmente disponíveis", () => {
-    const prompt = montarPromptSistema(
-      contexto({ buscaWebPerplexity: false, buscaWebOpenAI: false }),
-    );
+    const prompt = montarPromptSistema(contexto({ buscaWebPerplexity: false }));
 
     expect(prompt).toContain("PNCP");
     expect(prompt).not.toContain("Perplexity");
-    expect(prompt).not.toContain("OpenAI)");
+  });
+
+  // O que o usuário reclamou em 2026-08-26: "ele não me traz em card, traz em
+  // texto". A causa estrutural era o `web_search` hospedado (removido), mas o
+  // prompt também precisa dizer de onde vem o card, senão o modelo acha que
+  // resumir a web é resposta.
+  it("diz que só buscar_pncp gera card", () => {
+    const prompt = montarPromptSistema(contexto());
+    // O prompt quebra a linha no meio da frase — casar espaço em branco, não " ".
+    expect(prompt).toMatch(/só "buscar_pncp"\s+gera card/i);
+    expect(prompt).toMatch(/não um resumo em texto/i);
+  });
+
+  // A regra anterior mandava emendar buscar_pncp na mesma rodada da web. Com
+  // reserva de 30s para a busca e teto de 40s para as ferramentas do turno, as
+  // duas não cabem: a instrução prometia o que o orçamento barra (§9.40).
+  it("não manda encadear busca web e busca no PNCP no mesmo turno", () => {
+    const prompt = montarPromptSistema(contexto());
+    expect(prompt).toMatch(/NÃO cabe no mesmo turno/i);
   });
 
   it("anuncia a Perplexity quando ela está configurada", () => {

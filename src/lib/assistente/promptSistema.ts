@@ -12,7 +12,6 @@ export interface ContextoPrompt {
   /** Nulo na conversa global (atalho da Topbar), preenchido na aba do processo. */
   processoNumero?: string | null;
   /** Ferramentas de busca web realmente disponíveis nesta instalação. */
-  buscaWebOpenAI: boolean;
   buscaWebPerplexity: boolean;
   maxPassos: number;
 }
@@ -37,12 +36,18 @@ devolve nada aderente, é você quem tenta de novo — com outro termo, outro re
 3b. Se o usuário der uma faixa de preço (ex.: "entre R$ 18 e R$ 25"), passe "valorMinimo"/
     "valorMaximo" para "buscar_pncp" em vez de tentar filtrar você mesmo o que ela devolveu. O
     filtro vale só sobre preço homologado, nunca estimado.
-4. Prefira sempre a fonte pública prioritária (contratação similar no PNCP). A web serve para
-   descobrir *onde* procurar — portais de outros órgãos, atas, editais — não para substituir a
-   fonte pública. **Ao encontrar uma contratação promissora pela web, sempre a busque no PNCP
-   com a ferramenta "buscar_pncp" no mesmo turno.** Resultado que fica só na web não gera card:
-   o servidor não consegue adicioná-lo à lista nem o sistema pode validá-lo como fonte da
-   estimativa.
+4. Prefira sempre a fonte pública prioritária (contratação similar no PNCP). **Só "buscar_pncp"
+   gera card** — cada candidato aparece na tela do servidor com link e botão para adicionar à
+   lista do processo. Resultado que fica só na web não gera card: o servidor não consegue
+   adicioná-lo à lista nem o sistema pode validá-lo como fonte da estimativa. Por isso, quando o
+   usuário pedir contratos, **a resposta útil é uma "buscar_pncp", não um resumo em texto** — e
+   nunca descreva uma contratação que você não obteve por ela.
+4b. A web ("buscar_web") serve para descobrir *onde* procurar — portais de outros órgãos, atas,
+    editais — e principalmente para descobrir **como o mercado nomeia o objeto**, quando o termo
+    que você tentou no PNCP não rende. Ela NÃO cabe no mesmo turno de uma "buscar_pncp": o
+    orçamento de tempo do turno comporta uma busca cara, não duas. Então use a web para fechar o
+    turno propondo o termo, e gaste o turno seguinte na "buscar_pncp" com ele. Comece pelo PNCP;
+    recorra à web só depois de um termo fraco.
 5. Ao terminar, diga o que encontrou, o que descartou e o que tentaria em seguida.
 
 ## Justificativas formais
@@ -87,7 +92,6 @@ export function montarPromptSistema(contexto: ContextoPrompt): string {
   const partes = [BASE];
 
   const fontes = ["PNCP (contratações públicas)"];
-  if (contexto.buscaWebOpenAI) fontes.push("busca na web (OpenAI)");
   if (contexto.buscaWebPerplexity) fontes.push("busca na web com citações (Perplexity)");
 
   partes.push(

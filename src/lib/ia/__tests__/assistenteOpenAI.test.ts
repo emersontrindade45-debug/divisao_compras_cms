@@ -1,6 +1,13 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import type { Responses } from "openai/resources/responses/responses";
+
+const mocks = vi.hoisted(() => ({ create: vi.fn() }));
+vi.mock("../openaiClient", () => ({
+  getOpenAIClient: () => ({ responses: { create: mocks.create } }),
+}));
+
 import {
+  AssistenteOpenAI,
   historicoParaInput,
   interpretarResposta,
   modeloAssistente,
@@ -243,5 +250,54 @@ describe("interpretarResposta", () => {
     ]);
 
     expect(res.texto).toBe("resultado");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nenhum tool HOSPEDADO na requisição. Este teste existe porque o `web_search`
+// hospedado esteve ligado por meses e encerrava o turno: a OpenAI o executa
+// dentro da própria requisição e devolve texto sem `chamadas`, então
+// `executarTurno` faz `break` e `buscar_pncp` nunca roda — o analista recebia
+// a resposta em texto, sem card nenhum e sem candidato gravado. A asserção é
+// sobre o PAYLOAD enviado, e não sobre uma flag intermediária: era exatamente
+// aí que a feature morria (CLAUDE.md §9.99).
+// ---------------------------------------------------------------------------
+describe("AssistenteOpenAI — ferramentas enviadas à OpenAI", () => {
+  const FERRAMENTA = {
+    nome: "buscar_pncp",
+    descricao: "Busca contratações públicas.",
+    parametros: { type: "object", properties: {} },
+  };
+
+  function provedor() {
+    return new AssistenteOpenAI({
+      instrucoesSistema: "instruções",
+      ferramentas: [FERRAMENTA],
+    });
+  }
+
+  afterEach(() => {
+    mocks.create.mockReset();
+  });
+
+  it("envia só function tools — nenhum tool hospedado", async () => {
+    mocks.create.mockResolvedValue({ output: [] });
+
+    await provedor().responder([{ papel: "user", conteudo: "busque" }], true);
+
+    const { tools } = mocks.create.mock.calls[0]![0] as { tools: Array<{ type: string }> };
+    expect(tools.map((t) => t.type)).toEqual(["function"]);
+    // Explícito porque foi este valor exato que quebrou o fluxo em produção.
+    expect(tools.some((t) => t.type === "web_search")).toBe(false);
+  });
+
+  it("não manda ferramenta nenhuma quando o orçamento de passos acabou", async () => {
+    // `permitirFerramentas: false` é o fechamento do turno: mandar definições
+    // aqui pagaria tokens por ferramentas que não podem ser usadas.
+    mocks.create.mockResolvedValue({ output: [] });
+
+    await provedor().responder([{ papel: "user", conteudo: "busque" }], false);
+
+    expect(mocks.create.mock.calls[0]![0]).not.toHaveProperty("tools");
   });
 });
