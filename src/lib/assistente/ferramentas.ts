@@ -146,17 +146,21 @@ function parseArgumentos<T>(schema: z.ZodType<T>, bruto: string): T {
 /**
  * Resolve de qual processo a ferramenta fala.
  *
- * Numa conversa de processo o escopo é fixo: aceitar um `processoId` diferente
- * vindo do modelo deixaria o assistente ler (e escrever) num processo que não é
- * o da tela.
+ * Numa conversa de processo o escopo é fixo: o valor retornado é sempre
+ * `ctx.processoId`, e qualquer `processoId` que o modelo informe é ignorado —
+ * nunca usado para decidir o que a ferramenta lê. Isso preserva a garantia que
+ * o comentário anterior descrevia (o assistente nunca opera fora do processo
+ * da tela) sem depender do modelo acertar um valor que ele não tem como
+ * conhecer: em conversa ancorada o prompt de sistema só informa o *número* do
+ * processo (`1829/2024`), nunca o id interno (`ctx.processoId`, um cuid) — o
+ * modelo costuma preencher o argumento opcional com o número por tentar ser
+ * explícito, e isso sempre reprovava contra o id interno, derrubando
+ * `ler_processo`/`ler_candidatos`/`ler_conformidade` mesmo perguntando pelo
+ * processo certo (medido em produção: ~40% das mensagens com ferramentas desde
+ * o lançamento do M13).
  */
 function resolverProcesso(ctx: ContextoFerramentas, informado?: string): string {
   if (ctx.processoId) {
-    if (informado && informado !== ctx.processoId) {
-      throw new ArgumentosInvalidosError(
-        "Esta conversa está presa ao processo aberto; não é possível consultar outro processo por aqui.",
-      );
-    }
     return ctx.processoId;
   }
   if (!informado) {

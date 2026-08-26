@@ -124,13 +124,28 @@ describe("registry de ferramentas do assistente", () => {
   // -------------------------------------------------------------------------
 
   describe("escopo do processo", () => {
-    it("recusa ler outro processo quando a conversa está presa a um", async () => {
+    it("ignora processoId divergente informado pelo modelo e lê o processo da conversa", async () => {
+      // O modelo só conhece o processo pelo NÚMERO (ex.: "1829/2024"), nunca pelo
+      // id interno de `ctx.processoId` — então qualquer valor que ele preencha
+      // aqui tende a divergir por natureza, não por tentativa real de escapar do
+      // escopo. Ver o comentário de `resolverProcesso`.
+      mocks.db.processo.findUnique.mockResolvedValue({
+        id: "proc-1",
+        numero: "1829/2024",
+        objeto: "Objeto de teste",
+        status: "aberto",
+        responsavel: "Servidor Teste",
+        dataAbertura: new Date("2026-08-01"),
+        itens: [],
+      });
       const registry = montarRegistry(CTX_PROCESSO);
 
       const resposta = await chamar(registry, "ler_processo", { processoId: "proc-OUTRO" });
 
-      expect(resposta.erro).toMatch(/presa ao processo aberto/i);
-      expect(mocks.db.processo.findUnique).not.toHaveBeenCalled();
+      expect(resposta.erro).toBeUndefined();
+      expect(mocks.db.processo.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "proc-1" } }),
+      );
     });
 
     it("na conversa global, exige o processoId em vez de adivinhar", async () => {

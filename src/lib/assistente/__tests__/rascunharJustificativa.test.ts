@@ -377,7 +377,10 @@ describe("rascunhar_justificativa", () => {
   // -------------------------------------------------------------------------
 
   describe("escopo da conversa", () => {
-    it("recusa rascunhar para outro processo numa conversa presa a um processo", async () => {
+    it("ignora processoId divergente informado pelo modelo e rascunha para o processo da conversa", async () => {
+      // Mesma razão da suite de `ferramentas.test.ts`: o modelo só conhece o
+      // processo pelo NÚMERO, nunca pelo id interno — então um valor divergente
+      // aqui é o caso comum, não uma tentativa de escapar do escopo.
       const registry = montarRegistry(CTX_PROCESSO);
 
       const resposta = await chamar(registry, "rascunhar_justificativa", {
@@ -385,8 +388,10 @@ describe("rascunhar_justificativa", () => {
         processoId: "proc-outro",
       });
 
-      expect(resposta.erro).toMatch(/processo aberto/i);
-      expect(mocks.db.processo.findUnique).not.toHaveBeenCalled();
+      expect(resposta.erro).toBeUndefined();
+      expect(mocks.db.processo.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "proc-1" } }),
+      );
     });
 
     it("exige processoId na conversa global", async () => {
