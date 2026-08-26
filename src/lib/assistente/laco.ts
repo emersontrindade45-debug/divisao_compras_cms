@@ -56,6 +56,66 @@ export const MAX_PASSOS_POR_TURNO = 8;
  */
 export const ORCAMENTO_TEMPO_TURNO_MS = 35_000;
 
+/**
+ * Instante em que as ferramentas precisam ter **terminado** — não o instante em
+ * que a última pode começar.
+ *
+ * **A diferença entre os dois derrubava 1 em cada 3 turnos.** O
+ * `ORCAMENTO_TEMPO_TURNO_MS` acima é conferido como "já passei de 35s?", o que
+ * autoriza a começar às 34,9s uma busca que custa 30s. O comentário dele afirma
+ * que "DUAS não cabem, e a segunda é barrada antes de começar" — a intenção
+ * estava certa e a conta não fechava:
+ *
+ *     busca 1 começa em t≈4s, dura 23s  → t=27s
+ *     checagem para a busca 2: 27 < 35  → PASSA
+ *     busca 2 dura 23s                  → t=50s
+ *     fechamento com o modelo (até 15s) → t=65s  >  maxDuration=60
+ *
+ * Medido em produção em 2026-08-26: de 21 turnos, **5 não gravaram nada** — nem
+ * a resposta, nem os passos, nem os candidatos já encontrados. O usuário pedia
+ * "continue procurando" e não acontecia absolutamente nada, porque a Vercel mata
+ * a função no meio e a gravação só ocorre DEPOIS do turno inteiro
+ * (`route.ts` — `executarTurno` e só então `mensagemAssistente.create`).
+ *
+ * O número vem da medição, não de estimativa: nos turnos que sobreviveram, o
+ * custo fora das ferramentas (inferência entre passos + fechamento + gravação +
+ * auditoria) ficou entre **12s e 16s**, com tempo de parede máximo de 49s. Logo
+ * 60 − 16 − folga ≈ 40s é o instante em que a última ferramenta precisa ter
+ * acabado.
+ *
+ * É a §9.65 aplicada um nível acima: lá o teto do PNCP era verificado entre
+ * lotes e virava conselho; aqui o teto do turno era verificado entre ferramentas
+ * e virava conselho pelo mesmo motivo.
+ */
+export const LIMITE_FERRAMENTAS_MS = 40_000;
+
+/**
+ * Pior caso medido de cada ferramenta, usado como RESERVA: a ferramenta só
+ * começa se couber inteira antes de `LIMITE_FERRAMENTAS_MS`.
+ *
+ * Medidos em produção (`MensagemAssistente.ferramentasUsadas`, 26 execuções de
+ * 2026-08-25/26): `buscar_pncp` foi de 12,0s a **29,5s** (busca com teto interno
+ * de 12s + ranqueamento por IA em lotes paralelos); `buscar_web` de 4,2s a 12,6s;
+ * as leituras de banco ficaram todas abaixo de 7,5s (`ler_tr` é a mais cara,
+ * porque devolve o TR inteiro).
+ *
+ * Conservador de propósito. Errar para o lado de "não começa a busca" custa ao
+ * usuário um clique em "Continuar procurando", com a resposta parcial gravada e
+ * os candidatos já aprováveis; errar para o outro lado custa o turno inteiro,
+ * silenciosamente. Os dois não são comparáveis.
+ */
+const CUSTO_MAXIMO_MS: Readonly<Record<string, number>> = {
+  buscar_pncp: 30_000,
+  buscar_web: 15_000,
+};
+
+/** Reserva para ferramenta sem custo medido — as leituras de banco. */
+const CUSTO_MAXIMO_PADRAO_MS = 8_000;
+
+function custoMaximoDe(ferramenta: string): number {
+  return CUSTO_MAXIMO_MS[ferramenta] ?? CUSTO_MAXIMO_PADRAO_MS;
+}
+
 /** Quantos caracteres de resultado de ferramenta entram no rastro exibido. */
 const TAMANHO_RESUMO_PASSO = 500;
 
@@ -182,10 +242,22 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
   // paginar `/itens` três vezes, outra resolve em uma requisição.
   const tempoEsgotado = () => agora() - inicioTurno >= orcamentoMs;
 
+  /**
+   * A ferramenta cabe INTEIRA antes do limite? Reserva, não "ainda não passou":
+   * ver `LIMITE_FERRAMENTAS_MS` para a conta que derrubava 1 em cada 3 turnos.
+   */
+  const cabeNoPrazo = (ferramenta: string) =>
+    agora() - inicioTurno + custoMaximoDe(ferramenta) <= LIMITE_FERRAMENTAS_MS;
+
   // `maxPassos` conta ferramentas executadas, não idas ao modelo. Um orçamento
   // de 0 é válido e significa "responda sem pesquisar".
   while (true) {
-    const podeUsarFerramentas = passos.length < maxPassos && !tempoEsgotado();
+    // `orcamentoEsgotado` entra aqui, e não só o relógio: uma ferramenta barrada
+    // por não caber no prazo (`cabeNoPrazo`) não esgota o relógio, e sem esta
+    // condição o modelo pediria a MESMA ferramenta na rodada seguinte, seria
+    // barrado de novo, e o turno queimaria os 8 passos repetindo o bloqueio.
+    const podeUsarFerramentas =
+      passos.length < maxPassos && !tempoEsgotado() && !orcamentoEsgotado;
     const resposta = await modelo.responder(historico, podeUsarFerramentas);
 
     if (resposta.texto) {
@@ -213,17 +285,23 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
       // delas poderia consumir o orçamento inteiro e as seguintes rodariam
       // assim mesmo, estourando o `maxDuration`.
       const semTempo = tempoEsgotado();
-      if (passos.length >= maxPassos || semTempo) {
+      // `cabeNoPrazo` é o que impede o turno de morrer: sem ele, uma busca de
+      // 30s iniciada perto do teto estoura o `maxDuration` e NADA é gravado —
+      // nem os candidatos que as buscas anteriores já acharam.
+      const naoCabe = !cabeNoPrazo(chamada.nome);
+      if (passos.length >= maxPassos || semTempo || naoCabe) {
         orcamentoEsgotado = true;
         historico.push({
           papel: "tool",
           chamadaId: chamada.id,
           conteudo: JSON.stringify({
-            erro: semTempo
-              ? "Tempo de pesquisa deste turno esgotado. Não execute mais ferramentas: " +
-                "responda ao usuário com o que já encontrou e diga o que tentaria em seguida."
-              : "Orçamento de buscas deste turno esgotado. Não execute mais ferramentas: " +
-                "responda ao usuário com o que já encontrou e diga o que tentaria em seguida.",
+            erro:
+              semTempo || naoCabe
+                ? `Não há tempo restante neste turno para executar \`${chamada.nome}\` sem ` +
+                  "derrubar a resposta. Não execute mais ferramentas: responda ao usuário " +
+                  "com o que já encontrou e diga o que tentaria em seguida."
+                : "Orçamento de buscas deste turno esgotado. Não execute mais ferramentas: " +
+                  "responda ao usuário com o que já encontrou e diga o que tentaria em seguida.",
           }),
         });
         continue;
@@ -266,7 +344,7 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
       });
     }
 
-    if (passos.length >= maxPassos || tempoEsgotado()) {
+    if (passos.length >= maxPassos || tempoEsgotado() || orcamentoEsgotado) {
       orcamentoEsgotado = true;
       // Fechamento obrigatório: sem esta chamada o turno terminaria com o último
       // texto do modelo (frequentemente vazio, porque ele estava pedindo

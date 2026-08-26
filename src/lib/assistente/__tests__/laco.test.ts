@@ -280,18 +280,21 @@ describe("executarTurno", () => {
   // stream SSE, e o passo em andamento gira para sempre no cliente.
   // -------------------------------------------------------------------------
 
-  it("para de executar ferramentas quando o tempo do turno esgota", async () => {
+  // ATENÇÃO ao histórico deste teste: até 2026-08-26 ele afirmava o contrário —
+  // exigia que as DUAS buscas de 20s rodassem, terminando aos 40s. Ou seja, o
+  // teste codificava o bug: 40s de ferramentas + fechamento do modelo (até 15s)
+  // estoura o `maxDuration = 60` da rota, a Vercel mata a função no meio do
+  // stream e NADA é gravado. Medido em produção: 5 de 21 turnos morreram assim,
+  // e o usuário via o clique não fazer absolutamente nada.
+  it("não começa ferramenta que não cabe inteira antes do limite", async () => {
     let relogio = 0;
     const executar = vi.fn(async () => {
-      // Cada busca "gasta" 20s — duas já passam do orçamento de 35s.
       relogio += 20_000;
       return { conteudo: "{}" };
     });
     const modelo = modeloRoteirizado([
       { texto: "", chamadas: [chamada("buscar_pncp", "c1")] },
       { texto: "", chamadas: [chamada("buscar_pncp", "c2")] },
-      // Terceira ida ao modelo já é o fechamento: aos 40s o laço não pede mais
-      // ferramenta nenhuma.
       { texto: "Fechamento com o que achei.", chamadas: [] },
     ]);
 
@@ -302,12 +305,106 @@ describe("executarTurno", () => {
       agora: () => relogio,
     });
 
-    // Duas rodaram (relógio em 0s e 20s); a terceira nem chegou a ser pedida.
-    expect(executar).toHaveBeenCalledTimes(2);
-    expect(res.passos).toHaveLength(2);
+    // A primeira cabe (0s + 30s de reserva <= 40s). A segunda começaria aos 20s
+    // e a reserva a levaria a 50s — não cabe, e é barrada ANTES de começar.
+    expect(executar).toHaveBeenCalledTimes(1);
+    expect(res.passos).toHaveLength(1);
     expect(res.orcamentoEsgotado).toBe(true);
-    // Não pode acabar em silêncio: o turno fecha com texto para o usuário.
+    // Não pode acabar em silêncio: o turno fecha com texto para o usuário, e é
+    // esse fechamento que faz a mensagem (e os candidatos já achados) serem
+    // gravados em vez de perdidos.
     expect(res.texto).toBe("Fechamento com o que achei.");
+  });
+
+  /**
+   * Relógio que avança DURANTE o turno. Iniciar `relogio` num valor alto não
+   * funciona: `inicioTurno` é capturado na primeira leitura, então o decorrido
+   * continua zero — foi assim que a primeira versão destes testes passou sem
+   * exercitar a reserva.
+   */
+  function executarQueGastaTempo(relogioRef: { ms: number }) {
+    return vi.fn(async (c: ChamadaFerramenta) => {
+      // `ler_tr` é o consumidor de tempo do cenário; o resto é barato.
+      relogioRef.ms += c.nome === "ler_tr" ? 32_000 : 1_000;
+      return { conteudo: "{}" };
+    });
+  }
+
+  it("reserva conforme a ferramenta: leitura barata cabe onde a busca não cabe", async () => {
+    const relogio = { ms: 0 };
+    const executar = executarQueGastaTempo(relogio);
+    const modelo = modeloRoteirizado([
+      { texto: "", chamadas: [chamada("ler_tr", "c0")] },
+      // Aos 32s: ler_processo reserva 8s (32+8=40, cabe no limite);
+      // buscar_pncp reserva 30s (33+30=63, não cabe).
+      { texto: "", chamadas: [chamada("ler_processo", "c1"), chamada("buscar_pncp", "c2")] },
+      { texto: "Fechamento.", chamadas: [] },
+    ]);
+
+    const res = await executarTurno({
+      historico: [{ papel: "user", conteudo: "procure" }],
+      modelo,
+      executar,
+      agora: () => relogio.ms,
+    });
+
+    const executadas = executar.mock.calls.map(([c]) => c.nome);
+    expect(executadas).toEqual(["ler_tr", "ler_processo"]);
+    expect(executadas).not.toContain("buscar_pncp");
+    expect(res.orcamentoEsgotado).toBe(true);
+  });
+
+  it("não repete a ferramenta barrada até queimar os passos", async () => {
+    // Sem fechar o laço ao marcar `orcamentoEsgotado`, o modelo pediria a mesma
+    // busca na rodada seguinte, seria barrado de novo, e o turno gastaria as 8
+    // rodadas repetindo o bloqueio — devolvendo texto vazio no fim.
+    const relogio = { ms: 0 };
+    const executar = executarQueGastaTempo(relogio);
+    // O modelo INSISTE na busca: sem isso o roteiro pararia sozinho na terceira
+    // entrada e o teste passaria mesmo sem a guarda (a mutação que remove
+    // `orcamentoEsgotado` do fechamento não era detectada — §9.99).
+    const modelo = modeloRoteirizado([
+      { texto: "", chamadas: [chamada("ler_tr", "c0")] },
+      { texto: "", chamadas: [chamada("buscar_pncp", "c1")] },
+      { texto: "Fechei sem buscar.", chamadas: [chamada("buscar_pncp", "c2")] },
+      { texto: "NÃO DEVERIA CHEGAR AQUI", chamadas: [chamada("buscar_pncp", "c3")] },
+    ]);
+
+    const res = await executarTurno({
+      historico: [{ papel: "user", conteudo: "procure" }],
+      modelo,
+      executar,
+      agora: () => relogio.ms,
+    });
+
+    expect(executar.mock.calls.map(([c]) => c.nome)).toEqual(["ler_tr"]);
+    expect(res.orcamentoEsgotado).toBe(true);
+    // A assertiva que discrimina: 3 idas ao modelo (leitura, busca barrada,
+    // fechamento). Sem a guarda o laço daria mais uma volta pedindo a MESMA
+    // busca, seria barrado de novo, e só então fecharia — 4 idas.
+    expect(modelo.chamadasRecebidas).toHaveLength(3);
+    expect(res.texto).toBe("Fechei sem buscar.");
+  });
+
+  it("diz ao modelo QUAL ferramenta não coube, para ele fechar em vez de insistir", async () => {
+    const relogio = { ms: 0 };
+    const executar = executarQueGastaTempo(relogio);
+    const modelo = modeloRoteirizado([
+      { texto: "", chamadas: [chamada("ler_tr", "c0")] },
+      { texto: "", chamadas: [chamada("buscar_pncp", "c1")] },
+      { texto: "Fechamento.", chamadas: [] },
+    ]);
+
+    const res = await executarTurno({
+      historico: [{ papel: "user", conteudo: "procure" }],
+      modelo,
+      executar,
+      agora: () => relogio.ms,
+    });
+
+    const bloqueio = res.historico.filter((m) => m.papel === "tool").at(-1);
+    expect(bloqueio?.conteudo).toContain("buscar_pncp");
+    expect(bloqueio?.conteudo).toMatch(/não há tempo restante/i);
   });
 
   it("com o tempo esgotado, o fechamento é pedido sem ferramentas", async () => {

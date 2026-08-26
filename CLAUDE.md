@@ -1214,3 +1214,29 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     é na **última** camada observável (URL, corpo da requisição, SQL emitido); asserções nas
     intermediárias provam encanamento, não efeito. E ao rodar um lote de mutações, tratar cada uma
     que NÃO derruba nada como achado a investigar, nunca como ruído (§9.35, §9.39).
+100. **Teto de tempo conferido como "já passei?" autoriza começar o que não cabe — e no turno do
+     assistente isso apagava a resposta inteira.** `executarTurno` checava
+     `decorrido >= ORCAMENTO_TEMPO_TURNO_MS (35s)` antes de cada ferramenta. Uma `buscar_pncp`
+     começada aos 27s e custando 23s levava o turno a 50s, mais o fechamento obrigatório com o
+     modelo (até 15s) = 65s, contra `maxDuration = 60`. A Vercel mata a função, e como a gravação
+     só acontece DEPOIS do turno inteiro (`route.ts`: `executarTurno` e só então
+     `mensagemAssistente.create`), **nada é persistido** — nem a resposta, nem os passos, nem os
+     candidatos que as buscas anteriores já tinham achado. Medido em produção em 2026-08-26: **5
+     de 21 turnos morreram assim**, e o que o usuário via era o clique não fazer nada.
+     O mais instrutivo: o comentário da constante AFIRMAVA a garantia certa ("duas buscas não
+     cabem, a segunda é barrada antes de começar") e a aritmética não a entregava — documentação e
+     código discordando sem que nada apontasse (§9.70: docstring não é especificação). A correção
+     é reserva por ferramenta: só começa se `decorrido + custoMáximo(ferramenta) <= limite`, com o
+     custo máximo **medido** por ferramenta (aqui: `buscar_pncp` 30s, `buscar_web` 15s, leituras
+     8s), e o limite derivado do overhead real observado (12–16s fora das ferramentas). É a §9.65
+     um nível acima: lá o teto do PNCP era conferido entre lotes, aqui o teto do turno era
+     conferido entre ferramentas, e os dois viravam conselho pelo mesmo motivo.
+     **Corolário sobre a guarda nova:** barrar uma ferramenta sem encerrar o laço faz o modelo
+     pedi-la de novo na rodada seguinte e queimar o orçamento de passos repetindo o bloqueio — ao
+     acrescentar uma condição de corte, conferir que ela também encerra o laço, não só que impede a
+     execução.
+     **Corolário sobre o teste:** o teste que cobria este caminho **codificava o bug** — exigia que
+     as duas buscas de 20s rodassem, terminando aos 40s, exatamente o cenário que mata a função. Um
+     teste verde sobre um comportamento que derruba produção é pior que teste nenhum, porque
+     protege o defeito de ser mexido. Ao corrigir um bug de orçamento, ler o teste existente
+     perguntando "ele afirma o comportamento correto ou o atual?".

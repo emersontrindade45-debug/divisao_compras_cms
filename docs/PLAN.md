@@ -2738,3 +2738,50 @@ vazio também distingue "termo errado" de "recorte estreito demais".
 suíte **inteira verde com a feature inerte**: os testes do assistente verificavam que os filtros
 chegavam a `buscarCandidatosPublicos`, e nenhum verificava que chegavam à URL do PNCP. Foram
 acrescentados 4 testes que olham a query string; agora a mesma mutação derruba 3.
+
+---
+
+## Sessão 2026-08-26 (parte 4) — Turnos do assistente morrendo sem gravar nada
+
+Achado ao analisar as execuções reais de pesquisa a pedido do usuário. **De 21 turnos em
+2026-08-26, 5 não gravaram absolutamente nada** — nem resposta, nem passos, nem os candidatos já
+encontrados. O usuário pedia "Continue procurando" e nada acontecia.
+
+### Causa
+
+`executarTurno` conferia o orçamento como "já passei de 35s?" antes de cada ferramenta, o que
+autoriza começar aos 34,9s uma busca de 30s:
+
+```
+busca 1 começa em t≈4s, dura 23s  → t=27s
+checagem para a busca 2: 27 < 35  → PASSA
+busca 2 dura 23s                  → t=50s
+fechamento com o modelo (até 15s) → t=65s  >  maxDuration=60
+```
+
+A Vercel mata a função e, como a gravação só ocorre depois do turno inteiro (`route.ts`), tudo se
+perde. O comentário da constante **afirmava** a garantia certa ("duas não cabem, a segunda é
+barrada antes de começar") — a intenção estava certa e a aritmética não fechava.
+
+### Correção
+
+Reserva por ferramenta (`LIMITE_FERRAMENTAS_MS` + `CUSTO_MAXIMO_MS`): a ferramenta só começa se
+couber inteira antes do limite. Custos **medidos** em produção (26 execuções): `buscar_pncp`
+12,0–29,5s, `buscar_web` 4,2–12,6s, leituras < 7,5s. Limite de 40s derivado do overhead real fora
+das ferramentas (12–16s, tempo de parede máximo observado 49s contra o teto de 60s).
+
+Guarda adicional: marcar `orcamentoEsgotado` agora encerra o laço. Sem isso o modelo pediria a
+mesma ferramenta na rodada seguinte, seria barrado de novo, e o turno queimaria os 8 passos
+repetindo o bloqueio.
+
+### Verificação
+
+1.305 testes (129 arquivos) verdes, typecheck e ESLint limpos, `next build` compilado.
+
+**O teste que cobria este caminho codificava o bug**: exigia que as duas buscas de 20s rodassem,
+terminando aos 40s — exatamente o cenário que mata a função. Foi reescrito. 3 testes novos, e as 4
+mutações são detectadas — mas só depois de corrigir uma delas: a mutação que removia o fechamento
+do laço passava despercebida porque o roteiro do teste parava sozinho em vez de o modelo insistir
+na ferramenta (§9.99).
+
+Lição em [CLAUDE.md §9.100](../CLAUDE.md).
