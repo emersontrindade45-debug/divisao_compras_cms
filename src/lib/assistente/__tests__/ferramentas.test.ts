@@ -24,6 +24,10 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("@/lib/similaridade/buscarCandidatosPublicos", () => ({
   buscarCandidatosPublicos: mocks.buscarCandidatosPublicos,
+  // Fontes reais que não sabem aplicar o recorte do analista — é o que o aviso
+  // de recorte parcial enumera. Sem isto no mock, a chamada estoura dentro do
+  // try/catch de `executar` e vira um erro genérico em vez de falha legível.
+  fontesQueIgnoramFiltros: () => ["painel_precos", "compras_gov_contratacoes", "sinapi"],
 }));
 vi.mock("@/lib/integracoes/perplexity", () => ({
   buscarWebPerplexity: mocks.buscarWebPerplexity,
@@ -507,6 +511,122 @@ describe("registry de ferramentas do assistente", () => {
 
       expect(resposta.total).toBe(0);
       expect(resposta.observacao).toMatch(/ampliar a faixa/i);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Recorte geográfico/administrativo (P4).
+  //
+  // O PNCP falha de duas formas silenciosas e OPOSTAS com valor inválido,
+  // medidas em 2026-08-26: `ufs=XX` (e `ufs=sp` minúsculo) devolve 0 resultados
+  // em vez de erro; `status=lixo` é ignorado e devolve o total sem filtro.
+  // Nenhuma das duas é detectável pela resposta — por isso a validação é na
+  // fronteira, com enum fechado.
+  // -------------------------------------------------------------------------
+  describe("buscar_pncp — recorte por UF/esfera/situação", () => {
+    it("repassa o recorte válido para a busca", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({})]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      await chamar(registry, "buscar_pncp", { termo: "cadeira", uf: "SP", esfera: "M" });
+
+      expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("cadeira", {
+        timeoutMsPorProvedor: expect.any(Number),
+        filtros: { uf: "SP", esfera: "M" },
+      });
+    });
+
+    it("não inventa um objeto de filtros quando nada foi pedido", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({})]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("cadeira", {
+        timeoutMsPorProvedor: expect.any(Number),
+      });
+    });
+
+    it("rejeita UF inexistente ANTES de chamar a busca", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira", uf: "XX" });
+
+      // Sem esta guarda o PNCP devolveria 0 resultados sem erro, e o modelo
+      // diria ao analista que não existe contratação pública para o objeto.
+      expect(resposta.erro).toBeTruthy();
+      expect(mocks.buscarCandidatosPublicos).not.toHaveBeenCalled();
+    });
+
+    it("rejeita UF em minúsculas, que o PNCP trata como inexistente", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira", uf: "sp" });
+
+      expect(resposta.erro).toBeTruthy();
+      expect(mocks.buscarCandidatosPublicos).not.toHaveBeenCalled();
+    });
+
+    it("rejeita lista de UFs, que a API não suporta e responde com zero", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira", uf: "SP,RJ" });
+
+      expect(resposta.erro).toBeTruthy();
+      expect(mocks.buscarCandidatosPublicos).not.toHaveBeenCalled();
+    });
+
+    it("rejeita status inválido, que o PNCP ignoraria em silêncio", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira", status: "lixo" });
+
+      expect(resposta.erro).toBeTruthy();
+      expect(mocks.buscarCandidatosPublicos).not.toHaveBeenCalled();
+    });
+
+    it("avisa que o recorte valeu só para o PNCP", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({})]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira", uf: "SP" });
+
+      // Prometer "só SP" e devolver resultado nacional por três das quatro
+      // fontes, sem dizer, é o modo de falha da §9.40.
+      expect(resposta.observacao).toMatch(/apenas ao PNCP/i);
+      expect(resposta.observacao).toMatch(/UF SP/);
+    });
+
+    it("não avisa nada quando não há recorte", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({})]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(resposta.observacao).not.toMatch(/apenas ao PNCP/i);
+    });
+
+    it("sugere remover o recorte quando ele zera o resultado", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira", uf: "SP" });
+
+      // "Troque o substantivo-núcleo" seria conselho errado aqui: o termo pode
+      // estar certo e o recorte é que cortou 85% do universo.
+      expect(resposta.total).toBe(0);
+      expect(resposta.observacao).toMatch(/RECORTE PEDIDO/);
+    });
+
+    it("expõe o recorte ao modelo como enum, não como texto livre", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+      const def = registry.definicoes.find((d) => d.nome === "buscar_pncp");
+      const props = (def?.parametros as { properties: Record<string, { enum?: string[] }> })
+        .properties;
+
+      expect(props.uf?.enum).toContain("SP");
+      expect(props.uf?.enum).toHaveLength(27);
+      expect(props.esfera?.enum).toEqual(["F", "E", "M"]);
     });
   });
 });

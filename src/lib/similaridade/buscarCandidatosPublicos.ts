@@ -1,5 +1,6 @@
 import "server-only";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
+import type { FiltrosBuscaPNCP } from "@/lib/integracoes/pncp";
 import { REGISTRY_PROVEDORES_PUBLICOS } from "./registryProvedores";
 import { comTimeout } from "./comTimeout";
 import { deduplicarCandidatos } from "./deduplicarCandidatos";
@@ -33,6 +34,25 @@ export interface OpcoesBuscarCandidatosPublicos {
    * usa o `timeoutMs` que cada provedor já declara no registry.
    */
   timeoutMsPorProvedor?: number;
+  /**
+   * Recorte pedido pelo analista (UF, esfera, situação). Repassado a todos os
+   * provedores; **só os que declaram `aplicaFiltros` de fato o aplicam** — ver
+   * `FONTES_QUE_IGNORAM_FILTROS`, que é o que permite ao chamador avisar em vez
+   * de deixar a diferença silenciosa.
+   */
+  filtros?: FiltrosBuscaPNCP;
+}
+
+/**
+ * Fontes habilitadas que NÃO sabem aplicar o recorte do analista. Exportada para
+ * que a camada de cima possa dizer isso ao usuário: pedir "só SP" e receber
+ * resultado nacional de três das quatro fontes, sem aviso, é o modo de falha da
+ * CLAUDE.md §9.40.
+ */
+export function fontesQueIgnoramFiltros(): string[] {
+  return REGISTRY_PROVEDORES_PUBLICOS.filter((p) => p.habilitado && !p.aplicaFiltros).map(
+    (p) => p.chave,
+  );
 }
 
 export async function buscarCandidatosPublicos(
@@ -44,7 +64,7 @@ export async function buscarCandidatosPublicos(
   const resultados = await Promise.allSettled(
     provedoresHabilitados.map((provedor) =>
       comTimeout(
-        provedor.buscar(termo),
+        provedor.buscar(termo, opcoes.filtros),
         opcoes.timeoutMsPorProvedor ?? provedor.timeoutMs,
         provedor.chave,
       ),

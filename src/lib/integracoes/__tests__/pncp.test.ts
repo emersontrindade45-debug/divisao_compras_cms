@@ -1204,6 +1204,79 @@ describe("atas de registro de preços", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Recorte por UF/esfera/situação (P4).
+//
+// Estes testes existem porque a mutação mostrou o buraco: os testes do
+// assistente verificavam que os filtros chegavam a `buscarCandidatosPublicos`,
+// mas NENHUM verificava que eles chegavam à URL do PNCP. Apagar
+// `paramsDosFiltros` da query deixava a suíte inteira verde com a feature
+// inerte (CLAUDE.md §9.35 — teste que passa não prova que protege).
+// ---------------------------------------------------------------------------
+
+describe("recorte da busca por UF/esfera/situação", () => {
+  it("põe o recorte na query da busca textual", async () => {
+    const urls: string[] = [];
+    mockPncp({ processos: [], onUrl: (u) => urls.push(u) });
+
+    await buscarContratosPNCP("cadeira", undefined, {
+      uf: "SP",
+      esfera: "M",
+      status: "encerradas",
+    });
+
+    const busca = urls.filter((u) => u.includes("/api/search/"));
+    expect(busca.length).toBeGreaterThan(0);
+    for (const u of busca) {
+      expect(u).toContain("ufs=SP");
+      expect(u).toContain("esferas=M");
+      expect(u).toContain("status=encerradas");
+    }
+  });
+
+  it("aplica o recorte também ao índice de ATAS", async () => {
+    // Medido: os filtros valem para os dois índices (ufs=SP levou 19 atas para
+    // 2). É o que faz o recorte do analista alcançar as compras que só a ata
+    // encontra — sem isso o P4 melhoraria metade da busca e deixaria a outra
+    // metade trazendo o país inteiro.
+    const urls: string[] = [];
+    mockPncp({ processos: [], onUrl: (u) => urls.push(u) });
+
+    await buscarContratosPNCP("cadeira", undefined, { uf: "SP" });
+
+    const buscaAta = urls.filter((u) => u.includes("tipos_documento=ata"));
+    expect(buscaAta.length).toBe(2);
+    for (const u of buscaAta) expect(u).toContain("ufs=SP");
+  });
+
+  it("omite da query o que não foi pedido", async () => {
+    const urls: string[] = [];
+    mockPncp({ processos: [], onUrl: (u) => urls.push(u) });
+
+    await buscarContratosPNCP("cadeira", undefined, { uf: "SP" });
+
+    const busca = urls.filter((u) => u.includes("/api/search/"));
+    for (const u of busca) {
+      expect(u).toContain("ufs=SP");
+      expect(u).not.toContain("esferas=");
+      expect(u).not.toContain("status=");
+    }
+  });
+
+  it("não acrescenta parâmetro nenhum quando não há recorte", async () => {
+    const urls: string[] = [];
+    mockPncp({ processos: [], onUrl: (u) => urls.push(u) });
+
+    await buscarContratosPNCP("cadeira");
+
+    for (const u of urls.filter((u) => u.includes("/api/search/"))) {
+      expect(u).not.toContain("ufs=");
+      expect(u).not.toContain("esferas=");
+      expect(u).not.toContain("status=");
+    }
+  });
+});
+
 describe("descarte de edital sem julgamento", () => {
   it("não gasta nenhuma requisição em edital com tem_resultado: false", async () => {
     const urls: string[] = [];

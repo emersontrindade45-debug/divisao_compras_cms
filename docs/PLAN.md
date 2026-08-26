@@ -2684,3 +2684,57 @@ derruba 2; concatenar em vez de intercalar derruba 1.
 
 A URL de evidência montada a partir da ata foi validada contra a API real (§9.8): as 3 amostradas
 resolvem, e a descrição do item da compra bate com a da ata.
+
+---
+
+## Sessão 2026-08-26 (parte 3) — P4: recorte por UF/esfera/situação
+
+Expõe ao analista os filtros que a busca textual do PNCP sempre aceitou e nunca foram usados —
+o modelo "por filtro" da plataforma de comparação. `buscar_pncp` ganha `uf`, `esfera` e `status`.
+
+### A medição que definiu o desenho
+
+A API falha de duas formas **silenciosas e opostas** com valor inválido:
+
+| Entrada | Resposta do PNCP |
+|---|---|
+| `ufs=SP` | 5.028 → 650 (filtra) |
+| `ufs=XX` (inexistente) | **0 resultados**, sem erro |
+| `ufs=sp` (minúsculo) | **0 resultados**, sem erro |
+| `ufs=SP,RJ` (lista) | **0 resultados** — multivalor não existe |
+| `status=lixo` | 5.028 — **silenciosamente ignorado** |
+
+Nenhuma é detectável pela resposta. Um `uf` malformado vindo do modelo viraria "nenhuma
+contratação pública encontrada" e o analista concluiria que o objeto não tem referência no PNCP.
+Por isso o parâmetro é **enum fechado no Zod**, não string livre (§9.12), e o modelo recebe de
+volta a lista de valores aceitos quando erra.
+
+### Ganho para o P3 (a pergunta do usuário)
+
+**Os mesmos filtros valem para o índice de ATAS** — medido: `ufs=SP` levou 19 atas para 2,
+`esferas=M` para 8. Então o recorte alcança também as compras que só a ata encontra. Sem passar os
+filtros à busca de atas, o P4 melhoraria metade da busca e deixaria a outra metade trazendo o país
+inteiro (mutação M5 cobre isso).
+
+Outros campos da ata foram avaliados e **descartados por medição**, não por esquecimento:
+`permite_adesao` é `null` na maioria (só 12 de 139 são `true` — campo não confiável);
+`valor_global` é `null` em **100%** das atas; `cancelado` é `false` em 100% da amostra.
+Só `data_fim_vigencia` é confiável (presente em 100%, 35% ainda vigentes) — fica como ideia futura,
+sem implementação, porque não medi que vigência prediga qualidade de preço.
+
+### Honestidade sobre cobertura parcial
+
+Só o PNCP tem esses filtros na origem. Pedir "só SP" e receber resultado nacional de três das
+quatro fontes sem aviso seria o modo de falha da §9.40. O registry ganhou `aplicaFiltros`, e a
+resposta ao modelo passa a **declarar quais fontes ignoraram o recorte**. A mensagem de resultado
+vazio também distingue "termo errado" de "recorte estreito demais".
+
+### Verificação
+
+1.302 testes (129 arquivos) verdes, typecheck e ESLint limpos, `next build` compilado.
+14 testes novos.
+
+**A mutação achou um buraco real.** Na primeira rodada, apagar `paramsDosFiltros` da query deixou a
+suíte **inteira verde com a feature inerte**: os testes do assistente verificavam que os filtros
+chegavam a `buscarCandidatosPublicos`, e nenhum verificava que chegavam à URL do PNCP. Foram
+acrescentados 4 testes que olham a query string; agora a mesma mutação derruba 3.

@@ -91,7 +91,16 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
-vi.mock("@/lib/integracoes/pncp", () => ({ buscarContratosPNCP: mocks.buscarContratosPNCP }));
+// `filtrarPorValor` e os enums de recorte (UFS_VALIDAS...) são lidos no topo de
+// `ferramentas.ts` — ao montar o schema Zod —, então precisam existir no mock ou
+// o arquivo inteiro falha na coleção, não num teste específico.
+vi.mock("@/lib/integracoes/pncp", () => ({
+  buscarContratosPNCP: mocks.buscarContratosPNCP,
+  filtrarPorValor: (c: unknown[]) => c,
+  UFS_VALIDAS: ["SP", "RJ", "MG"] as const,
+  ESFERAS_VALIDAS: ["F", "E", "M"] as const,
+  STATUS_VALIDOS: ["encerradas", "recebendo_proposta", "em_julgamento"] as const,
+}));
 vi.mock("@/lib/integracoes/perplexity", () => ({
   buscarWebPerplexity: mocks.buscarWebPerplexity,
   perplexityConfigurada: mocks.perplexityConfigurada,

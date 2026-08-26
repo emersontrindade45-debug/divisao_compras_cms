@@ -1190,3 +1190,27 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
     "como divido o orçamento entre as origens" — aqui, intercalando. E dividir sem afirmar qual
     origem rende mais foi deliberado: as duas medições de rendimento que eu tinha usavam tetos de
     itens diferentes e não eram comparáveis entre si (§9.69).
+98. **API que responde a valor inválido com "zero resultados" em vez de erro exige enum fechado na
+    fronteira — e a mesma API pode falhar do jeito OPOSTO no parâmetro vizinho.** Medido no PNCP em
+    2026-08-26, ao expor os filtros de busca ao analista: `ufs=XX` (UF inexistente) e até `ufs=sp`
+    (minúsculo) devolvem **0 resultados sem erro**, enquanto `status=lixo` é **silenciosamente
+    ignorado** e devolve o total sem filtro. Um é falso-vazio, o outro é falso-recorte, e **nenhum
+    dos dois é detectável pela resposta**. O estrago do primeiro é o pior: o assistente reportaria
+    "nenhuma contratação pública encontrada" e o analista concluiria que o objeto não tem
+    referência de preço, quando o que houve foi um `uf: "São Paulo"` ou `uf: "SP,RJ"` do modelo
+    (multivalor também devolve zero). Por isso o parâmetro entra como `z.enum`, nunca `z.string` —
+    o modelo recebe a lista de valores aceitos e se corrige (§9.12). Regra geral: ao repassar a uma
+    API externa qualquer valor que o modelo escolhe, testar o comportamento dela com valor
+    INVÁLIDO antes de decidir a validação, e testar **cada parâmetro separadamente** — a forma de
+    falhar não é uniforme dentro da mesma API.
+99. **Mutação em camada errada dá falso conforto: testar que o argumento chega à função vizinha não
+    testa que ele chega ao mundo.** Ao implementar o recorte da busca (P4), os testes verificavam
+    que os filtros chegavam a `buscarCandidatosPublicos` — e passavam. A mutação que apagava
+    `paramsDosFiltros` da query string do PNCP deixou a suíte **inteira verde com a feature
+    completamente inerte**: nada olhava a URL efetivamente montada. As outras três mutações do
+    mesmo lote foram detectadas, o que tornou este buraco ainda mais fácil de não ver — "3 de 4
+    mutações pegas" parece cobertura boa. A correção foi acrescentar asserção sobre a query string
+    real. Regra: para feature que atravessa N camadas até uma chamada externa, a asserção decisiva
+    é na **última** camada observável (URL, corpo da requisição, SQL emitido); asserções nas
+    intermediárias provam encanamento, não efeito. E ao rodar um lote de mutações, tratar cada uma
+    que NÃO derruba nada como achado a investigar, nunca como ruído (§9.35, §9.39).

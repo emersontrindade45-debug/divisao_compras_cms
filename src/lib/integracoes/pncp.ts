@@ -373,6 +373,58 @@ function chaveCompra(item: PNCPSearchItem): string {
   return `${item.orgao_cnpj}/${item.ano}/${item.numero_sequencial}`;
 }
 
+/** As 27 unidades federativas, no formato que o parâmetro `ufs` aceita. */
+export const UFS_VALIDAS = [
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
+  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+] as const;
+
+/** Esferas administrativas aceitas pelo parâmetro `esferas`. */
+export const ESFERAS_VALIDAS = ["F", "E", "M"] as const;
+
+/** Situações aceitas pelo parâmetro `status`. */
+export const STATUS_VALIDOS = ["encerradas", "recebendo_proposta", "em_julgamento"] as const;
+
+/**
+ * Recorte opcional da busca textual, pedido pelo analista.
+ *
+ * **Todo valor aqui já tem de estar validado pelo chamador.** A API do PNCP
+ * falha de duas formas silenciosas e incompatíveis entre si, medidas em
+ * 2026-08-26 contra o endpoint real:
+ *
+ * - `ufs=XX` (UF inexistente) e `ufs=sp` (minúsculo) devolvem **0 resultados**,
+ *   não erro. Um valor errado vira "nenhuma contratação pública encontrada" —
+ *   e o analista concluiria que o objeto não tem referência no PNCP quando o
+ *   que houve foi um filtro malformado.
+ * - `status=lixo` é **silenciosamente ignorado** (devolve o total sem filtro),
+ *   ou seja o oposto: o analista pensa que recortou e não recortou nada.
+ *
+ * Nenhuma das duas é detectável a posteriori pela resposta. Por isso a validação
+ * é feita na fronteira, com Zod, antes de chegar aqui (ver `lib/assistente`), e
+ * os valores aceitos vivem nas constantes acima.
+ *
+ * **Multivalor não existe**: `ufs=SP,RJ` devolve 0, e não a união. Um filtro por
+ * vez.
+ */
+export interface FiltrosBuscaPNCP {
+  /** Sigla da UF em maiúsculas. Ver `UFS_VALIDAS`. */
+  uf?: string;
+  /** `F` federal, `E` estadual, `M` municipal. Ver `ESFERAS_VALIDAS`. */
+  esfera?: string;
+  /** Situação da contratação. Ver `STATUS_VALIDOS`. */
+  status?: string;
+}
+
+/** Converte os filtros em parâmetros de query, omitindo os não informados. */
+function paramsDosFiltros(filtros: FiltrosBuscaPNCP | undefined): Record<string, string> {
+  if (!filtros) return {};
+  return {
+    ...(filtros.uf ? { ufs: filtros.uf } : {}),
+    ...(filtros.esfera ? { esferas: filtros.esfera } : {}),
+    ...(filtros.status ? { status: filtros.status } : {}),
+  };
+}
+
 /**
  * Busca textual real do PNCP (mesmo endpoint usado pelo site oficial em
  * pncp.gov.br/busca). A API de Consulta (/api/consulta) não suporta texto
@@ -393,6 +445,7 @@ async function buscarPorTexto(
   ctx: ContextoBusca,
   pagina = 1,
   tipo: "edital" | "ata" = "edital",
+  filtros?: FiltrosBuscaPNCP,
 ): Promise<PNCPSearchItem[]> {
   const params = new URLSearchParams({
     q: termo,
@@ -403,6 +456,10 @@ async function buscarPorTexto(
     ordenacao: "relevancia",
     pagina: String(pagina),
     tam_pagina: String(TAMANHO_PAGINA),
+    // Medido: os mesmos filtros valem para os DOIS índices — no de atas,
+    // `ufs=SP` levou 19 atas para 2 e `esferas=M` para 8. É o que faz o recorte
+    // do analista alcançar também as compras que só a ata encontra (P3).
+    ...paramsDosFiltros(filtros),
   });
 
   const url = `${PNCP_SEARCH_BASE_URL}/?${params.toString()}`;
@@ -777,6 +834,7 @@ export function filtrarPorValor(
 export async function buscarContratosPNCP(
   termo: string,
   filtroValor?: FiltroValorPNCP,
+  filtros?: FiltrosBuscaPNCP,
 ): Promise<CandidatoSimilaridade[]> {
   if (!termo.trim()) return [];
 
@@ -789,12 +847,12 @@ export async function buscarContratosPNCP(
     const [paginasEdital, paginasAta] = await Promise.all([
       Promise.all(
         Array.from({ length: PAGINAS_BUSCA_TEXTUAL }, (_, i) =>
-          buscarPorTexto(termo, ctx, i + 1, "edital"),
+          buscarPorTexto(termo, ctx, i + 1, "edital", filtros),
         ),
       ),
       Promise.all(
         Array.from({ length: PAGINAS_BUSCA_ATA }, (_, i) =>
-          buscarPorTexto(termo, ctx, i + 1, "ata"),
+          buscarPorTexto(termo, ctx, i + 1, "ata", filtros),
         ),
       ),
     ]);

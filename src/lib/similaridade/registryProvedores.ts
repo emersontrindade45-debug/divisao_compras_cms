@@ -1,5 +1,5 @@
 import "server-only";
-import { buscarContratosPNCP } from "@/lib/integracoes/pncp";
+import { buscarContratosPNCP, type FiltrosBuscaPNCP } from "@/lib/integracoes/pncp";
 import { buscarPrecosPainelPrecos } from "@/lib/integracoes/painelPrecos";
 import { buscarCandidatosComprasGovContratacoes } from "./provedorComprasGovContratacoes";
 import { buscarCandidatosSinapi } from "./provedorSinapi";
@@ -20,7 +20,19 @@ export interface ProvedorBuscaPublica {
   habilitado: boolean;
   /** Teto de tempo do provedor (ver `comTimeout`): estourar não derruba a busca dos demais. */
   timeoutMs: number;
-  buscar: (termo: string) => Promise<CandidatoSimilaridade[]>;
+  /**
+   * O provedor aplica os `FiltrosBuscaPNCP` (UF, esfera, situação) que o analista
+   * informar? **Hoje só o PNCP aplica** — as demais fontes não têm parâmetro
+   * equivalente na origem.
+   *
+   * O campo existe para que a diferença seja DECLARADA em vez de silenciosa: o
+   * chamador (`lib/assistente`) usa esta lista para avisar o analista de quais
+   * fontes ignoraram o recorte pedido. Sem isso a busca prometeria "só SP" e
+   * devolveria resultado de todo o país por três das quatro fontes, sem nada na
+   * tela indicando (CLAUDE.md §9.40).
+   */
+  aplicaFiltros: boolean;
+  buscar: (termo: string, filtros?: FiltrosBuscaPNCP) => Promise<CandidatoSimilaridade[]>;
 }
 
 // Os dois provedores atuais já respondiam via Promise.all antes do M15; o
@@ -40,12 +52,14 @@ export const REGISTRY_PROVEDORES_PUBLICOS: readonly ProvedorBuscaPublica[] = [
     chave: "pncp",
     habilitado: true,
     timeoutMs: TIMEOUT_PADRAO_MS,
-    buscar: (termo) => buscarContratosPNCP(termo),
+    aplicaFiltros: true,
+    buscar: (termo, filtros) => buscarContratosPNCP(termo, undefined, filtros),
   },
   {
     chave: "painel_precos",
     habilitado: true,
     timeoutMs: TIMEOUT_PADRAO_MS,
+    aplicaFiltros: false,
     buscar: (termo) => buscarPrecosPainelPrecos(termo),
   },
   {
@@ -58,6 +72,7 @@ export const REGISTRY_PROVEDORES_PUBLICOS: readonly ProvedorBuscaPublica[] = [
     chave: "compras_gov_contratacoes",
     habilitado: true,
     timeoutMs: TIMEOUT_PADRAO_MS,
+    aplicaFiltros: false,
     buscar: (termo) => buscarCandidatosComprasGovContratacoes(termo),
   },
   {
@@ -72,6 +87,7 @@ export const REGISTRY_PROVEDORES_PUBLICOS: readonly ProvedorBuscaPublica[] = [
     chave: "sinapi",
     habilitado: true,
     timeoutMs: TIMEOUT_PADRAO_MS,
+    aplicaFiltros: false,
     buscar: (termo) => buscarCandidatosSinapi(termo),
   },
 ];

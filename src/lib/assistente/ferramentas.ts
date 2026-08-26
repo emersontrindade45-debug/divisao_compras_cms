@@ -4,8 +4,17 @@ import { db } from "@/lib/db";
 import { avaliarConformidade } from "@/lib/domain/conformidade";
 import { MIN_FORNECEDORES_PESQUISA_DIRETA } from "@/lib/domain/in65Rules";
 import { CV_ANALISE_CRITICA } from "@/lib/domain/priceStats";
-import { filtrarPorValor } from "@/lib/integracoes/pncp";
-import { buscarCandidatosPublicos } from "@/lib/similaridade/buscarCandidatosPublicos";
+import {
+  filtrarPorValor,
+  UFS_VALIDAS,
+  ESFERAS_VALIDAS,
+  STATUS_VALIDOS,
+  type FiltrosBuscaPNCP,
+} from "@/lib/integracoes/pncp";
+import {
+  buscarCandidatosPublicos,
+  fontesQueIgnoramFiltros,
+} from "@/lib/similaridade/buscarCandidatosPublicos";
 import { ordenarResultadoBusca } from "@/lib/similaridade/ordenarResultadoBusca";
 import { rankearEmLotesParalelos } from "@/lib/similaridade/rankearEmLotesParalelos";
 import { getProvedorIA } from "@/lib/ia";
@@ -81,6 +90,24 @@ export interface Registry {
 /** Erro de argumento inválido: volta ao modelo como resultado, não derruba o turno. */
 class ArgumentosInvalidosError extends Error {}
 
+/**
+ * Monta o recorte a partir dos argumentos do modelo, ou `undefined` quando nada
+ * foi pedido — um objeto vazio não é "sem filtro", é ruído que atravessa três
+ * camadas e obriga cada uma a saber que `{}` não significa nada.
+ */
+function montarFiltros(args: {
+  uf?: string;
+  esfera?: string;
+  status?: string;
+}): FiltrosBuscaPNCP | undefined {
+  const filtros: FiltrosBuscaPNCP = {
+    ...(args.uf ? { uf: args.uf } : {}),
+    ...(args.esfera ? { esfera: args.esfera } : {}),
+    ...(args.status ? { status: args.status } : {}),
+  };
+  return Object.keys(filtros).length > 0 ? filtros : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Schemas dos argumentos (CLAUDE.md §9.12 — tool call de modelo é entrada não
 // confiável e passa por Zod como qualquer outra fronteira).
@@ -105,6 +132,21 @@ const buscarPncpSchema = z
      */
     valorMinimo: z.number().positive().optional(),
     valorMaximo: z.number().positive().optional(),
+    /**
+     * Recorte da busca no PNCP. **Enum fechado de propósito**, e não string
+     * livre: medido em 2026-08-26, o PNCP responde a valor inválido de `ufs`
+     * com **0 resultados em vez de erro** (`ufs=XX` e até `ufs=sp` minúsculo),
+     * e a valor inválido de `status` **ignorando o filtro**. As duas falhas são
+     * silenciosas e opostas, e nenhuma é detectável pela resposta.
+     *
+     * Sem esta validação, um `uf: "São Paulo"` ou `uf: "SP, RJ"` vindo do modelo
+     * viraria "nenhuma contratação pública encontrada", e o analista concluiria
+     * que o objeto não tem referência no PNCP. Com ela, o modelo recebe de volta
+     * a lista de valores aceitos e se corrige (CLAUDE.md §9.12).
+     */
+    uf: z.enum(UFS_VALIDAS).optional(),
+    esfera: z.enum(ESFERAS_VALIDAS).optional(),
+    status: z.enum(STATUS_VALIDOS).optional(),
   })
   .refine(
     (v) => v.valorMinimo === undefined || v.valorMaximo === undefined || v.valorMinimo <= v.valorMaximo,
@@ -601,16 +643,45 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     return ranqueados.map((r) => r.candidato);
   }
 
+  /**
+   * Avisa que o recorte pedido valeu só para parte das fontes.
+   *
+   * Sem isto a busca prometeria "só SP" e devolveria resultado nacional por três
+   * das quatro fontes, sem nada na tela indicando — o modo de falha da §9.40, em
+   * que a interface promete o que o código não faz. Só o PNCP tem parâmetro de
+   * UF/esfera/situação na origem; as demais não têm equivalente.
+   */
+  function avisoRecorteParcial(filtros?: FiltrosBuscaPNCP): string {
+    const pedidos = [
+      filtros?.uf ? `UF ${filtros.uf}` : null,
+      filtros?.esfera ? `esfera ${filtros.esfera}` : null,
+      filtros?.status ? `situação ${filtros.status}` : null,
+    ].filter((x): x is string => x !== null);
+    if (pedidos.length === 0) return "";
+
+    const ignoram = fontesQueIgnoramFiltros();
+    if (ignoram.length === 0) return "";
+    return (
+      ` ATENÇÃO: o recorte (${pedidos.join(", ")}) foi aplicado apenas ao PNCP. ` +
+      `As demais fontes (${ignoram.join(", ")}) não têm esse filtro na origem e ` +
+      "podem ter devolvido resultado de fora do recorte — diga isso ao usuário " +
+      "em vez de afirmar que todos os candidatos respeitam o filtro."
+    );
+  }
+
   async function buscarPncp(
     termo: string,
     itemIdSugerido: string | null,
     valorMinimo?: number,
     valorMaximo?: number,
+    filtros?: FiltrosBuscaPNCP,
   ) {
     const temFiltroValor = valorMinimo !== undefined || valorMaximo !== undefined;
+    const temRecorte = Boolean(filtros?.uf || filtros?.esfera || filtros?.status);
     const item = await itemDaBusca(itemIdSugerido);
     const buscados = await buscarCandidatosPublicos(termo, {
       timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
+      ...(filtros ? { filtros } : {}),
     });
     const filtrados = filtrarPorValor(buscados, { valorMinimo, valorMaximo });
 
@@ -651,9 +722,14 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         ? temFiltroValor
           ? "Nenhuma fonte pública devolveu nada para este termo dentro da faixa de valor " +
             "informada. Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
-          : "Nenhuma fonte pública (PNCP, Painel de Preços, Compras.gov, SINAPI) devolveu nada " +
-            "para este termo. Tente outro recorte: troque o substantivo-núcleo, remova " +
-            "qualificadores ou use o nome comercial do produto."
+          : temRecorte
+            ? "Nenhuma fonte pública devolveu nada para este termo COM O RECORTE PEDIDO " +
+              "(UF/esfera/situação). Antes de mexer no termo, tente remover o recorte: ele " +
+              "reduz muito o universo — filtrar por uma UF sozinha costuma cortar mais de 85% " +
+              "dos editais."
+            : "Nenhuma fonte pública (PNCP, Painel de Preços, Compras.gov, SINAPI) devolveu nada " +
+              "para este termo. Tente outro recorte: troque o substantivo-núcleo, remova " +
+              "qualificadores ou use o nome comercial do produto."
         : `A busca encontrou ${priorizados.length} itens, mas NENHUM é comparável ao objeto ` +
           "deste item — a checagem de aderência (descrição, especificação e unidade) reprovou " +
           "todos. Isso quase sempre significa que o termo casou por uma palavra ambígua (ex.: " +
@@ -662,7 +738,12 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           "e um qualificador técnico que só exista nesse domínio.";
 
       return {
-        resposta: { termo, total: 0, candidatos: [], observacao },
+        resposta: {
+          termo,
+          total: 0,
+          candidatos: [],
+          observacao: observacao + avisoRecorteParcial(filtros),
+        },
         sugestoes: [] as CandidatoSugerido[],
       };
     }
@@ -683,7 +764,8 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           "Estes candidatos já apareceram na tela do usuário, cada um com link e botão para " +
           "adicionar à lista do processo. Você NÃO registra nada: comente o que achou de cada " +
           "um (por que é ou não comparável) e deixe a decisão com o servidor. Os valores vêm " +
-          "da fonte — não os repita de memória nem estime score.",
+          "da fonte — não os repita de memória nem estime score." +
+          avisoRecorteParcial(filtros),
       },
       sugestoes: catalogados.map((c) =>
         paraSugestao(c.id, catalogo.get(c.id)!, {
@@ -1011,7 +1093,8 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       descricao:
         "Busca contratações e preços públicos — a fonte prioritária da IN 65/2021 — em todas as " +
         "fontes conectadas de uma vez (PNCP, Painel de Preços, catálogo CATMAT/CATSER do " +
-        "Compras.gov e SINAPI). Devolve candidatos com id, valor unitário, órgão e data, já " +
+        "Compras.gov e SINAPI), cobrindo no PNCP tanto editais quanto atas de registro de " +
+        "preços. Devolve candidatos com id, valor unitário, órgão e data, já " +
         "deduplicados entre fontes. Contratações da própria Câmara já são excluídas. Varie o " +
         "termo entre chamadas em vez de repetir o mesmo. Cada candidato já aparece na tela do " +
         "usuário como cartão com link e botão de adicionar — você não registra nada, apenas " +
@@ -1042,6 +1125,31 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           valorMaximo: {
             type: "number",
             description: "Opcional, junto de valorMinimo. Mesmo critério: preço homologado.",
+          },
+          uf: {
+            type: "string",
+            enum: [...UFS_VALIDAS],
+            description:
+              "Opcional. Restringe ao estado, ex.: 'SP'. UMA sigla só — a API não aceita " +
+              "lista ('SP,RJ' devolve zero). Recorte forte: filtrar por uma UF costuma cortar " +
+              "mais de 85% dos editais, então use quando o usuário pedir referência regional, " +
+              "não por padrão. Vale só para o PNCP; as outras fontes ignoram.",
+          },
+          esfera: {
+            type: "string",
+            enum: [...ESFERAS_VALIDAS],
+            description:
+              "Opcional. 'M' municipal, 'E' estadual, 'F' federal. Útil quando o porte do " +
+              "órgão importa para a comparação — contratação municipal costuma ser a " +
+              "referência mais próxima da Câmara. Vale só para o PNCP.",
+          },
+          status: {
+            type: "string",
+            enum: [...STATUS_VALIDOS],
+            description:
+              "Opcional. 'encerradas' restringe a certames já concluídos. Raramente " +
+              "necessário: a busca já descarta sozinha todo edital sem julgamento, então " +
+              "este filtro só ajuda a estreitar mais. Vale só para o PNCP.",
           },
         },
         required: ["termo"],
@@ -1139,6 +1247,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
             args.itemId ?? null,
             args.valorMinimo,
             args.valorMaximo,
+            montarFiltros(args),
           );
           // As sugestões viajam FORA do conteúdo devolvido ao modelo: elas são
           // para a tela e para a aprovação por clique, não para o prompt.
