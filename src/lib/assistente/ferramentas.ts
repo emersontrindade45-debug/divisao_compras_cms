@@ -213,6 +213,96 @@ function resolverProcesso(ctx: ContextoFerramentas, informado?: string): string 
   return informado;
 }
 
+/**
+ * Quantos candidatos com a MESMA descrição podem ocupar a tela de uma busca.
+ *
+ * Existe porque descrição de item de compra pública vem de catálogo
+ * (CATMAT/CATSER): a mesma frase é reusada por dezenas de órgãos, e sem teto um
+ * único texto toma a tela inteira. Medido em produção em 2026-08-26, na busca
+ * por "link de internet backbone 900 mbps": dos 24 candidatos exibidos, **21
+ * eram a frase "TAXA DE INSTALAÇÃO LINK DE INTERNET - STFC (BANDA LARGA)"** —
+ * 1 descrição distinta, 23 URLs distintas, 22 órgãos distintos. O analista
+ * descartou os 21 à mão, um a cada ~4 segundos.
+ *
+ * **Por que 3 e não 1.** Colapsar para um só seria mais limpo na tela e estaria
+ * errado no domínio: 22 órgãos que compraram o mesmo item de catálogo por
+ * preços diferentes SÃO a série de preços que a pesquisa procura — no caso
+ * medido os valores iam de R$ 0,01 a R$ 114.000,00. Com teto de 3, o analista
+ * enxerga que existe dispersão (o sinal que decide se o termo serve) sem pagar
+ * 21 cliques por ela, e nenhuma vaga é gasta às cegas: o resto continua no
+ * `total` e é anunciado na `observacao`.
+ */
+const MAX_POR_DESCRICAO = 3;
+
+/**
+ * Chave de comparação de descrição de item: sem acento, sem caixa, sem
+ * pontuação, espaços colapsados.
+ *
+ * A pontuação precisa sair porque a mesma compra publica a mesma frase com e
+ * sem ponto final — "ACESSO INTERNET - LINK DEDICADO 600 MBPS." e "ACESSO
+ * INTERNET - LINK DEDICADO 600 MBPS" apareceram lado a lado no mesmo resultado,
+ * e com `trim().toLowerCase()` sozinho contavam como itens diferentes.
+ */
+function chaveDescricao(descricao: string): string {
+  return descricao
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Tira da lista as repetições que não acrescentam decisão ao analista, em duas
+ * regras distintas — a ordem relativa do que sobra é preservada.
+ *
+ * 1. **Duplicata exata** — mesma descrição, mesmo órgão e mesmo valor. É uma
+ *    observação de preço só, publicada mais de uma vez. Medido no mesmo
+ *    resultado de 2026-08-26: "ACESSO INTERNET - LINK DEDICADO 600 MBPS" a
+ *    R$ 320,12 do município de Pará de Minas apareceu 3 vezes, em dois editais
+ *    e três números de item. Promovidos os 3, o mesmo preço entraria 3 vezes na
+ *    série e puxaria média e mediana — é defeito de conformidade, não de tela.
+ *    A URL fica FORA desta chave de propósito: era só ela que distinguia os 3.
+ * 2. **Enchente de catálogo** — acima de `MAX_POR_DESCRICAO` candidatos com a
+ *    mesma descrição, o excedente sai da tela ainda que o preço difira.
+ *
+ * **Roda antes do corte de `MAX_SUGESTOES_POR_BUSCA`**, nunca depois: aplicado
+ * ao que já foi truncado, o filtro só reorganizaria as sobras e não liberaria
+ * vaga nenhuma para candidato inédito — é a mesma armadilha de ordem que a
+ * demoção de descartados pagou uma iteração para aprender (CLAUDE.md §9.91).
+ * Roda também antes do ranqueamento por IA, então as 21 duplicatas deixam de
+ * ser enviadas ao modelo: o corte fica mais barato de quebra.
+ */
+function consolidarDuplicatas(candidatos: CandidatoSimilaridade[]): {
+  candidatos: CandidatoSimilaridade[];
+  suprimidos: number;
+} {
+  const vistosExatos = new Set<string>();
+  const porDescricao = new Map<string, number>();
+  const mantidos: CandidatoSimilaridade[] = [];
+
+  for (const c of candidatos) {
+    const chave = chaveDescricao(c.fonteDescricao);
+    // Sem descrição não há como julgar repetição: passa direto, em vez de todos
+    // caírem no mesmo balde vazio e 2 de cada 3 sumirem.
+    if (chave === "") {
+      mantidos.push(c);
+      continue;
+    }
+
+    const chaveExata = `${chave}|${chaveDescricao(c.fonteOrgaoOuId ?? "")}|${c.valorUnitario ?? ""}`;
+    if (vistosExatos.has(chaveExata)) continue;
+    vistosExatos.add(chaveExata);
+
+    const usados = porDescricao.get(chave) ?? 0;
+    if (usados >= MAX_POR_DESCRICAO) continue;
+    porDescricao.set(chave, usados + 1);
+    mantidos.push(c);
+  }
+
+  return { candidatos: mantidos, suprimidos: candidatos.length - mantidos.length };
+}
+
 export function montarRegistry(ctx: ContextoFerramentas): Registry {
   /**
    * Candidatos devolvidos pelas buscas deste turno, por id curto. É o que torna
@@ -502,20 +592,35 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
    * textual fraca — ver histórico do commit), este não tem como confundir
    * "texto parecido pouco" com "já julgado ruim".
    *
-   * **A chave é (URL do edital + descrição do item), não a URL sozinha.**
-   * `fonteUrl` de um candidato do PNCP é a URL do EDITAL
-   * (`/app/editais/{cnpj}/{ano}/{seq}`), compartilhada por todos os itens da
-   * mesma compra — ver `montarUrlEdital` em `integracoes/pncp.ts`. Enquanto a
-   * chave era só a URL, descartar UM item de uma ata demovia todos os irmãos
-   * dele junto, inclusive os bons: numa ata de registro de preços com dezenas
-   * de itens comparáveis, um único descarte empurrava a ata inteira para o fim
-   * da lista. `numeroItem` seria a chave exata, mas `ResultadoSimilaridade` não
-   * tem essa coluna e criá-la exigiria migration (CLAUDE.md §9.19/§9.46); a
-   * descrição já distingue itens dentro do mesmo edital com as colunas que
-   * existem hoje.
+   * **A chave é só a descrição normalizada — a URL saiu dela em 2026-08-26.**
+   * A chave passou por três desenhos, e cada mudança corrigiu o excesso da
+   * anterior:
+   *
+   * 1. Só `fonteUrl`: como ela é a URL do EDITAL
+   *    (`/app/editais/{cnpj}/{ano}/{seq}`, ver `montarUrlEdital` em
+   *    `integracoes/pncp.ts`), é compartilhada por todos os itens da mesma
+   *    compra — descartar UM item de uma ata demovia os irmãos bons junto.
+   * 2. `fonteUrl` + descrição: consertou o item 1 e criou o oposto — o descarte
+   *    parava de valer entre compras. Medido em produção neste processo: o
+   *    analista descartou **21 cards com a descrição idêntica**
+   *    "TAXA DE INSTALAÇÃO LINK DE INTERNET - STFC (BANDA LARGA)", um a cada
+   *    ~4 segundos, e como vinham de 22 órgãos diferentes cada um tinha URL
+   *    própria e chave própria. Nenhum dos 21 cliques ensinava nada ao sistema:
+   *    no termo seguinte a mesma frase voltaria inteira.
+   * 3. Só a descrição normalizada (hoje): o descarte passa a valer entre
+   *    órgãos, que é o que o analista quis dizer ao descartar — "este texto de
+   *    item não é comparável", não "este edital não é comparável".
+   *
+   * Voltar à falha do item 1 não é risco: irmãos dentro do mesmo edital têm
+   * descrições DIFERENTES (é o que os distingue), então a URL não fazia
+   * trabalho nenhum ali que a descrição já não fizesse.
+   *
+   * A normalização (`chaveDescricao`) é o que faz "ACESSO INTERNET - LINK
+   * DEDICADO 600 MBPS." e a mesma frase sem o ponto final contarem como uma —
+   * as duas grafias apareceram no mesmo resultado de busca.
    */
-  function chaveDescarte(fonteUrl: string | null, fonteDescricao: string): string {
-    return `${fonteUrl ?? ""} ${fonteDescricao.trim().toLowerCase()}`;
+  function chaveDescarte(fonteDescricao: string): string {
+    return chaveDescricao(fonteDescricao);
   }
 
   async function demoverJaDescartados(
@@ -525,16 +630,24 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     if (!processoId || candidatos.length === 0) return candidatos;
 
     const descartados = await db.resultadoSimilaridade.findMany({
-      where: { item: { processoId }, descartado: true, fonteUrl: { not: null } },
-      select: { fonteUrl: true, fonteDescricao: true },
+      where: { item: { processoId }, descartado: true },
+      select: { fonteDescricao: true },
     });
+    // Chave vazia casaria com todo candidato sem descrição: um único descarte
+    // sem texto demoveria a tela inteira. Fora do Set, não casa com nada.
+    //
+    // Guarda defensiva, e assumidamente sem teste: a mutação que a remove deixa
+    // a suíte verde, porque a ordenação por aderência já joga descrição vazia
+    // para o fim — não há posição de onde ela possa ser demovida. Fica porque
+    // custa um `filter` e porque essa premissa é da ORDENAÇÃO, não desta função
+    // (CLAUDE.md §9.35: dizer qual experimento sustenta a decisão).
     const chavesDescartadas = new Set(
-      descartados.map((d) => chaveDescarte(d.fonteUrl, d.fonteDescricao)),
+      descartados.map((d) => chaveDescarte(d.fonteDescricao)).filter((k) => k !== ""),
     );
     if (chavesDescartadas.size === 0) return candidatos;
 
     const foiDescartado = (c: CandidatoSimilaridade) =>
-      Boolean(c.fonteUrl) && chavesDescartadas.has(chaveDescarte(c.fonteUrl ?? null, c.fonteDescricao));
+      chavesDescartadas.has(chaveDescarte(c.fonteDescricao));
 
     // Todos os inéditos primeiro, os já descartados depois. Como o chamador só
     // corta em `MAX_SUGESTOES_POR_BUSCA` DEPOIS desta função, na prática cada
@@ -644,6 +757,24 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
   }
 
   /**
+   * Conta ao modelo o que a consolidação tirou da tela.
+   *
+   * Sem isto o modelo veria 9 candidatos onde a busca achou 24 e concluiria que
+   * o termo rendeu pouco — trocaria um termo que estava funcionando. Pior, se
+   * ele mencionasse "24 achados" pelo `total`, o analista contaria 9 na tela e
+   * não teria como saber o que houve com os outros: a tela prometendo o que não
+   * mostra é o modo de falha da §9.40.
+   */
+  function avisoDuplicatas(suprimidos: number): string {
+    if (suprimidos <= 0) return "";
+    return (
+      ` ${suprimidos} candidato(s) repetido(s) foram omitidos da tela: descrição idêntica à de ` +
+      "outro já listado (item de catálogo reusado por vários órgãos) ou mesma descrição, mesmo " +
+      "órgão e mesmo valor. Diga isso ao usuário — não é a busca que rendeu pouco."
+    );
+  }
+
+  /**
    * Avisa que o recorte pedido valeu só para parte das fontes.
    *
    * Sem isto a busca prometeria "só SP" e devolveria resultado nacional por três
@@ -702,8 +833,12 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     // corte, que é o comportamento que o descarte promete.
     const priorizados = await demoverJaDescartados(ctx.processoId, ordenados);
 
+    // Depois da demoção, para que o representante de cada descrição seja o
+    // candidato ainda não julgado, e não um que o analista já descartou.
+    const consolidados = consolidarDuplicatas(priorizados);
+
     const encontrados = await filtrarPorRelevanciaIA(
-      priorizados.slice(0, MAX_SUGESTOES_POR_BUSCA),
+      consolidados.candidatos.slice(0, MAX_SUGESTOES_POR_BUSCA),
       item?.itemTR ?? null,
       item?.natureza ?? null,
     );
@@ -765,6 +900,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           "adicionar à lista do processo. Você NÃO registra nada: comente o que achou de cada " +
           "um (por que é ou não comparável) e deixe a decisão com o servidor. Os valores vêm " +
           "da fonte — não os repita de memória nem estime score." +
+          avisoDuplicatas(consolidados.suprimidos) +
           avisoRecorteParcial(filtros),
       },
       sugestoes: catalogados.map((c) =>

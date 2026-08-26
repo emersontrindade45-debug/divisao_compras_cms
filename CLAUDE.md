@@ -1240,3 +1240,34 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      teste verde sobre um comportamento que derruba produção é pior que teste nenhum, porque
      protege o defeito de ser mexido. Ao corrigir um bug de orçamento, ler o teste existente
      perguntando "ele afirma o comportamento correto ou o atual?".
+101. **Descrição de item de compra pública vem de catálogo: a mesma frase é reusada por dezenas de
+     órgãos, e sem teto por descrição um único texto toma a tela inteira.** Medido em produção em
+     2026-08-26 (processo 1829/2024): a busca por "link de internet backbone 900 mbps" exibiu 24
+     candidatos, dos quais **21 eram a frase "TAXA DE INSTALAÇÃO LINK DE INTERNET - STFC (BANDA
+     LARGA)"** — 1 descrição distinta, 23 URLs distintas, 22 órgãos distintos, valores de R$ 0,01 a
+     R$ 114.000,00. O analista descartou os 21 à mão, um a cada ~4 segundos, e o trabalho se perdeu
+     inteiro (ver corolário). O teto **não pode ser 1**: 22 órgãos que compraram o mesmo item de
+     catálogo por preços diferentes SÃO a série de preços que a pesquisa procura — colapsar para um
+     esconderia a dispersão, que é justamente o sinal que decide se o termo serve. `MAX_POR_DESCRICAO
+     = 3` mantém o sinal e devolve 21 vagas. Regra geral: ao exibir resultado de busca em fonte com
+     catálogo padronizado (CATMAT/CATSER/SINAPI), perguntar **quantas vagas da tela um único texto
+     pode ocupar** — a resposta nunca é "todas", e também nunca é "uma".
+     **Corolário sobre duplicata exata vs. dispersão:** são regras diferentes e precisam de chaves
+     diferentes. Mesma descrição + mesmo órgão + mesmo valor é UMA observação publicada duas vezes
+     (medido: "ACESSO INTERNET - LINK DEDICADO 600 MBPS" a R$ 320,12 do mesmo município, em dois
+     editais e três números de item) — promovidos os três, o mesmo preço entra três vezes na série e
+     puxa média e mediana, que é defeito de conformidade, não de tela. A URL fica FORA dessa chave
+     de propósito: era só ela que distinguia os três. Já mesma descrição + mesmo órgão + valores
+     DIFERENTES são duas observações e ficam.
+     **Corolário sobre a chave de descarte, que é o mesmo erro no eixo do tempo:** enquanto
+     `chaveDescarte` era `fonteUrl + descrição`, descartar um card não ensinava nada sobre os 21
+     irmãos vindos de outros órgãos — cada um tinha URL própria, logo chave própria, e no termo
+     seguinte a mesma frase voltava inteira. Ao descartar, o analista está dizendo "este TEXTO DE
+     ITEM não é comparável", não "este edital não é comparável"; a chave tem de refletir o que a
+     ação significa. Passar a chave para só a descrição normalizada não reabre o defeito que fez a
+     URL entrar nela (descartar um item de uma ata demovia os irmãos bons), porque irmãos dentro do
+     mesmo edital têm descrições DIFERENTES — é o que os distingue.
+     **E a normalização não é detalhe:** "ACESSO INTERNET - LINK DEDICADO 600 MBPS." e a mesma frase
+     sem o ponto final apareceram lado a lado no MESMO resultado de busca. Com `trim().toLowerCase()`
+     sozinho elas contam como itens diferentes e toda a consolidação vaza. Tirar acento, caixa e
+     pontuação, e colapsar espaço.

@@ -298,16 +298,16 @@ describe("registry de ferramentas do assistente", () => {
 
   describe("buscar_pncp — descartados não somem, só perdem prioridade", () => {
     it("empurra candidato já descartado para o fim, sem excluí-lo", async () => {
+      // Descrições distintas de propósito: candidatos que só diferem pela URL
+      // são duplicatas e a consolidação os funde — o que se testa aqui é a
+      // ORDEM, então cada um precisa sobreviver a ela.
       mocks.buscarCandidatosPublicos.mockResolvedValue([
-        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/A" }),
-        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/B" }),
-        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/C" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/A", fonteDescricao: "Cadeira giratória A" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/B", fonteDescricao: "Cadeira giratória B" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/C", fonteDescricao: "Cadeira giratória C" }),
       ]);
       mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
-        {
-          fonteUrl: "https://pncp.gov.br/app/editais/A",
-          fonteDescricao: "Cadeira giratória ergonômica",
-        },
+        { fonteDescricao: "Cadeira giratória A" },
       ]);
       const registry = montarRegistry(CTX_PROCESSO);
 
@@ -331,14 +331,14 @@ describe("registry de ferramentas do assistente", () => {
       // 26 candidatos, o PRIMEIRO já descartado: sem liberar vaga, ele ocuparia
       // uma das 25 e o inédito de índice 25 ficaria de fora.
       const muitos = Array.from({ length: 26 }, (_, i) =>
-        candidato({ fonteUrl: `https://pncp.gov.br/app/editais/${i}` }),
+        candidato({
+          fonteUrl: `https://pncp.gov.br/app/editais/${i}`,
+          fonteDescricao: `Cadeira giratória modelo ${i}`,
+        }),
       );
       mocks.buscarCandidatosPublicos.mockResolvedValue(muitos);
       mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
-        {
-          fonteUrl: "https://pncp.gov.br/app/editais/0",
-          fonteDescricao: "Cadeira giratória ergonômica",
-        },
+        { fonteDescricao: "Cadeira giratória modelo 0" },
       ]);
       const registry = montarRegistry(CTX_PROCESSO);
 
@@ -350,6 +350,126 @@ describe("registry de ferramentas do assistente", () => {
       expect(urls).toContain("https://pncp.gov.br/app/editais/25");
       // E o descartado não gastou vaga.
       expect(urls).not.toContain("https://pncp.gov.br/app/editais/0");
+    });
+
+    // -----------------------------------------------------------------------
+    // Consolidação de duplicatas. Os dois casos vêm de um resultado real de
+    // produção (processo 1829/2024, 2026-08-26), onde 21 dos 24 cards exibidos
+    // eram a MESMA frase de catálogo e o analista os descartou um a um.
+    // -----------------------------------------------------------------------
+
+    it("limita a MAX_POR_DESCRICAO cards com a mesma descrição, liberando as vagas", async () => {
+      // "TAXA DE INSTALAÇÃO LINK DE INTERNET - STFC (BANDA LARGA)": 1 descrição,
+      // 22 órgãos, valores de R$ 0,01 a R$ 114.000,00. Antes, os 22 tomavam a
+      // tela e os candidatos inéditos atrás deles nunca apareciam.
+      // 26 repetições, uma a mais que o corte de MAX_SUGESTOES_POR_BUSCA: é o
+      // que torna a ORDEM observável. Consolidando antes do corte, o inédito
+      // entra; consolidando depois, as 25 primeiras vagas já foram gastas com
+      // repetição e ele nunca chega à tela (CLAUDE.md §9.91).
+      const enchente = Array.from({ length: 26 }, (_, i) =>
+        candidato({
+          fonteDescricao: "TAXA DE INSTALAÇÃO LINK DE INTERNET - STFC (BANDA LARGA)",
+          fonteOrgaoOuId: `Município ${i}`,
+          fonteUrl: `https://pncp.gov.br/app/editais/taxa-${i}`,
+          valorUnitario: 100 + i,
+        }),
+      );
+      // Casa o termo mais fracamente que a enchente, então fica no fim da
+      // ordenação por aderência — que é a posição em que o corte o mataria.
+      const inedito = candidato({
+        fonteDescricao: "Link dedicado de internet 900 Mbps via fibra óptica",
+        fonteUrl: "https://pncp.gov.br/app/editais/inedito",
+      });
+      mocks.buscarCandidatosPublicos.mockResolvedValue([...enchente, inedito]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "taxa de instalação link de internet stfc",
+      });
+
+      const urls = (resposta.candidatos as Array<{ url: string }>).map((c) => c.url);
+      const daEnchente = urls.filter((u) => u.includes("/taxa-"));
+      expect(daEnchente).toHaveLength(3);
+      // A vaga liberada é o ponto: o inédito estava em 27º.
+      expect(urls).toContain("https://pncp.gov.br/app/editais/inedito");
+      // E o modelo é avisado, senão diria que a busca rendeu 4 quando achou 27.
+      expect(resposta.observacao).toContain("23 candidato(s) repetido(s)");
+    });
+
+    it("funde duplicata exata — mesma descrição, mesmo órgão e mesmo valor", async () => {
+      // Caso real: "ACESSO INTERNET - LINK DEDICADO 600 MBPS" a R$ 320,12 do
+      // mesmo município, em dois editais e três números de item. Promovidos os
+      // três, o MESMO preço entraria três vezes na série e puxaria a mediana.
+      // Note o ponto final numa das grafias: só a normalização as une.
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({
+          fonteDescricao: "ACESSO INTERNET - LINK DEDICADO 600 MBPS.",
+          fonteOrgaoOuId: "MUNICIPIO DE PARA DE MINAS",
+          valorUnitario: 320.12,
+          fonteUrl: "https://pncp.gov.br/app/editais/18313817000185/2025/147",
+        }),
+        candidato({
+          fonteDescricao: "ACESSO INTERNET - LINK DEDICADO 600 MBPS",
+          fonteOrgaoOuId: "MUNICIPIO DE PARA DE MINAS",
+          valorUnitario: 320.12,
+          fonteUrl: "https://pncp.gov.br/app/editais/18313817000185/2025/146",
+        }),
+        candidato({
+          fonteDescricao: "ACESSO INTERNET - LINK DEDICADO 600 MBPS.",
+          fonteOrgaoOuId: "MUNICIPIO DE PARA DE MINAS",
+          valorUnitario: 320.12,
+          fonteUrl: "https://pncp.gov.br/app/editais/18313817000185/2025/146",
+        }),
+      ]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "link dedicado" });
+
+      expect(resposta.candidatos).toHaveLength(1);
+    });
+
+    it("mantém preços diferentes do mesmo órgão — dispersão não é duplicata", async () => {
+      // A fusão exata não pode virar fusão por órgão: dois preços distintos são
+      // duas observações, e é delas que a série de preços é feita.
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({ fonteDescricao: "Link dedicado 600 Mbps", fonteOrgaoOuId: "Município X", valorUnitario: 320.12 }),
+        candidato({ fonteDescricao: "Link dedicado 600 Mbps", fonteOrgaoOuId: "Município X", valorUnitario: 480.0 }),
+      ]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "link dedicado" });
+
+      expect(resposta.candidatos).toHaveLength(2);
+    });
+
+    it("descarte vale entre órgãos: uma descrição descartada demove a família toda", async () => {
+      // O defeito que custou 21 cliques: com a URL na chave, cada um dos 22
+      // órgãos tinha chave própria e nenhum descarte valia para o seguinte.
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({
+          fonteDescricao: "TAXA DE INSTALAÇÃO LINK DE INTERNET - STFC (BANDA LARGA)",
+          fonteOrgaoOuId: "Município A",
+          fonteUrl: "https://pncp.gov.br/app/editais/taxa-A",
+          valorUnitario: 98,
+        }),
+        candidato({
+          fonteDescricao: "Link dedicado de internet 900 Mbps",
+          fonteUrl: "https://pncp.gov.br/app/editais/bom",
+        }),
+      ]);
+      // O analista descartou a taxa uma vez, num edital de OUTRO órgão.
+      mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+        { fonteDescricao: "taxa de instalação link de internet - stfc (banda larga)" },
+      ]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "link dedicado" });
+
+      const urls = (resposta.candidatos as Array<{ url: string }>).map((c) => c.url);
+      expect(urls).toEqual([
+        "https://pncp.gov.br/app/editais/bom",
+        "https://pncp.gov.br/app/editais/taxa-A",
+      ]);
     });
 
     it("aplica o corte de relevância da IA, tirando o ruído da tela", async () => {
@@ -407,8 +527,8 @@ describe("registry de ferramentas do assistente", () => {
     it("mantém a ordem lexical quando o ranqueamento de IA falha por inteiro", async () => {
       // Falha de infraestrutura não pode esvaziar a tela do analista.
       mocks.buscarCandidatosPublicos.mockResolvedValue([
-        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/A" }),
-        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/B" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/A", fonteDescricao: "Cadeira giratória A" }),
+        candidato({ fonteUrl: "https://pncp.gov.br/app/editais/B", fonteDescricao: "Cadeira giratória B" }),
       ]);
       mocks.rankearCandidatos.mockRejectedValue(new Error("OpenAI fora do ar"));
       vi.spyOn(console, "error").mockImplementation(() => {});
@@ -437,17 +557,17 @@ describe("registry de ferramentas do assistente", () => {
       expect(resposta.candidatos).toHaveLength(1);
     });
 
-    it("consulta os descartes só deste processo, com URL não nula", async () => {
+    it("consulta os descartes só deste processo, pela descrição", async () => {
       const registry = montarRegistry(CTX_PROCESSO);
 
       await chamar(registry, "buscar_pncp", { termo: "cadeira" });
 
       expect(mocks.db.resultadoSimilaridade.findMany).toHaveBeenCalledWith({
-        where: { item: { processoId: "proc-1" }, descartado: true, fonteUrl: { not: null } },
-        // A descrição entra na chave porque `fonteUrl` é a URL do EDITAL,
-        // compartilhada por todos os itens da mesma compra: sem ela, descartar
-        // um item demovia os irmãos bons junto.
-        select: { fonteUrl: true, fonteDescricao: true },
+        where: { item: { processoId: "proc-1" }, descartado: true },
+        // Só a descrição: a URL saiu da chave para o descarte valer entre
+        // órgãos. Com ela, 21 cards de descrição idêntica vindos de 22 órgãos
+        // tinham 21 chaves diferentes e nenhum dos descartes ensinava nada.
+        select: { fonteDescricao: true },
       });
     });
 
