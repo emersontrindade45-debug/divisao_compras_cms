@@ -12,7 +12,10 @@ vi.mock("@/lib/db", () => ({
   db: { itemCatalogoReferencia: { findMany: vi.fn().mockResolvedValue([]) } },
 }));
 
-import { buscarCandidatosPublicos } from "../buscarCandidatosPublicos";
+import {
+  buscarCandidatosPublicos,
+  buscarCandidatosPublicosComDiagnostico,
+} from "../buscarCandidatosPublicos";
 import { REGISTRY_PROVEDORES_PUBLICOS } from "../registryProvedores";
 import * as pncp from "@/lib/integracoes/pncp";
 import * as painelPrecos from "@/lib/integracoes/painelPrecos";
@@ -71,6 +74,39 @@ describe("buscarCandidatosPublicos", () => {
     expect(resultado).toEqual([candidatoPainel]);
     expect(erroSpy).toHaveBeenCalled();
     erroSpy.mockRestore();
+  });
+
+  // O `console.error` acima era o ÚNICO registro de que uma fonte não
+  // respondeu, e ninguém lê log durante uma pesquisa de preços. Estes casos
+  // provam que a informação chega a quem pode agir sobre ela — asserção na
+  // camada que o assistente de fato consome, não numa intermediária
+  // (CLAUDE.md §9.99).
+  describe("diagnóstico de falha das fontes", () => {
+    it("nomeia o provedor que falhou", async () => {
+      vi.spyOn(pncp, "buscarContratosPNCP").mockRejectedValue(
+        new pncp.ErroColetaPNCP("cadeira", 6, false),
+      );
+      vi.spyOn(painelPrecos, "buscarPrecosPainelPrecos").mockResolvedValue([]);
+      const erroSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const { candidatos, provedoresQueFalharam } =
+        await buscarCandidatosPublicosComDiagnostico("cadeira");
+
+      expect(candidatos).toEqual([]);
+      expect(provedoresQueFalharam).toContain("pncp");
+      erroSpy.mockRestore();
+    });
+
+    it("devolve lista de falhas vazia quando todas as fontes respondem", async () => {
+      vi.spyOn(pncp, "buscarContratosPNCP").mockResolvedValue([]);
+      vi.spyOn(painelPrecos, "buscarPrecosPainelPrecos").mockResolvedValue([]);
+
+      const { provedoresQueFalharam } = await buscarCandidatosPublicosComDiagnostico("cadeira");
+
+      // Sem esta asserção, marcar todo provedor como falho passaria batido e o
+      // assistente reportaria erro de rede em toda busca legitimamente vazia.
+      expect(provedoresQueFalharam).toEqual([]);
+    });
   });
 
   it("aplica timeout por provedor: um provedor que nunca resolve não trava a busca", async () => {

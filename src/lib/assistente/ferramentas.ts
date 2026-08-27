@@ -12,7 +12,7 @@ import {
   type FiltrosBuscaPNCP,
 } from "@/lib/integracoes/pncp";
 import {
-  buscarCandidatosPublicos,
+  buscarCandidatosPublicosComDiagnostico,
   fontesQueIgnoramFiltros,
 } from "@/lib/similaridade/buscarCandidatosPublicos";
 import { ordenarResultadoBusca } from "@/lib/similaridade/ordenarResultadoBusca";
@@ -810,10 +810,11 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     const temFiltroValor = valorMinimo !== undefined || valorMaximo !== undefined;
     const temRecorte = Boolean(filtros?.uf || filtros?.esfera || filtros?.status);
     const item = await itemDaBusca(itemIdSugerido);
-    const buscados = await buscarCandidatosPublicos(termo, {
-      timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
-      ...(filtros ? { filtros } : {}),
-    });
+    const { candidatos: buscados, provedoresQueFalharam } =
+      await buscarCandidatosPublicosComDiagnostico(termo, {
+        timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
+        ...(filtros ? { filtros } : {}),
+      });
     const filtrados = filtrarPorValor(buscados, { valorMinimo, valorMaximo });
 
     // Ordenação lexical primeiro: é ela que decide QUAIS candidatos valem a
@@ -853,7 +854,21 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       // devolveu nada" quando a busca achou 25 e a IA rejeitou todos seria
       // falso, e mandaria o modelo trocar o termo por outro igualmente amplo.
       const buscaVeioVazia = priorizados.length === 0;
-      const observacao = buscaVeioVazia
+      // Terceira causa, e a mais perigosa das três, porque é a única em que a
+      // resposta honesta é "não sei": as fontes não responderam. Vem primeiro
+      // porque qualquer das outras mensagens seria uma afirmação sobre o
+      // mercado que a busca não tem base para fazer — em produção o assistente
+      // dizia "nenhum contrato encontrado no PNCP" e o analista concluía que o
+      // objeto não tem referência de preço pública (CLAUDE.md §9.93).
+      const observacao =
+        buscaVeioVazia && provedoresQueFalharam.length > 0
+          ? `A CONSULTA FALHOU: ${provedoresQueFalharam.join(", ")} não respondeu(ram) ` +
+            "(instabilidade ou limite de requisições da fonte). Isto NÃO é ausência de " +
+            "contratações — a busca não chegou a ser respondida, e o universo não foi " +
+            "consultado. NÃO afirme ao usuário que não existem contratações para este termo " +
+            "e NÃO troque o termo por causa disto: diga que a fonte falhou e repita a MESMA " +
+            "busca, que costuma funcionar na tentativa seguinte."
+          : buscaVeioVazia
         ? temFiltroValor
           ? "Nenhuma fonte pública devolveu nada para este termo dentro da faixa de valor " +
             "informada. Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."

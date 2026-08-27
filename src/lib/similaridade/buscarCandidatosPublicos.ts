@@ -55,10 +55,26 @@ export function fontesQueIgnoramFiltros(): string[] {
   );
 }
 
-export async function buscarCandidatosPublicos(
+/**
+ * Resultado da busca junto com o que deu errado ao produzi-lo.
+ *
+ * `provedoresQueFalharam` existe porque uma lista vazia tem duas causas
+ * incompatíveis — "as fontes responderam e não têm nada" e "as fontes não
+ * responderam" — e colapsar as duas fazia o assistente afirmar ao analista que
+ * não existem contratações para o objeto quando o que houve foi falha de rede
+ * (CLAUDE.md §9.93). Sem este canal a informação morre no `console.error`
+ * abaixo, que ninguém lê durante uma pesquisa de preços.
+ */
+export interface ResultadoBuscaPublica {
+  candidatos: CandidatoSimilaridade[];
+  /** Chaves do registry (`pncp`, `painel_precos`, …) que falharam ou expiraram. */
+  provedoresQueFalharam: string[];
+}
+
+export async function buscarCandidatosPublicosComDiagnostico(
   termo: string,
   opcoes: OpcoesBuscarCandidatosPublicos = {},
-): Promise<CandidatoSimilaridade[]> {
+): Promise<ResultadoBuscaPublica> {
   const provedoresHabilitados = REGISTRY_PROVEDORES_PUBLICOS.filter((provedor) => provedor.habilitado);
 
   const resultados = await Promise.allSettled(
@@ -72,17 +88,32 @@ export async function buscarCandidatosPublicos(
   );
 
   const candidatos: CandidatoSimilaridade[] = [];
+  const provedoresQueFalharam: string[] = [];
   resultados.forEach((resultado, indice) => {
     if (resultado.status === "fulfilled") {
       candidatos.push(...resultado.value);
       return;
     }
     const provedor = provedoresHabilitados[indice];
+    provedoresQueFalharam.push(provedor.chave);
     console.error(
       `[buscarCandidatosPublicos] Provedor "${provedor.chave}" falhou/expirou para "${termo}":`,
       resultado.reason,
     );
   });
 
-  return deduplicarCandidatos(candidatos);
+  return { candidatos: deduplicarCandidatos(candidatos), provedoresQueFalharam };
+}
+
+/**
+ * Só os candidatos, para os chamadores que não têm o que fazer com o
+ * diagnóstico — a Server Action de similaridade roda em lote sobre vários itens
+ * e não tem onde reportar falha por termo. O assistente usa a versão acima.
+ */
+export async function buscarCandidatosPublicos(
+  termo: string,
+  opcoes: OpcoesBuscarCandidatosPublicos = {},
+): Promise<CandidatoSimilaridade[]> {
+  const { candidatos } = await buscarCandidatosPublicosComDiagnostico(termo, opcoes);
+  return candidatos;
 }

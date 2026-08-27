@@ -14,6 +14,13 @@ const mocks = vi.hoisted(() => ({
   },
   registrarAuditoria: vi.fn(),
   buscarCandidatosPublicos: vi.fn(),
+  /**
+   * Provedores que falharam na busca, controlado caso a caso. Mutável (e não um
+   * `vi.fn()` à parte) para que os ~25 testes que só configuram
+   * `buscarCandidatosPublicos` continuem valendo sem edição: por padrão a lista
+   * é vazia, isto é, ninguém falhou.
+   */
+  provedoresQueFalharam: [] as string[],
   buscarWebPerplexity: vi.fn(),
   perplexityConfigurada: vi.fn(),
   rankearCandidatos: vi.fn(),
@@ -24,6 +31,13 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("@/lib/similaridade/buscarCandidatosPublicos", () => ({
   buscarCandidatosPublicos: mocks.buscarCandidatosPublicos,
+  // A ferramenta usa a versão com diagnóstico; ela é encaminhada para o mesmo
+  // mock de candidatos para que os testes existentes sigam configurando um só
+  // lugar, e a lista de provedores que falharam entra por fora.
+  buscarCandidatosPublicosComDiagnostico: async (termo: string, opcoes: unknown) => ({
+    candidatos: await mocks.buscarCandidatosPublicos(termo, opcoes),
+    provedoresQueFalharam: mocks.provedoresQueFalharam,
+  }),
   // Fontes reais que não sabem aplicar o recorte do analista — é o que o aviso
   // de recorte parcial enumera. Sem isto no mock, a chamada estoura dentro do
   // try/catch de `executar` e vira um erro genérico em vez de falha legível.
@@ -103,6 +117,7 @@ const RANQUEADO = {
 describe("registry de ferramentas do assistente", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.provedoresQueFalharam = [];
     mocks.perplexityConfigurada.mockReturnValue(true);
     mocks.db.site.findMany.mockResolvedValue([]);
     mocks.db.item.findUnique.mockResolvedValue(ITEM);
@@ -288,6 +303,70 @@ describe("registry de ferramentas do assistente", () => {
 
     expect(resposta.total).toBe(0);
     expect(resposta.observacao).toMatch(/outro recorte|substantivo/i);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tela vazia por FALHA da fonte ≠ tela vazia por ausência de contratações.
+  // Medido em produção (2026-08-27): 9 de 18 buscas voltaram vazias em 12,8s
+  // cravados, com o PNCP recusando conexão em rajada, e o assistente relatou ao
+  // analista "nenhum contrato encontrado" — afirmação sobre o mercado que a
+  // busca não tinha base para fazer (CLAUDE.md §9.93).
+  // ---------------------------------------------------------------------------
+  describe("buscar_pncp — falha de coleta não é ausência de contratações", () => {
+    it("diz que a consulta falhou, e não que não há contratações", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([]);
+      mocks.provedoresQueFalharam = ["pncp"];
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "link dedicado 900 mbps" });
+
+      expect(resposta.total).toBe(0);
+      expect(resposta.observacao).toMatch(/CONSULTA FALHOU/);
+      expect(resposta.observacao).toContain("pncp");
+      // A instrução que evita o dano: o modelo não pode concluir ausência nem
+      // queimar o próximo turno inventando um termo novo por causa disto.
+      expect(resposta.observacao).toMatch(/NÃO afirme/);
+      expect(resposta.observacao).toMatch(/MESMA busca|repita a MESMA/i);
+    });
+
+    it("nomeia todos os provedores que falharam", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([]);
+      mocks.provedoresQueFalharam = ["pncp", "painel_precos"];
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(resposta.observacao).toContain("pncp");
+      expect(resposta.observacao).toContain("painel_precos");
+    });
+
+    // Mutação: sem esta asserção, trocar a condição por `provedoresQueFalharam
+    // >= 0` (isto é, sempre reportar falha) passaria despercebido, e o modelo
+    // veria erro de rede em toda busca legitimamente vazia.
+    it("não reporta falha quando as fontes responderam e não tinham nada", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([]);
+      mocks.provedoresQueFalharam = [];
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "objeto inexistente" });
+
+      expect(resposta.observacao).not.toMatch(/CONSULTA FALHOU/);
+      expect(resposta.observacao).toMatch(/outro recorte|substantivo/i);
+    });
+
+    // A outra ponta: falha parcial que ainda trouxe candidatos é degradação
+    // legítima, e a tela tem o que mostrar. Anunciar "a consulta falhou" com 1
+    // candidato na tela faria o analista descartar um resultado válido.
+    it("não reporta falha quando algum candidato chegou", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato()]);
+      mocks.provedoresQueFalharam = ["painel_precos"];
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(resposta.total).toBeGreaterThan(0);
+      expect(resposta.observacao).not.toMatch(/CONSULTA FALHOU/);
+    });
   });
 
   // -------------------------------------------------------------------------

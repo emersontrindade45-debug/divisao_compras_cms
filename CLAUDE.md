@@ -1300,3 +1300,29 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      prometia um encadeamento que a guarda barra sempre. Ao escrever regra de prompt que encadeia
      ferramentas, somar as RESERVAS delas e conferir contra o teto do turno, do mesmo jeito que se
      confere um limite de memória.
+103. **`Promise.all` sobre requisições independentes transforma uma falha isolada em perda total —
+     e o resultado vazio ainda chega ao usuário como afirmação sobre o mundo.** Dois defeitos
+     compostos em `buscarContratosPNCP`, medidos em produção em 2026-08-27. (a) As 6 requisições de
+     busca textual (4 páginas de edital + 2 de ata) rodavam sob `Promise.all`; uma página que
+     esgotasse os 3 retries rejeitava o conjunto e o catch externo devolvia `[]`, jogando fora as
+     outras cinco já pagas e bem-sucedidas. Com o `pncp.gov.br/api/search` recusando conexão em
+     rajada (medido: **6 de 10 requisições resetadas em ~100ms**), basta uma azarada para zerar a
+     busca inteira. Requisição independente isola a própria falha — `allSettled`, ou try/catch por
+     item devolvendo vazio — e degrada em COBERTURA, nunca em tudo-ou-nada. (b) Pior que perder os
+     dados: `[]` é indistinguível de "o PNCP não tem nada para este termo". **9 das 18 buscas de
+     dois dias voltaram vazias em 12,8s cravados** — o teto de tempo consumido por retries — e o
+     assistente relatou ao analista "nenhum contrato encontrado no PNCP", que é afirmação sobre o
+     mercado que a busca não tinha base para fazer; o analista concluiria que o objeto não tem
+     referência de preço pública. É a §9.93 no eixo da rede, e a correção é a mesma: enumerar os
+     desfechos e perguntar de cada um **"isto é uma falha ou uma resposta?"**. Aqui são três, não
+     dois — candidatos > 0 (resposta, mesmo com falha parcial: o analista prefere o que veio);
+     vazio sem falha (resposta legítima); vazio COM falha (não sabemos, e só este vira erro
+     tipado). O canal para carregar isso até a UI/prompt tem de ser criado de propósito: a
+     informação existia e morria num `console.error` que ninguém lê durante uma pesquisa de preços.
+     **Corolário sobre o que dizer ao modelo:** não basta reportar a falha — a instrução precisa
+     barrar as duas reações erradas, afirmar ausência e trocar o termo. Termo trocado por causa de
+     falha de rede queima o turno seguinte (§9.100) e afasta a busca do termo que estava certo.
+     **Corolário de teste:** rejeição precisa do handler anexado ANTES de adiantar timers falsos
+     (`const r = expect(p).rejects...; await vi.runAllTimersAsync(); await r;`), senão a promessa
+     rejeita durante o avanço sem ninguém escutando e a suíte inteira acusa unhandled rejection
+     com os testes "passando".

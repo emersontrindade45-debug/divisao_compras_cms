@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { buscarContratosPNCP, listarItensDaCompraPNCP } from "../pncp";
+import { buscarContratosPNCP, listarItensDaCompraPNCP, ErroColetaPNCP } from "../pncp";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -142,18 +142,98 @@ describe("buscarContratosPNCP", () => {
     expect(resultado).toEqual([]);
   });
 
-  it("retorna lista vazia quando a busca textual falha", async () => {
+  // Este teste afirmava o contrário — que a busca devolve `[]` quando a coleta
+  // falha — e assim protegia o defeito de ser mexido (CLAUDE.md §9.100). Lista
+  // vazia é indistinguível de "o PNCP não tem nada para este termo", e foi
+  // exatamente essa confusão que fez o assistente relatar ao analista, em
+  // produção, "nenhum contrato encontrado" quando na verdade não tinha
+  // conseguido perguntar. É a §9.93 no eixo da rede: falha lida como resposta.
+  it("lança ErroColetaPNCP quando toda a busca textual falha, em vez de lista vazia", async () => {
     vi.useFakeTimers();
     vi.spyOn(global, "fetch").mockResolvedValue({ ok: false, status: 500 } as Response);
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
+    // A asserção é anexada ANTES de adiantar os timers: a promessa rejeita
+    // durante `runAllTimersAsync`, e sem um handler já ligado a rejeição sobe
+    // como unhandled e polui a suíte inteira.
     const promessa = buscarContratosPNCP("qualquer coisa");
+    const rejeicao = expect(promessa).rejects.toBeInstanceOf(ErroColetaPNCP);
+    await vi.runAllTimersAsync();
+    await rejeicao;
+
+    vi.useRealTimers();
+  });
+
+  it("não descarta as páginas que deram certo quando uma delas falha", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // A página 1 de edital falha nas três tentativas; as outras cinco requisições
+    // de busca (páginas 2..4 de edital e 1..2 de ata) devolvem um processo bom.
+    // Antes da correção, `Promise.all` rejeitava por causa da página 1 e o catch
+    // externo devolvia `[]` — uma falha isolada custava a busca inteira, o que
+    // basta para explicar boa parte das buscas vazias medidas em produção.
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/api/search/")) {
+        const params = new URL(url).searchParams;
+        const ehEditalPagina1 =
+          params.get("tipos_documento") === "edital" && params.get("pagina") === "1";
+        if (ehEditalPagina1) throw new Error("read ECONNRESET");
+        return mockBusca([processoPadrao]);
+      }
+      if (url.includes("/resultados")) return mockJson([resultadoDe()]);
+      if (url.includes("/itens")) {
+        const pagina = Number(new URL(url).searchParams.get("pagina") ?? 1);
+        return mockJson(pagina === 1 ? [itemDe()] : []);
+      }
+      throw new Error(`URL inesperada: ${url}`);
+    });
+
+    const promessa = buscarContratosPNCP("cadeira de escritório");
     await vi.runAllTimersAsync();
     const resultado = await promessa;
 
-    expect(resultado).toEqual([]);
+    expect(resultado.length).toBeGreaterThan(0);
     vi.useRealTimers();
+  });
+
+  it("devolve os candidatos que conseguiu, sem lançar, quando a falha é parcial", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/api/search/")) {
+        const params = new URL(url).searchParams;
+        if (params.get("tipos_documento") === "ata") throw new Error("read ECONNRESET");
+        return mockBusca([processoPadrao]);
+      }
+      if (url.includes("/resultados")) return mockJson([resultadoDe()]);
+      if (url.includes("/itens")) {
+        const pagina = Number(new URL(url).searchParams.get("pagina") ?? 1);
+        return mockJson(pagina === 1 ? [itemDe()] : []);
+      }
+      throw new Error(`URL inesperada: ${url}`);
+    });
+
+    const promessa = buscarContratosPNCP("cadeira de escritório");
+    await vi.runAllTimersAsync();
+
+    // Falha parcial COM candidatos é degradação legítima: o analista prefere os
+    // que vieram a um erro. Só a combinação "falhou E não trouxe nada" é o
+    // estado que não pode ser reportado como ausência de contratações.
+    await expect(promessa).resolves.toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it("não lança quando a busca simplesmente não tem resultados", async () => {
+    mockPncp({ processos: [] });
+
+    // O outro lado da mutação: se `ErroColetaPNCP` passasse a valer para toda
+    // busca vazia, o modelo veria falha de rede onde há resposta legítima.
+    await expect(buscarContratosPNCP("objeto inexistente")).resolves.toEqual([]);
   });
 
   it("tenta de novo com backoff quando a rede falha e sucede na tentativa seguinte", async () => {
@@ -190,11 +270,12 @@ describe("buscarContratosPNCP", () => {
       .spyOn(global, "fetch")
       .mockResolvedValue({ ok: false, status: 429 } as Response);
 
+    // Throttling é falha de coleta, não ausência de contratações.
     const promessa = buscarContratosPNCP("caneta");
+    const rejeicao = expect(promessa).rejects.toBeInstanceOf(ErroColetaPNCP);
     await vi.runAllTimersAsync();
-    const resultado = await promessa;
+    await rejeicao;
 
-    expect(resultado).toEqual([]);
     // 6 buscas textuais em paralelo (4 edital + 2 ata) × 3 tentativas = 18.
     expect(fetchSpy).toHaveBeenCalledTimes(18);
     vi.useRealTimers();

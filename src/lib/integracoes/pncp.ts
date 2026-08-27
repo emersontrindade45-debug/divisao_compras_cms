@@ -200,7 +200,45 @@ interface ContextoBusca {
    * seria descartada no fim de qualquer forma.
    */
   reservarResultados(quantidade: number): boolean;
+  /**
+   * Contabiliza o desfecho de uma requisição de BUSCA TEXTUAL (as páginas de
+   * edital e de ata). São só essas porque são elas que decidem se a busca
+   * chegou a enxergar o universo: se todas falharem, um resultado vazio não diz
+   * nada sobre o PNCP ter ou não contratações para o termo.
+   */
+  registrarBusca(sucesso: boolean): void;
+  /** Quantas requisições de busca textual falharam depois de esgotar os retries. */
+  buscasFalhas(): number;
   encerrar(): void;
+}
+
+/**
+ * A coleta no PNCP falhou e o resultado vazio NÃO significa ausência de
+ * contratações. Lançado só na combinação que não pode ser reportada como
+ * resposta: nenhuma requisição de busca textual funcionou (ou as que
+ * funcionaram não sobraram nenhum candidato) E houve falha de rede/HTTP.
+ *
+ * Existe porque `[]` é ambíguo e a ambiguidade chegava ao analista como
+ * afirmação falsa. Medido em produção em 2026-08-27: 9 das 18 buscas de dois
+ * dias voltaram vazias em 12,8s cravados — o teto de tempo consumido por
+ * retries contra um `pncp.gov.br/api/search` que recusava conexão em rajada
+ * (6 de 10 requisições resetadas em ~100ms na medição direta). O assistente
+ * relatou "nenhum contrato encontrado no PNCP" nas duas situações, e o
+ * analista não tinha como distinguir uma da outra. Ver CLAUDE.md §9.93.
+ */
+export class ErroColetaPNCP extends Error {
+  constructor(
+    readonly termo: string,
+    readonly buscasFalhas: number,
+    readonly prazoEsgotado: boolean,
+  ) {
+    super(
+      `[PNCP] A consulta falhou para "${termo}": ${buscasFalhas} requisição(ões) de busca sem ` +
+        `resposta${prazoEsgotado ? " e prazo da busca esgotado" : ""}. ` +
+        "Resultado vazio aqui NÃO significa ausência de contratações.",
+    );
+    this.name = "ErroColetaPNCP";
+  }
 }
 
 function criarContextoBusca(): ContextoBusca {
@@ -218,6 +256,7 @@ function criarContextoBusca(): ContextoBusca {
   setMaxListeners(0, controle.signal);
 
   let resultadosRestantes = MAX_RESULTADOS_POR_BUSCA;
+  let falhasDeBusca = 0;
 
   return {
     sinal: controle.signal,
@@ -228,6 +267,10 @@ function criarContextoBusca(): ContextoBusca {
       resultadosRestantes -= quantidade;
       return true;
     },
+    registrarBusca(sucesso) {
+      if (!sucesso) falhasDeBusca++;
+    },
+    buscasFalhas: () => falhasDeBusca,
     encerrar: () => clearTimeout(timer),
   };
 }
@@ -463,11 +506,29 @@ async function buscarPorTexto(
   });
 
   const url = `${PNCP_SEARCH_BASE_URL}/?${params.toString()}`;
-  const res = await fetchComRetry(url, ctx);
+
+  // A falha é contida AQUI, e não propagada ao `Promise.all` do chamador. Antes,
+  // uma única página que esgotasse os retries rejeitava o `Promise.all` inteiro
+  // e o catch externo devolvia `[]` — as outras cinco requisições, já pagas e
+  // bem-sucedidas, iam junto. Com o PNCP recusando conexão em rajada (medido:
+  // 6 de 10 requisições resetadas), basta uma azarada para zerar a busca.
+  // Isolando, a busca degrada em cobertura em vez de virar tudo ou nada, e a
+  // contagem de falhas é o que permite ao chamador distinguir vazio de calado.
+  let res: Response;
+  try {
+    res = await fetchComRetry(url, ctx);
+  } catch (err) {
+    ctx.registrarBusca(false);
+    console.error(`[PNCP] Busca textual ${tipo} p.${pagina} ("${termo}") sem resposta:`, err);
+    return [];
+  }
+
   if (!res.ok) {
+    ctx.registrarBusca(false);
     console.error(`[PNCP] Falha na busca textual ${tipo} ("${termo}"): HTTP ${res.status}`);
     return [];
   }
+  ctx.registrarBusca(true);
 
   const body = (await res.json()) as { items?: PNCPSearchItem[] };
   const brutos = body.items ?? [];
@@ -901,8 +962,22 @@ export async function buscarContratosPNCP(
         ...(await Promise.all(lote.map((processo) => buscarItensDaCompra(processo, termo, ctx)))),
       );
     }
-    return filtrarPorValor(itensPorProcesso.flat(), filtroValor);
+    const candidatos = filtrarPorValor(itensPorProcesso.flat(), filtroValor);
+
+    // O único estado que não pode ser devolvido como resposta: nada colhido E a
+    // coleta tropeçou. Enumerar os desfechos em vez de colapsá-los é o que a
+    // §9.93 pede — "isto é uma falha ou uma resposta?" — e aqui há três:
+    //   candidatos > 0                → resposta (mesmo com falha parcial: o
+    //                                   analista prefere o que veio, e a
+    //                                   cobertura menor já é sinalizada em log);
+    //   candidatos = 0, sem falha     → resposta legítima ("o PNCP não tem");
+    //   candidatos = 0, com falha     → não sabemos, e dizer "não tem" é mentir.
+    if (candidatos.length === 0 && ctx.buscasFalhas() > 0) {
+      throw new ErroColetaPNCP(termo, ctx.buscasFalhas(), ctx.vencido());
+    }
+    return candidatos;
   } catch (err) {
+    if (err instanceof ErroColetaPNCP) throw err;
     console.error(`[PNCP] Erro inesperado ao buscar contratações para "${termo}":`, err);
     return [];
   } finally {
