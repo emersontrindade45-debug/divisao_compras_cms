@@ -1326,3 +1326,23 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      (`const r = expect(p).rejects...; await vi.runAllTimersAsync(); await r;`), senão a promessa
      rejeita durante o avanço sem ninguém escutando e a suíte inteira acusa unhandled rejection
      com os testes "passando".
+104. **Dado que a ferramenta entrega ao modelo mas o prompt não manda usar é indistinguível de
+     dado ausente — e a falha não gera erro nenhum.** Em 2026-08-27 o assistente listou cinco
+     contratações do PNCP ("Município de Crateús", "FUNDEPI", …) sem um único link, e o servidor
+     não tinha como abrir o edital para conferir a evidência — obrigação da IN 65/2021, não
+     conveniência. Não era dado faltando: as URLs estavam no banco (12 de 12 candidatos vivos do
+     processo com `fonteUrl` preenchida e válida), `ler_candidatos` já as devolvia no campo `url`,
+     e a UI já converte `[texto](url)` em link clicável (`formatacao.ts`, que aceita só
+     http/https). **O buraco era o prompt**, que descrevia link apenas como propriedade do CARD
+     ("só `buscar_pncp` gera card — cada candidato aparece na tela com link e botão") e nunca
+     pedia link no TEXTO. O agravante é estrutural: candidato vindo de `ler_candidatos` **não gera
+     card**, então ali o texto é o único caminho até a fonte — exatamente o caso em que a
+     instrução faltava. Ao acrescentar um campo ao retorno de uma ferramenta, perguntar **"o que
+     no prompt faz o modelo usar isto?"**; sem uma regra explícita, o campo viaja no JSON e não
+     aparece na resposta, e nada — nem teste, nem log, nem erro — denuncia a omissão.
+     **Corolário de teste, em duas pontas que se sustentam:** a regra do prompt e o campo que ela
+     pressupõe precisam de teste cada um. Só testar o texto do prompt deixa a regra virar promessa
+     vazia se o `select` do Prisma parar de pedir a coluna; só testar o campo não impede o modelo
+     de ignorá-lo. O teste do campo asserta o **argumento** passado ao Prisma (`select.fonteUrl
+     === true`), não o resultado — com o Prisma mockado o objeto volta completo por construção e a
+     asserção sobre o retorno passa mesmo com a coluna fora do `select` (§9.46).

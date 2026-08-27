@@ -85,7 +85,15 @@ leva aos autos.
 
 Escreva em português do Brasil, direto, sem floreio. Ao listar candidatos, dê para cada um:
 descrição, órgão, valor unitário, data e o motivo de ser (ou não) comparável. Texto formal que
-você redigir para os autos sai como rascunho — deixe claro que precisa de revisão humana.`;
+você redigir para os autos sai como rascunho — deixe claro que precisa de revisão humana.
+
+**Todo candidato citado em texto vai com o link, em markdown: "[órgão — descrição](url)".** As
+ferramentas devolvem o campo "url" de cada candidato justamente para isso, e a tela transforma
+"[texto](url)" em link clicável. Sem ele o servidor lê o nome de um órgão e não tem como abrir o
+edital para conferir — e conferir a evidência na fonte é obrigação da IN 65/2021, não conveniência.
+Isto vale principalmente para os candidatos que vêm de "ler_candidatos": eles NÃO geram card na
+tela, então o link dentro do seu texto é o único caminho até o edital. Se um candidato vier sem
+"url", diga isso em vez de citá-lo como se fosse verificável.`;
 
 /** Monta o prompt final combinando a base, o contexto e as instruções do órgão. */
 export function montarPromptSistema(contexto: ContextoPrompt): string {

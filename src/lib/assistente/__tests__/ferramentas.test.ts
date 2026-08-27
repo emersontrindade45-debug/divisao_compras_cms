@@ -295,6 +295,49 @@ describe("registry de ferramentas do assistente", () => {
     });
   });
 
+  // O link só chega ao servidor se `ler_candidatos` entregar a URL ao modelo.
+  // A regra do prompt que manda citar com link (ver promptSistema.test.ts) fica
+  // impossível de cumprir se este campo sumir do select — e o sintoma seria um
+  // texto plausível, sem link, sem nenhum erro em lugar nenhum.
+  it("entrega a URL de cada candidato em ler_candidatos", async () => {
+    mocks.db.item.findMany.mockResolvedValue([
+      {
+        id: "item-1",
+        descricao: "Link dedicado 900 Mbps",
+        unidade: "MES",
+        quantidade: 1,
+        resultadosSimilaridade: [
+          {
+            id: "r1",
+            tipoCandidato: "contratacao_publica",
+            fonteDescricao: "Serviço de link de internet dedicado – 900 Mbps",
+            fonteOrgaoOuId: "MUNICIPIO DE CRATEUS",
+            fonteUrl: "https://pncp.gov.br/app/editais/07982036000167/2025/171",
+            valorUnitario: 2403,
+            dataReferencia: new Date("2025-11-18"),
+            scoreFinal: 73,
+            justificativa: "Mesmo objeto",
+            promovidoParaFonte: false,
+          },
+        ],
+      },
+    ]);
+    const registry = montarRegistry(CTX_PROCESSO);
+
+    const resposta = await chamar(registry, "ler_candidatos", { processoId: "proc-1" });
+
+    const itens = resposta as unknown as Array<{ candidatos: Array<{ url: string }> }>;
+    expect(itens[0].candidatos[0].url).toBe(
+      "https://pncp.gov.br/app/editais/07982036000167/2025/171",
+    );
+    // O select precisa pedir a coluna; sem isto o Prisma devolve o candidato
+    // completo por acidente hoje e quebra na próxima coluna adicionada (§9.46).
+    const args = mocks.db.item.findMany.mock.calls[0][0] as {
+      select: { resultadosSimilaridade: { select: Record<string, boolean> } };
+    };
+    expect(args.select.resultadosSimilaridade.select.fonteUrl).toBe(true);
+  });
+
   it("orienta a variar o termo quando nenhuma fonte devolve nada", async () => {
     mocks.buscarCandidatosPublicos.mockResolvedValue([]);
     const registry = montarRegistry(CTX_PROCESSO);

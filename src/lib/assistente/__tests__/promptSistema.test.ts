@@ -21,6 +21,19 @@ describe("montarPromptSistema", () => {
     expect(prompt).toMatch(/não envia e-mail/i);
   });
 
+  // Em 2026-08-27 o assistente listou cinco contratações do PNCP pelo nome do
+  // órgão e sem nenhum link. As URLs existiam no banco e `ler_candidatos` as
+  // entregava no campo `url` — faltava a instrução de usá-las. Como esses
+  // candidatos não geram card, o texto era o único caminho até o edital, e o
+  // servidor ficou sem como conferir a evidência.
+  it("manda citar candidato com link em markdown", () => {
+    const prompt = montarPromptSistema(contexto());
+
+    expect(prompt).toMatch(/\[.*\]\(url\)/);
+    expect(prompt).toMatch(/ler_candidatos/);
+    expect(prompt).toMatch(/não geram card|NÃO geram card/i);
+  });
+
   it("ancora a conversa no processo quando há um", () => {
     const prompt = montarPromptSistema(contexto({ processoNumero: "2026/0042" }));
     expect(prompt).toContain("2026/0042");
