@@ -387,22 +387,54 @@ describe("registry de ferramentas do assistente", () => {
 
       expect(resposta.total).toBe(0);
       expect(resposta.observacao).toMatch(/CONSULTA FALHOU/);
-      expect(resposta.observacao).toContain("pncp");
+      expect(resposta.observacao).toMatch(/PNCP não respondeu/);
       // A instrução que evita o dano: o modelo não pode concluir ausência nem
       // queimar o próximo turno inventando um termo novo por causa disto.
       expect(resposta.observacao).toMatch(/NÃO afirme/);
       expect(resposta.observacao).toMatch(/MESMA busca|repita a MESMA/i);
     });
 
-    it("nomeia todos os provedores que falharam", async () => {
+    it("reporta a falha quando o PNCP cai junto com outra fonte", async () => {
       mocks.buscarCandidatosPublicos.mockResolvedValue([]);
       mocks.provedoresQueFalharam = ["pncp", "painel_precos"];
       const registry = montarRegistry(CTX_PROCESSO);
 
       const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
 
-      expect(resposta.observacao).toContain("pncp");
-      expect(resposta.observacao).toContain("painel_precos");
+      expect(resposta.observacao).toMatch(/CONSULTA FALHOU/);
+      expect(resposta.observacao).toMatch(/PNCP não respondeu/);
+    });
+
+    // O defeito que esta guarda ganhou na primeira versão, visto em produção em
+    // 2026-08-27: `provedoresQueFalharam.length > 0` tratava qualquer fonte como
+    // equivalente. O `compras_gov_contratacoes` caiu, o PNCP respondeu e não
+    // tinha nada, e o assistente relatou "falha de resposta do PNCP; não é
+    // ausência de contratos" — falha atribuída à fonte errada, e uma ausência
+    // real negada. Trocar uma afirmação falsa por outra não é corrigir.
+    it("não chama de falha do PNCP quando só uma fonte secundária caiu", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([]);
+      mocks.provedoresQueFalharam = ["compras_gov_contratacoes"];
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(resposta.observacao).not.toMatch(/CONSULTA FALHOU/);
+      // A ausência é real e pode ser dita — com a ressalva de cobertura, que é
+      // informação diferente de "a busca falhou".
+      expect(resposta.observacao).toMatch(/Cobertura reduzida/);
+      expect(resposta.observacao).toContain("compras_gov_contratacoes");
+      expect(resposta.observacao).toMatch(/PNCP, fonte priorit[áa]ria, respondeu/i);
+    });
+
+    it("não fala de cobertura reduzida quando todas as fontes responderam", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([]);
+      mocks.provedoresQueFalharam = [];
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(resposta.observacao).not.toMatch(/Cobertura reduzida/);
+      expect(resposta.observacao).not.toMatch(/CONSULTA FALHOU/);
     });
 
     // Mutação: sem esta asserção, trocar a condição por `provedoresQueFalharam

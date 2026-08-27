@@ -1378,3 +1378,22 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      **Corolário sobre teste calibrado em milissegundos:** mexer num teto de tempo quebra os
      testes que somam custos de requisição à mão, e a janela válida precisa ser recalculada e
      escrita no comentário — não é regressão, é a conta mudando de base.
+107. **Corrigir uma afirmação falsa com outra afirmação falsa não é corrigir — guarda que trata
+     fontes desiguais como equivalentes erra na direção nova.** A §9.103 acabara de trocar
+     "nenhum contrato encontrado" por "A CONSULTA FALHOU" quando a busca vinha vazia com algum
+     provedor em erro. A condição era `provedoresQueFalharam.length > 0`, e horas depois, em
+     produção (2026-08-27, 15:43), o `compras_gov_contratacoes` falhou enquanto o **PNCP
+     respondeu normalmente e não tinha nada**: o assistente relatou ao servidor *"falha de
+     resposta do PNCP; não é ausência de contratos"* — atribuiu a falha à fonte errada e negou uma
+     ausência que era real. As quatro fontes não têm o mesmo peso: a IN 65/2021 põe a contratação
+     pública similar como prioritária, então é a resposta do PNCP que decide se sabemos algo sobre
+     o universo; falha das outras estreita a COBERTURA, o que é informação diferente e merece
+     frase própria ("cobertura reduzida"), nunca o mesmo alarme. Regra geral: ao escrever guarda
+     sobre um conjunto de dependências, perguntar **"todas valem o mesmo para esta conclusão?"** —
+     se não, a condição precisa nomear qual delas importa, e as demais viram ressalva.
+     **Corolário de método, que é o mais caro:** o defeito foi visto porque a auditoria leu o
+     `resumo` gravado da ferramenta, não o texto do assistente. O texto era fluente e plausível e
+     não denunciava nada; a `observacao` no `ferramentasUsadas` nomeava `compras_gov_contratacoes`
+     e provava a atribuição errada em uma linha. Ao verificar em produção uma correção que muda o
+     que o modelo LÊ, comparar o campo que a ferramenta gravou com o que o modelo escreveu — só a
+     diferença entre os dois mostra se ele foi mal informado ou se errou por conta própria.

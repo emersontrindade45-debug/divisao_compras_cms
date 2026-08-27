@@ -76,6 +76,15 @@ const MAX_RESULTADOS_WEB = 8;
  */
 const TIMEOUT_BUSCA_ASSISTENTE_MS = TEMPO_MAX_BUSCA_MS + MARGEM_ENTREGA_MS;
 
+/**
+ * Chave da fonte prioritária no registry (`REGISTRY_PROVEDORES_PUBLICOS`). É a
+ * resposta DELA que decide se sabemos alguma coisa sobre o universo: a IN
+ * 65/2021 põe a contratação pública similar como fonte prioritária, e as demais
+ * entram como complemento. Falha das outras estreita a cobertura; falha desta
+ * torna "não encontrei nada" uma afirmação sem base.
+ */
+const PROVEDOR_PRIORITARIO = "pncp";
+
 export interface ContextoFerramentas {
   userId: string;
   /** Nulo na conversa global; preenchido na aba de um processo. */
@@ -868,14 +877,35 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
       // mercado que a busca não tem base para fazer — em produção o assistente
       // dizia "nenhum contrato encontrado no PNCP" e o analista concluía que o
       // objeto não tem referência de preço pública (CLAUDE.md §9.93).
+      // **Só a falha da fonte PRIORITÁRIA invalida a conclusão.** A primeira
+      // versão desta guarda olhava `provedoresQueFalharam.length > 0` e tratava
+      // qualquer fonte como equivalente. Em produção, em 2026-08-27, o
+      // `compras_gov_contratacoes` falhou enquanto o PNCP respondeu normalmente
+      // e não tinha nada — e o assistente relatou ao servidor "falha de resposta
+      // do PNCP; não é ausência de contratos", atribuindo a falha à fonte errada
+      // e negando uma ausência que era real. Trocar uma afirmação falsa por
+      // outra não é corrigir: o PNCP é a fonte prioritária da IN 65/2021, e é a
+      // resposta DELE que decide se sabemos ou não sobre o universo.
+      const prioritariaFalhou = provedoresQueFalharam.includes(PROVEDOR_PRIORITARIO);
+      const secundariasQueFalharam = provedoresQueFalharam.filter(
+        (chave) => chave !== PROVEDOR_PRIORITARIO,
+      );
+      // Fonte secundária fora do ar não invalida a conclusão, mas estreita o que
+      // foi consultado — dizer isso é diferente de dizer que a busca falhou.
+      const ressalvaCobertura =
+        secundariasQueFalharam.length > 0
+          ? ` (Cobertura reduzida nesta busca: ${secundariasQueFalharam.join(", ")} não ` +
+            "respondeu(ram). O PNCP, fonte prioritária, respondeu normalmente.)"
+          : "";
+
       const observacao =
-        buscaVeioVazia && provedoresQueFalharam.length > 0
-          ? `A CONSULTA FALHOU: ${provedoresQueFalharam.join(", ")} não respondeu(ram) ` +
-            "(instabilidade ou limite de requisições da fonte). Isto NÃO é ausência de " +
-            "contratações — a busca não chegou a ser respondida, e o universo não foi " +
-            "consultado. NÃO afirme ao usuário que não existem contratações para este termo " +
-            "e NÃO troque o termo por causa disto: diga que a fonte falhou e repita a MESMA " +
-            "busca, que costuma funcionar na tentativa seguinte."
+        buscaVeioVazia && prioritariaFalhou
+          ? `A CONSULTA FALHOU: o PNCP não respondeu (instabilidade ou limite de requisições ` +
+            "da fonte). Isto NÃO é ausência de contratações — a busca não chegou a ser " +
+            "respondida, e o universo não foi consultado. NÃO afirme ao usuário que não " +
+            "existem contratações para este termo e NÃO troque o termo por causa disto: diga " +
+            "que a fonte falhou e repita a MESMA busca, que costuma funcionar na tentativa " +
+            "seguinte."
           : buscaVeioVazia
         ? temFiltroValor
           ? "Nenhuma fonte pública devolveu nada para este termo dentro da faixa de valor " +
@@ -887,7 +917,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
               "dos editais."
             : "Nenhuma fonte pública (PNCP, Painel de Preços, Compras.gov, SINAPI) devolveu nada " +
               "para este termo. Tente outro recorte: troque o substantivo-núcleo, remova " +
-              "qualificadores ou use o nome comercial do produto."
+              "qualificadores ou use o nome comercial do produto." + ressalvaCobertura
         : `A busca encontrou ${priorizados.length} itens, mas NENHUM é comparável ao objeto ` +
           "deste item — a checagem de aderência (descrição, especificação e unidade) reprovou " +
           "todos. Isso quase sempre significa que o termo casou por uma palavra ambígua (ex.: " +
