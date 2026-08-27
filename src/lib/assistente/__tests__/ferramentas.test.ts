@@ -53,6 +53,7 @@ vi.mock("@/lib/similaridade/rankearCandidatos", () => ({
 vi.mock("@/lib/ia", () => ({ getProvedorIA: mocks.getProvedorIA }));
 
 import { montarRegistry, type ContextoFerramentas } from "../ferramentas";
+import { TEMPO_MAX_BUSCA_MS, MARGEM_ENTREGA_MS } from "@/lib/integracoes/pncp";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 
 const CTX_PROCESSO: ContextoFerramentas = {
@@ -336,6 +337,27 @@ describe("registry de ferramentas do assistente", () => {
       select: { resultadosSimilaridade: { select: Record<string, boolean> } };
     };
     expect(args.select.resultadosSimilaridade.select.fonteUrl).toBe(true);
+  });
+
+  // A corrida dos dois tetos. Enquanto o teto por provedor e o
+  // `TEMPO_MAX_BUSCA_MS` interno do PNCP eram ambos 12s, o externo — agendado
+  // primeiro — vencia sempre, e candidatos já colhidos eram descartados como se
+  // a fonte tivesse falhado. A asserção é sobre o valor que de fato viaja até
+  // `buscarCandidatosPublicos`, não sobre a constante: `expect.any(Number)` nos
+  // outros casos aceitaria o empate de volta sem nada falhar (§9.99).
+  it("dá ao provedor mais tempo do que o PNCP leva para entregar", async () => {
+    mocks.buscarCandidatosPublicos.mockResolvedValue([candidato()]);
+    const registry = montarRegistry(CTX_PROCESSO);
+
+    await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+    const [, opcoes] = mocks.buscarCandidatosPublicos.mock.calls[0] as [
+      string,
+      { timeoutMsPorProvedor: number },
+    ];
+    expect(opcoes.timeoutMsPorProvedor).toBeGreaterThan(TEMPO_MAX_BUSCA_MS);
+    // A folga precisa cobrir o pós-coleta (mapear o que já está em memória).
+    expect(MARGEM_ENTREGA_MS).toBeGreaterThan(0);
   });
 
   it("orienta a variar o termo quando nenhuma fonte devolve nada", async () => {

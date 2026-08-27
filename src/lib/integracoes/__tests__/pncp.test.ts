@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { buscarContratosPNCP, listarItensDaCompraPNCP, ErroColetaPNCP } from "../pncp";
+import {
+  buscarContratosPNCP,
+  listarItensDaCompraPNCP,
+  ErroColetaPNCP,
+  TEMPO_MAX_BUSCA_MS,
+  MARGEM_ENTREGA_MS,
+} from "../pncp";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -19,6 +25,26 @@ function mockJson(corpo: unknown) {
     ok: true,
     json: async () => corpo,
   } as Response;
+}
+
+/**
+ * Requisição que nunca responde e **respeita o AbortSignal**, como o `fetch`
+ * real. Um mock que só espera um `setTimeout` longo ignora o abort e faz o teto
+ * de tempo parecer inerte: o `Promise.all` fica preso até o timer do próprio
+ * mock, o prazo geral vence enquanto isso, e a etapa seguinte nunca roda — um
+ * artefato do teste lido como comportamento do código.
+ */
+function pendurada(init?: { signal?: AbortSignal | null }): Promise<Response> {
+  return new Promise<Response>((_, reject) => {
+    const sinal = init?.signal;
+    if (!sinal) return;
+    if (sinal.aborted) return reject(new DOMException("Aborted", "AbortError"));
+    sinal.addEventListener(
+      "abort",
+      () => reject(new DOMException("Aborted", "AbortError")),
+      { once: true },
+    );
+  });
 }
 
 /** Item como o PNCP devolve em /itens: sem valor homologado, que vive em /resultados. */
@@ -234,6 +260,123 @@ describe("buscarContratosPNCP", () => {
     // O outro lado da mutação: se `ErroColetaPNCP` passasse a valer para toda
     // busca vazia, o modelo veria falha de rede onde há resposta legítima.
     await expect(buscarContratosPNCP("objeto inexistente")).resolves.toEqual([]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Divisão do orçamento entre as duas etapas. Medido contra a API real em
+  // 2026-08-27: sob instabilidade, a descoberta de editais consumiu 15,1s em
+  // média — mais que o teto inteiro — e a etapa que produz preço leu 0 editais
+  // em 4 de 6 termos. A busca então devolve vazio não por falta de editais, mas
+  // por nunca ter chegado a abri-los.
+  // ---------------------------------------------------------------------------
+  it("não deixa a descoberta de editais consumir o orçamento inteiro", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let primeiraChamadaDeItens: number | null = null;
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      // Página 1 responde; as outras cinco penduram e só saem pelo abort. Sem o
+      // sub-teto elas ficariam presas ao prazo GERAL, e a etapa 2 começaria (se
+      // começasse) com o orçamento no fim.
+      if (url.includes("/api/search/")) {
+        const params = new URL(url).searchParams;
+        if (params.get("pagina") === "1" && params.get("tipos_documento") === "edital") {
+          return mockBusca([processoPadrao]);
+        }
+        return pendurada(init);
+      }
+      if (url.includes("/resultados")) return mockJson([resultadoDe()]);
+      if (url.includes("/itens")) {
+        primeiraChamadaDeItens ??= Date.now();
+        const pagina = Number(new URL(url).searchParams.get("pagina") ?? 1);
+        return mockJson(pagina === 1 ? [itemDe()] : []);
+      }
+      throw new Error(`URL inesperada: ${url}`);
+    });
+
+    const inicio = Date.now();
+    const promessa = buscarContratosPNCP("cadeira de escritório");
+    await vi.runAllTimersAsync();
+    const resultado = await promessa;
+
+    // A asserção que importa é o RELÓGIO: a etapa 2 começou no sub-teto da
+    // descoberta, não no teto geral. Só verificar que ela aconteceu passaria
+    // igual com o sub-teto removido — a descoberta terminaria aos 10s e a etapa
+    // 2 seria pulada pela reserva de lote, mas em outros cenários não.
+    // `throw` e não `expect(...).not.toBeNull()`: o matcher não estreita o tipo
+    // para o TypeScript, e o cast que ele obrigaria escondia o caso nulo.
+    if (primeiraChamadaDeItens === null) throw new Error("A etapa 2 nunca começou.");
+    expect(primeiraChamadaDeItens - inicio).toBeLessThan(TEMPO_MAX_BUSCA_MS);
+    expect(resultado.length).toBeGreaterThan(0);
+    vi.useRealTimers();
+  });
+
+  it("entrega o que colheu quando a descoberta estoura o próprio sub-teto", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes("/api/search/")) {
+        const params = new URL(url).searchParams;
+        // Página 1 responde na hora; as demais penduram até o sub-teto abortá-las.
+        // Estourar a descoberta significa "vou com os editais que já tenho",
+        // nunca "a busca inteira falhou".
+        if (params.get("pagina") === "1" && params.get("tipos_documento") === "edital") {
+          return mockBusca([processoPadrao]);
+        }
+        return pendurada(init);
+      }
+      if (url.includes("/resultados")) return mockJson([resultadoDe()]);
+      if (url.includes("/itens")) {
+        const pagina = Number(new URL(url).searchParams.get("pagina") ?? 1);
+        return mockJson(pagina === 1 ? [itemDe()] : []);
+      }
+      throw new Error(`URL inesperada: ${url}`);
+    });
+
+    const promessa = buscarContratosPNCP("cadeira de escritório");
+    await vi.runAllTimersAsync();
+    const resultado = await promessa;
+
+    expect(resultado.length).toBeGreaterThan(0);
+    vi.useRealTimers();
+  });
+
+  // ---------------------------------------------------------------------------
+  // A corrida dos dois tetos. O provedor que envolve esta busca tem teto próprio
+  // (`TIMEOUT_BUSCA_ASSISTENTE_MS`); enquanto os dois números eram iguais, o
+  // externo — agendado primeiro — sempre vencia, e o resultado já colhido era
+  // descartado. A margem existe para o empate nunca acontecer.
+  // ---------------------------------------------------------------------------
+  it("entrega dentro da margem que o teto do provedor reserva", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // Todas as requisições penduram: a busca só termina pelo próprio teto.
+    vi.spyOn(global, "fetch").mockImplementation(async (_input, init) => pendurada(init));
+
+    // Uma flag, e não `Date.now()`: `runAllTimersAsync` adiantaria o relógio até
+    // o último timer agendado (os 120s do fetch), medindo o mock em vez da busca.
+    let resolvida = false;
+    const promessa = buscarContratosPNCP("cadeira de escritório")
+      .catch(() => [])
+      .finally(() => {
+        resolvida = true;
+      });
+
+    // Um milissegundo antes de o teto do provedor disparar, a busca já entregou.
+    // Enquanto os dois tetos eram iguais isto era falso por construção, e o
+    // provedor descartava o que a coleta tinha colhido.
+    await vi.advanceTimersByTimeAsync(TEMPO_MAX_BUSCA_MS + MARGEM_ENTREGA_MS - 1);
+    expect(resolvida).toBe(true);
+
+    await promessa;
+    vi.useRealTimers();
   });
 
   it("tenta de novo com backoff quando a rede falha e sucede na tentativa seguinte", async () => {
@@ -860,18 +1003,18 @@ describe("tetos de tempo", () => {
     let relogio = 0;
     vi.spyOn(Date, "now").mockImplementation(() => relogio);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Cada requisição "gasta" 700ms. As 6 buscas textuais em paralelo (4 edital +
-    // 2 ata) custam 4,2s; o primeiro lote de 5 editais custa mais 7s (5 páginas +
-    // 5 resultados × 700ms) → 11,2s, dentro dos 12s. Sobram 0,8s, abaixo da
-    // reserva de 2s, e o segundo lote não começa.
-    // O custo por requisição precisa cair na janela 625 < c < 750: acima disso o
-    // próprio primeiro lote estoura os 12s e `ctx.vencido()` descarta o que ele
-    // achou; abaixo, sobra reserva e o segundo lote começa. A janela se estreita
-    // a cada busca textual acrescentada (era 714–857 com 4 buscas, 900ms com 2).
+    // Cada requisição "gasta" 560ms. As 6 buscas textuais (4 edital + 2 ata)
+    // custam 3,36s e cabem no sub-teto de 5s da descoberta; o primeiro lote de 5
+    // editais custa mais 5,6s (5 páginas + 5 resultados) → 8,96s, dentro dos 10s.
+    // Sobra 1,04s, abaixo da reserva de 2s, e o segundo lote não começa.
+    // A janela do custo por requisição é 500 < c < 625: acima disso o próprio
+    // primeiro lote estoura os 10s e `ctx.vencido()` descarta o que ele achou;
+    // abaixo, sobra reserva e o segundo lote começa. Era 625–750 enquanto o teto
+    // valia 12s — ao mexer em `TEMPO_MAX_BUSCA_MS`, esta conta se refaz.
     mockPncp({
       processos,
       onUrl: () => {
-        relogio += 700;
+        relogio += 560;
       },
     });
 

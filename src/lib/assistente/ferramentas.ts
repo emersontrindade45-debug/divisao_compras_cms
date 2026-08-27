@@ -9,6 +9,8 @@ import {
   UFS_VALIDAS,
   ESFERAS_VALIDAS,
   STATUS_VALIDOS,
+  TEMPO_MAX_BUSCA_MS,
+  MARGEM_ENTREGA_MS,
   type FiltrosBuscaPNCP,
 } from "@/lib/integracoes/pncp";
 import {
@@ -59,14 +61,20 @@ const MAX_RESULTADOS_WEB = 8;
 
 /**
  * Teto de tempo por provedor em `buscar_pncp`, sobrescrevendo o padrão de 25s
- * do registry (`REGISTRY_PROVEDORES_PUBLICOS`). Igual ao prazo real que o
- * próprio PNCP já se impõe internamente (`TEMPO_MAX_BUSCA_MS` em
- * `integracoes/pncp.ts`) — os outros três provedores (Painel de Preços,
- * Compras.gov/catálogo, SINAPI) passam a respeitar o mesmo teto, então trocar
- * de 1 para 4 fontes não muda o pior caso de tempo que `ORCAMENTO_TEMPO_TURNO_MS`
- * (35s, `laco.ts`) já foi calibrado para tolerar.
+ * do registry (`REGISTRY_PROVEDORES_PUBLICOS`). Os outros três provedores
+ * (Painel de Preços, Compras.gov/catálogo, SINAPI) respeitam o mesmo teto, então
+ * trocar de 1 para 4 fontes não muda o pior caso de tempo que
+ * `ORCAMENTO_TEMPO_TURNO_MS` (35s, `laco.ts`) já foi calibrado para tolerar.
+ *
+ * **Derivado, nunca escrito à mão.** Era um `12_000` literal, igual ao
+ * `TEMPO_MAX_BUSCA_MS` do PNCP — e como este timeout é agendado ANTES do
+ * interno, o empate era sempre resolvido contra nós: coleta que usava o prazo
+ * inteiro e entregava milissegundos depois tinha os candidatos descartados,
+ * válidos e já pagos com requisições reais. Reproduzido em teste em 2026-08-27.
+ * A soma mantém o mesmo valor de 12s para quem chama, e torna impossível subir
+ * um dos dois números sem o outro.
  */
-const TIMEOUT_BUSCA_ASSISTENTE_MS = 12_000;
+const TIMEOUT_BUSCA_ASSISTENTE_MS = TEMPO_MAX_BUSCA_MS + MARGEM_ENTREGA_MS;
 
 export interface ContextoFerramentas {
   userId: string;

@@ -83,8 +83,51 @@ const TIMEOUT_REQUISICAO_MS = 10_000;
  * A garantia original continua valendo, por outro caminho: compra interrompida
  * pelo prazo é descartada INTEIRA (ver `buscarItensDaCompra`), nunca entregue pela
  * metade. Compras que terminaram entram; as que ficaram no meio somem.
+ *
+ * **Era 12s, baixado para 10s em 2026-08-27 junto com `MARGEM_ENTREGA_MS`.** O
+ * chamador desta busca envolve a promessa num teto próprio, e enquanto os dois
+ * números eram iguais o empate era resolvido contra nós — ver a margem abaixo.
+ * O orçamento do turno não muda: quem o chamador enxerga continua sendo
+ * 10s + 2s = 12s.
  */
-const TEMPO_MAX_BUSCA_MS = 12_000;
+export const TEMPO_MAX_BUSCA_MS = 10_000;
+
+/**
+ * Folga entre o fim da COLETA e o teto que o chamador impõe à busca inteira.
+ *
+ * Existe por causa de um defeito reproduzido em teste: `TEMPO_MAX_BUSCA_MS` e o
+ * `TIMEOUT_BUSCA_ASSISTENTE_MS` do assistente eram ambos 12s, e o timeout do
+ * chamador é agendado ANTES do nosso — então, sempre que a coleta usava o prazo
+ * inteiro e entregava alguns milissegundos depois (o custo de mapear o que já
+ * está em memória), o chamador já havia desistido e descartava candidatos
+ * válidos, pagos com requisições reais. Um empate que se resolvia sempre para o
+ * lado errado.
+ *
+ * 2s é folga larguíssima sobre o pós-coleta, que é trabalho em memória. O ponto
+ * não é o tamanho: é a relação existir explicitamente no código, para que subir
+ * um dos dois números sem o outro deixe de ser possível. `ferramentas.ts` deriva
+ * o teto dele desta soma em vez de repetir a constante.
+ */
+export const MARGEM_ENTREGA_MS = 2_000;
+
+/**
+ * Sub-teto da DESCOBERTA de editais (as páginas de busca textual), dentro de
+ * `TEMPO_MAX_BUSCA_MS`.
+ *
+ * A busca tem duas etapas — descobrir editais e depois ler itens e preços
+ * homologados — e sem divisão a primeira gastava o que precisasse, deixando à
+ * segunda o que sobrasse. Medido contra a API real em 2026-08-27, sob
+ * instabilidade do PNCP: a descoberta consumiu **15,1s** em média (mais que o
+ * teto inteiro) e a segunda etapa leu **0 editais em 4 de 6 termos**. A busca
+ * devolvia vazio não por falta de editais, mas por nunca ter chegado a abri-los
+ * — e o analista lia isso como "não existe contratação para este objeto".
+ *
+ * Estourar este sub-teto significa "vou com os editais que já tenho", nunca "a
+ * busca falhou": as páginas que responderam continuam valendo, e o que fica
+ * pendurado é abortado. Em ambiente saudável a descoberta custa ~4,5s medidos,
+ * então o corte raramente morde — ele existe para o dia ruim.
+ */
+const TEMPO_MAX_DESCOBERTA_MS = 5_000;
 
 /**
  * Reserva mínima para começar um lote novo. Sem ela, um lote iniciado a 200ms do
@@ -209,6 +252,12 @@ interface ContextoBusca {
   registrarBusca(sucesso: boolean): void;
   /** Quantas requisições de busca textual falharam depois de esgotar os retries. */
   buscasFalhas(): number;
+  /**
+   * Prazo da etapa de DESCOBERTA, mais curto que o da busca inteira — ver
+   * `TEMPO_MAX_DESCOBERTA_MS`. Só as páginas de busca textual o usam; itens e
+   * resultados correm contra o prazo geral.
+   */
+  readonly descoberta: { readonly sinal: AbortSignal; vencido(): boolean };
   encerrar(): void;
 }
 
@@ -258,6 +307,18 @@ function criarContextoBusca(): ContextoBusca {
   let resultadosRestantes = MAX_RESULTADOS_POR_BUSCA;
   let falhasDeBusca = 0;
 
+  // Prazo próprio da descoberta, encerrado antes do geral. Abortar aqui não
+  // aborta a busca: as páginas que já responderam seguem valendo e a etapa
+  // seguinte herda o tempo que sobrou — que é a razão de o sub-teto existir.
+  const fimDescobertaEm = Date.now() + TEMPO_MAX_DESCOBERTA_MS;
+  const controleDescoberta = new AbortController();
+  const timerDescoberta = setTimeout(
+    () => controleDescoberta.abort(new Error("[PNCP] Prazo da descoberta esgotado.")),
+    TEMPO_MAX_DESCOBERTA_MS,
+  );
+  timerDescoberta.unref?.();
+  setMaxListeners(0, controleDescoberta.signal);
+
   return {
     sinal: controle.signal,
     vencido: () => controle.signal.aborted || Date.now() >= fimEm,
@@ -271,11 +332,32 @@ function criarContextoBusca(): ContextoBusca {
       if (!sucesso) falhasDeBusca++;
     },
     buscasFalhas: () => falhasDeBusca,
-    encerrar: () => clearTimeout(timer),
+    descoberta: {
+      sinal: controleDescoberta.signal,
+      // O prazo geral também encerra a descoberta: ela nunca sobrevive à busca.
+      vencido: () =>
+        controleDescoberta.signal.aborted ||
+        controle.signal.aborted ||
+        Date.now() >= fimDescobertaEm,
+    },
+    encerrar: () => {
+      clearTimeout(timer);
+      clearTimeout(timerDescoberta);
+    },
   };
 }
 
-async function fetchComRetry(url: string, ctx: ContextoBusca): Promise<Response> {
+/**
+ * `prazo` decide contra qual relógio esta requisição corre: o da busca inteira
+ * (padrão) ou o sub-prazo da descoberta, mais curto. Sem este parâmetro as
+ * páginas de busca textual correriam contra o teto geral e voltariam a poder
+ * consumi-lo por inteiro — ver `TEMPO_MAX_DESCOBERTA_MS`.
+ */
+async function fetchComRetry(
+  url: string,
+  ctx: ContextoBusca,
+  prazo: { readonly sinal: AbortSignal; vencido(): boolean } = ctx,
+): Promise<Response> {
   let ultimoErro: unknown;
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
     try {
@@ -284,7 +366,7 @@ async function fetchComRetry(url: string, ctx: ContextoBusca): Promise<Response>
       // da busca entra composto, para que vencer o prazo aborte o que está em voo.
       const res = await fetch(url, {
         headers: { Accept: "application/json" },
-        signal: AbortSignal.any([AbortSignal.timeout(TIMEOUT_REQUISICAO_MS), ctx.sinal]),
+        signal: AbortSignal.any([AbortSignal.timeout(TIMEOUT_REQUISICAO_MS), prazo.sinal]),
       });
       const retryavel = res.status === 429 || res.status >= 500;
       if (res.ok || !retryavel || tentativa === MAX_TENTATIVAS) return res;
@@ -295,7 +377,7 @@ async function fetchComRetry(url: string, ctx: ContextoBusca): Promise<Response>
       console.warn(`[PNCP] Falha de rede (tentativa ${tentativa}/${MAX_TENTATIVAS}): ${url}`, err);
     }
     // Prazo vencido não se resolve com backoff: esperar aqui só atrasa o fim.
-    if (ctx.vencido()) throw ultimoErro ?? new Error("[PNCP] Prazo esgotado durante o retry.");
+    if (prazo.vencido()) throw ultimoErro ?? new Error("[PNCP] Prazo esgotado durante o retry.");
     await esperar(BACKOFF_BASE_MS * 2 ** (tentativa - 1));
   }
   throw ultimoErro ?? new Error("[PNCP] Tentativas esgotadas.");
@@ -516,7 +598,8 @@ async function buscarPorTexto(
   // contagem de falhas é o que permite ao chamador distinguir vazio de calado.
   let res: Response;
   try {
-    res = await fetchComRetry(url, ctx);
+    // Corre contra o sub-prazo da DESCOBERTA, não contra o teto geral.
+    res = await fetchComRetry(url, ctx, ctx.descoberta);
   } catch (err) {
     ctx.registrarBusca(false);
     console.error(`[PNCP] Busca textual ${tipo} p.${pagina} ("${termo}") sem resposta:`, err);

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, ExternalLink, Send, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { lerStreamSSE } from "@/lib/assistente/sse";
@@ -37,6 +37,8 @@ interface Mensagem {
   /** Turno terminou por teto de passos; a UI oferece continuar. */
   orcamentoEsgotado?: boolean;
   erro?: string;
+  /** 401: o erro tem conserto conhecido, e a UI leva direto ao login. */
+  sessaoExpirada?: boolean;
 }
 
 /** Mensagem enviada pelo botão "Continuar procurando". */
@@ -200,9 +202,18 @@ export function AssistenteChat({
         if (!res.ok || !res.body) {
           // 401/400 vêm como JSON, não como stream.
           const detalhe = (await res.json().catch(() => null)) as { error?: string } | null;
+          // A sessão dura 7 dias e vence com a página aberta: ela foi renderizada
+          // enquanto valia, continua com aparência de funcional, e a primeira
+          // pista é este 401. Repassar o "Não autorizado" cru deixava o servidor
+          // deduzir a causa e descobrir sozinho que era só entrar de novo —
+          // erro que não diz o próximo passo (CLAUDE.md §9.93).
           atualizar((m) => ({
             ...m,
-            erro: detalhe?.error ?? `A requisição falhou (HTTP ${res.status}).`,
+            erro:
+              res.status === 401
+                ? "Sua sessão expirou. Entre novamente para continuar — o que você já registrou neste processo está salvo."
+                : (detalhe?.error ?? `A requisição falhou (HTTP ${res.status}).`),
+            sessaoExpirada: res.status === 401,
           }));
           return;
         }
@@ -397,10 +408,28 @@ export function AssistenteChat({
               )}
 
               {mensagem.erro && (
-                <p className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-danger-strong">
-                  <AlertCircle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  {mensagem.erro}
-                </p>
+                <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2">
+                  <p className="flex items-start gap-2 text-xs text-danger-strong">
+                    <AlertCircle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                    {mensagem.erro}
+                  </p>
+                  {/* Sessão vencida é o único erro daqui com conserto conhecido:
+                      sem este atalho o servidor precisa deduzir a causa e achar
+                      o login sozinho (CLAUDE.md §9.40). É um `<a>` com as
+                      classes do botão, e não `<Button asChild>`: `asChild` é
+                      padrão do Radix e este projeto usa Base UI, que não o tem
+                      (§9.4). O login leva sempre ao dashboard — não existe
+                      retorno por `?next=`, e por isso a mensagem acima não
+                      promete voltar para cá. */}
+                  {mensagem.sessaoExpirada && (
+                    <a
+                      href="/login"
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "self-start")}
+                    >
+                      Entrar novamente
+                    </a>
+                  )}
+                </div>
               )}
 
               {/* Teto de passos atingido: o turno acabou por orçamento, não por

@@ -100,6 +100,10 @@ vi.mock("@/lib/integracoes/pncp", () => ({
   UFS_VALIDAS: ["SP", "RJ", "MG"] as const,
   ESFERAS_VALIDAS: ["F", "E", "M"] as const,
   STATUS_VALIDOS: ["encerradas", "recebendo_proposta", "em_julgamento"] as const,
+  // `ferramentas.ts` deriva daqui o teto por provedor — ver a corrida dos dois
+  // tetos em `pncp.ts`. O mock precisa dos dois, senão o módulo nem carrega.
+  TEMPO_MAX_BUSCA_MS: 10_000,
+  MARGEM_ENTREGA_MS: 2_000,
 }));
 vi.mock("@/lib/integracoes/perplexity", () => ({
   buscarWebPerplexity: mocks.buscarWebPerplexity,

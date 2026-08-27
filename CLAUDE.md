@@ -1346,3 +1346,35 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      de ignorá-lo. O teste do campo asserta o **argumento** passado ao Prisma (`select.fonteUrl
      === true`), não o resultado — com o Prisma mockado o objeto volta completo por construção e a
      asserção sobre o retorno passa mesmo com a coluna fora do `select` (§9.46).
+105. **Dois relógios com o mesmo valor não empatam: vence o que foi agendado primeiro — e num
+     par "teto interno / teto do chamador" o primeiro é sempre o de fora.** `TEMPO_MAX_BUSCA_MS`
+     (coleta no PNCP) e `TIMEOUT_BUSCA_ASSISTENTE_MS` (teto por provedor) eram ambos `12_000`, e o
+     comentário afirmava que a igualdade era deliberada. O efeito real, reproduzido em teste em
+     2026-08-27: sempre que a coleta usava o prazo inteiro e entregava alguns milissegundos depois
+     — o custo de mapear o que já está em memória — o `comTimeout` do chamador já havia disparado,
+     e candidatos válidos, pagos com requisições reais, eram descartados como se a fonte tivesse
+     falhado. A correção não é escolher outro número: é **derivar um do outro**
+     (`chamador = interno + MARGEM_ENTREGA_MS`), para que subir um sem o outro deixe de ser
+     possível. Ao envolver uma operação que já tem teto próprio, o teto de fora precisa cobrir o
+     de dentro **mais o custo de entregar**; igualdade é a única relação que nunca funciona.
+     **Corolário de teste — a asserção não pode se mover junto com a mutação.** O primeiro teste
+     comparava a duração contra `TEMPO_MAX_BUSCA_MS + MARGEM_ENTREGA_MS`, então zerar a margem e
+     voltar o teto a 12s deixava a suíte **inteira verde com o defeito de volta**: o alvo se
+     reajustava. A asserção que pega é sobre a RELAÇÃO, na fronteira observável — o
+     `timeoutMsPorProvedor` efetivamente passado a `buscarCandidatosPublicos` é
+     `toBeGreaterThan(TEMPO_MAX_BUSCA_MS)`, e `MARGEM_ENTREGA_MS` é `toBeGreaterThan(0)`. Ao
+     testar um limite parametrizado, perguntar "se eu mudar a constante, este teste ainda falha?";
+     se ele acompanha, ele não testa nada (§9.99).
+106. **Mock de `fetch` que ignora o `AbortSignal` faz todo teto de tempo parecer inerte.** Ao
+     testar o sub-orçamento da descoberta, o mock era
+     `await new Promise(r => setTimeout(r, 30_000))` — nunca escutava `init.signal`. O abort
+     disparava no prazo certo e não tinha efeito nenhum: o `Promise.all` continuava preso até o
+     timer do próprio mock, o prazo geral vencia nesse meio-tempo, e a etapa seguinte nunca
+     rodava. O teste falhava mostrando "0 requisições de itens", que se lê como defeito do código
+     e era artefato do teste. Requisição pendurada em teste tem de rejeitar no `abort`, como o
+     `fetch` real — helper `pendurada(init)` no arquivo. Regra geral: **um duplo de teste precisa
+     honrar o mecanismo que o teste existe para exercitar**; mock que ignora o cancelamento é
+     inútil justamente nos testes de prazo, que são os únicos que precisam dele (§9.88).
+     **Corolário sobre teste calibrado em milissegundos:** mexer num teto de tempo quebra os
+     testes que somam custos de requisição à mão, e a janela válida precisa ser recalculada e
+     escrita no comentário — não é regressão, é a conta mudando de base.

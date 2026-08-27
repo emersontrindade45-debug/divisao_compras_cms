@@ -258,7 +258,25 @@ describe("AssistenteChat", () => {
     expect(document.querySelector(".animate-spin")).toBeNull();
   });
 
-  it("mostra o erro de uma resposta que não é stream (401/400)", async () => {
+  it("mostra o erro de uma resposta que não é stream (400)", async () => {
+    mockFetch(
+      new Response(JSON.stringify({ error: "Corpo inválido" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<AssistenteChat processoId="proc-1" />);
+
+    perguntar("procure");
+
+    await waitFor(() => expect(screen.getByText("Corpo inválido")).toBeInTheDocument());
+  });
+
+  // Este teste afirmava que a tela mostra o "Não autorizado" cru da API — isto
+  // é, codificava o defeito. A sessão dura 7 dias e vence com a página aberta,
+  // que continua com aparência de funcional; aconteceu em produção em
+  // 2026-08-27, e o servidor teve de deduzir sozinho que era só entrar de novo.
+  it("explica a sessão vencida e leva ao login em vez de repassar o 401 cru", async () => {
     mockFetch(
       new Response(JSON.stringify({ error: "Não autorizado" }), {
         status: 401,
@@ -269,7 +287,29 @@ describe("AssistenteChat", () => {
 
     perguntar("procure");
 
-    await waitFor(() => expect(screen.getByText("Não autorizado")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/sessão expirou/i)).toBeInTheDocument());
+    // O erro precisa dizer o próximo passo, não só o que houve.
+    const entrar = screen.getByRole("link", { name: /entrar novamente/i });
+    expect(entrar).toHaveAttribute("href", "/login");
+    // E não pode restar na tela o jargão que não diz nada ao servidor.
+    expect(screen.queryByText("Não autorizado")).not.toBeInTheDocument();
+  });
+
+  // A outra ponta: erro comum não pode ganhar o atalho de login, que mandaria o
+  // servidor refazer um login válido e perder o que estava fazendo.
+  it("não oferece login quando a falha não é de sessão", async () => {
+    mockFetch(
+      new Response(JSON.stringify({ error: "Corpo inválido" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<AssistenteChat processoId="proc-1" />);
+
+    perguntar("procure");
+
+    await waitFor(() => expect(screen.getByText("Corpo inválido")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /entrar novamente/i })).not.toBeInTheDocument();
   });
 
   it("não envia mensagem vazia", () => {
