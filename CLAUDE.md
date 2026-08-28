@@ -1397,3 +1397,41 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      e provava a atribuição errada em uma linha. Ao verificar em produção uma correção que muda o
      que o modelo LÊ, comparar o campo que a ferramenta gravou com o que o modelo escreveu — só a
      diferença entre os dois mostra se ele foi mal informado ou se errou por conta própria.
+108. **Latência de API paginada CRESCE com a profundidade da página — "N páginas × custo da
+     página 1" subestima o total por ordens de grandeza.** Ao baixar o SICAF inteiro
+     (`modulo-fornecedor/1_consultarFornecedor`, 826.570 registros / ~1.654 páginas), a estimativa
+     ingênua dava poucos minutos; a rodagem real ficou **35 minutos sem terminar** e foi abortada.
+     Medido direto no endpoint: página 1 = **5,4s**, página 800 = **11,9s**, página 1600 =
+     **35,3s** — assinatura clássica de `OFFSET` no banco de origem, que relê e descarta tudo que
+     vem antes. A correção não é aumentar timeout nem concorrência: é **particionar por um filtro
+     de domínio** para que nenhuma consulta chegue a uma página profunda (aqui `codigoCnae`, ~1.300
+     fatias, a maior com 26 páginas). Antes de planejar uma coleta paginada grande, **medir a
+     página 1, a do meio e a última** — três `curl` respondem se o custo é linear ou não, e a
+     resposta muda a arquitetura, não só o prazo. Corolário: toda requisição em laço longo precisa
+     de `AbortSignal.timeout` próprio (§9.64) — sem ele, "lento" e "travado" são indistinguíveis, e
+     foi o que permitiu 35 minutos de silêncio.
+109. **Reação a rate limit (HTTP 429) é GLOBAL, nunca por worker — e não pode dividir a cota de
+     retry com o erro genérico.** Depois de corrigido o item 108, a coleta com concorrência 8
+     tomou 429 no CNAE 400 de 1.321. O retry existia, mas errado em dois eixos. (a) O backoff era o
+     genérico de 800ms: rate limit não passa nesse prazo, e insistir cedo só renova o bloqueio —
+     precisa respeitar `Retry-After` (que vem em segundos OU como data HTTP) e, na ausência dele,
+     esperar dezenas de segundos. (b) Pior: só o worker que tomou o 429 esperava, enquanto os
+     outros 7 seguiam martelando a API e renovando o bloqueio para todos. **O limite é do servidor,
+     não da conexão, então a pausa também tem de ser compartilhada** (um `pausadoAte` que todo
+     worker consulta antes de cada requisição). Contar as tentativas em separado importa: 429 passa
+     esperando e merece muitas tentativas; HTTP 500 persistente não melhora insistindo e merece
+     poucas — cota única força escolher um número errado para os dois casos.
+     **Corolário que se aplica a toda coleta longa: sem checkpoint, a garantia tudo-ou-nada da
+     ESCRITA vira "descarta tudo" na LEITURA.** A falha no CNAE 400 jogou fora 340s de coleta e
+     ~99 mil CNPJs já pagos em requisições. Gravar o progresso da leitura em arquivo (escrita
+     atômica via `.tmp` + `rename`, senão um Ctrl-C deixa JSON truncado que só falha na próxima
+     rodagem) permite retomar de onde parou. O checkpoint cobre só a coleta — a escrita no banco
+     continua tudo-ou-nada, porque marcar `false` a partir de leitura parcial afirmaria "esta
+     empresa não licita" sobre quem apenas não foi lida ainda.
+     **Corolário de teste, que é a §9.35 outra vez:** o primeiro teste da pausa global usava 2
+     CNAEs com concorrência 2 — os dois workers disparavam em t≈0, não sobrava requisição
+     posterior ao bloqueio, e **desativar a pausa global inteira mantinha a suíte verde**
+     (confirmado por mutação). Teste de coordenação entre workers precisa de trabalho AINDA
+     PENDENTE no momento do evento: com 3 CNAEs e concorrência 2, o terceiro só começa depois que
+     um worker libera, e é ele que prova a garantia (mutação passou a falhar: 111ms contra os
+     ≥900ms esperados).
