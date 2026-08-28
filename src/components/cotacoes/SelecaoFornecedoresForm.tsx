@@ -3,7 +3,7 @@
 import { useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Mail, Users, Sparkles, Copy, Search, FileSpreadsheet } from "lucide-react";
+import { Send, Mail, Users, Sparkles, Copy, Search, FileSpreadsheet, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { VARIANT_CLASSES } from "@/lib/domain/status";
 import { ScoreBadge } from "@/components/fornecedores/ScoreBadge";
 import { criarCotacao } from "@/lib/actions/cotacoes";
 import { sugerirFornecedoresPorObjeto } from "@/lib/actions/fornecedores";
@@ -22,7 +23,11 @@ import { sugerirCandidatosParaObjeto } from "@/lib/actions/sugerirCandidatosCota
 import { adicionarCandidatoAPlanilha } from "@/lib/actions/candidatosCnpj";
 import { aplicarSelecao } from "@/lib/domain/selecaoEmMassa";
 import { PainelCnaes } from "./PainelCnaes";
-import type { CandidatoSugerido } from "@/lib/domain/candidatoSugerido";
+import {
+  REGIOES_BUSCA,
+  type CandidatoSugerido,
+  type RegiaoBuscaCandidatos,
+} from "@/lib/domain/candidatoSugerido";
 import { cn } from "@/lib/utils";
 
 const TEMPLATE_EMAIL = `Prezado(a) {responsavel},
@@ -87,6 +92,13 @@ export function SelecaoFornecedoresForm({
   const [candidatos, setCandidatos] = useState<CandidatoSugerido[] | null>(null);
   const [totalCandidatos, setTotalCandidatos] = useState(0);
   const [locaisCandidatos, setLocaisCandidatos] = useState(0);
+  const [ocultadosPorSicaf, setOcultadosPorSicaf] = useState<number | null>(null);
+  // Filtros do recorte da busca. Vazio = todas as regiões (comportamento anterior à expansão do
+  // Sudeste); `somenteSicaf` é opt-in porque só ~3% das empresas com e-mail estão no SICAF.
+  const [regioesSelecionadas, setRegioesSelecionadas] = useState<Set<RegiaoBuscaCandidatos>>(
+    new Set(),
+  );
+  const [somenteSicaf, setSomenteSicaf] = useState(false);
   const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
   const [candidatosSelecionados, setCandidatosSelecionados] = useState<Set<string>>(new Set());
   const [adicionandoPlanilha, setAdicionandoPlanilha] = useState(false);
@@ -154,10 +166,12 @@ export function SelecaoFornecedoresForm({
         processo.objeto,
         processo.numero,
         cnaesAprovados,
+        { regioes: [...regioesSelecionadas], somenteSicaf },
       );
       setCandidatos(r.candidatos);
       setTotalCandidatos(r.totalEncontrado);
       setLocaisCandidatos(r.locais);
+      setOcultadosPorSicaf(r.ocultadosPorSicaf);
       // Nada vem pré-selecionado: a lista chega com até 500 empresas e marcar todas faria o
       // analista enviar cotação em massa sem revisar (§9.40 — a UI não pode prometer o que a
       // conferência da IN 65/2021 exige que seja conferido).
@@ -318,6 +332,59 @@ export function SelecaoFornecedoresForm({
           </div>
         </CardContent>
       </Card>
+
+      {/* Filtros ANTES do painel de CNAEs, porque é neste ponto que a busca é disparada — um
+          recorte oferecido depois do resultado obrigaria a refazer a busca para ter efeito. */}
+      {processoId && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Filter className="size-4 text-muted-foreground" />
+              Onde buscar
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                Região (nenhuma marcada = todas)
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {REGIOES_BUSCA.map((r) => (
+                  <label key={r.valor} className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={regioesSelecionadas.has(r.valor)}
+                      onChange={() =>
+                        setRegioesSelecionadas((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(r.valor)) next.delete(r.valor);
+                          else next.add(r.valor);
+                          return next;
+                        })
+                      }
+                    />
+                    {r.rotulo}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <label className="flex items-center gap-1.5 border-t pt-3 text-sm">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={somenteSicaf}
+                onChange={(e) => setSomenteSicaf(e.target.checked)}
+              />
+              Somente empresas habilitadas no SICAF
+              <span className="text-xs text-muted-foreground">
+                (já licitam com o governo federal — bem menos empresas)
+              </span>
+            </label>
+          </CardContent>
+        </Card>
+      )}
 
       {processoId && (
         <PainelCnaes
@@ -492,8 +559,23 @@ export function SelecaoFornecedoresForm({
             {locaisCandidatos < candidatos.length && (
               <p className="mb-3 text-sm">
                 {locaisCandidatos === 0
-                  ? "As empresas da Baixada Santista para este objeto já foram trabalhadas neste processo — a lista agora traz o restante do estado."
-                  : `${locaisCandidatos} da Baixada Santista; as demais são de outras cidades de SP.`}
+                  ? "Nenhuma da Baixada Santista nesta busca — a lista traz empresas de outras cidades/estados."
+                  : `${locaisCandidatos} da Baixada Santista; as demais são de outras cidades.`}
+              </p>
+            )}
+            {/* O custo do filtro precisa ficar visível: sem este aviso, uma lista curta é ambígua
+                — o analista não sabe se a busca rendeu pouco ou se foi o filtro que estreitou. */}
+            {ocultadosPorSicaf !== null && (
+              <p className="mb-3 rounded-md border border-primary/30 bg-primary/5 p-2 text-sm">
+                Filtro do SICAF ligado: <strong>{candidatos.length}</strong> empresa(s) habilitada(s)
+                nesta busca
+                {ocultadosPorSicaf > 0 && (
+                  <>
+                    ; <strong>{ocultadosPorSicaf.toLocaleString("pt-BR")}</strong> ocultada(s) por
+                    não estarem cadastradas no SICAF
+                  </>
+                )}
+                . Desmarque o filtro acima para vê-las.
               </p>
             )}
             <p className="mb-3 text-xs text-muted-foreground">
@@ -549,7 +631,17 @@ export function SelecaoFornecedoresForm({
                         />
                       </TableCell>
                       <TableCell className="whitespace-normal">
-                        <p className="text-sm font-medium break-words">{c.razaoSocial}</p>
+                        <p className="text-sm font-medium break-words">
+                          {c.razaoSocial}
+                          {c.sicafHabilitado && (
+                            <Badge
+                              className={`${VARIANT_CLASSES.success} ml-1.5 align-middle`}
+                              title="Habilitada a licitar no SICAF (compras.gov.br)"
+                            >
+                              SICAF
+                            </Badge>
+                          )}
+                        </p>
                         <p className="text-xs text-muted-foreground tabular-nums">{c.cnpj}</p>
                       </TableCell>
                       <TableCell className="whitespace-normal text-sm">

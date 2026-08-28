@@ -42,8 +42,16 @@ function candidato(over: Partial<Record<string, unknown>> & { id: string }) {
     estado: "SP",
     cnaePrincipalCodigo: "4761003",
     cnaePrincipalDescricao: "Comércio varejista de artigos de papelaria",
+    sicafHabilitado: false,
     ...over,
   };
+}
+
+/** O `where` efetivamente passado ao Prisma na busca de candidatos — é nele que os filtros de
+ *  região/SICAF precisam aparecer. Asserir só o retorno não provaria nada: com o Prisma mockado, a
+ *  lista volta igual independentemente do filtro (CLAUDE.md §9.99). */
+function whereDaBusca(): Record<string, unknown> {
+  return mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mock.calls[0]![0].where;
 }
 
 describe("sugerirCandidatosParaObjeto", () => {
@@ -66,7 +74,14 @@ describe("sugerirCandidatosParaObjeto", () => {
   it("retorna vazio sem chamar a IA quando o objeto está em branco", async () => {
     const r = await sugerirCandidatosParaObjeto("   ");
 
-    expect(r).toEqual({ cnaesSugeridos: [], candidatos: [], totalEncontrado: 0, locais: 0 });
+    expect(r).toEqual({
+      cnaesSugeridos: [],
+      candidatos: [],
+      totalEncontrado: 0,
+      locais: 0,
+      noSicaf: 0,
+      ocultadosPorSicaf: null,
+    });
     expect(mocks.sugerirCnaesParaObjeto).not.toHaveBeenCalled();
   });
 
@@ -244,5 +259,102 @@ describe("sugerirCandidatosParaObjeto", () => {
     const r = await sugerirCandidatosParaObjeto("caneta");
 
     expect(r.locais).toBe(2);
+  });
+
+  // Os filtros existem para o analista recortar a busca ANTES de gastá-la. Todas as asserções são
+  // sobre o `where` enviado ao Prisma — a última camada observável antes do banco —, porque com o
+  // client mockado o RESULTADO é o mesmo com ou sem filtro (§9.99).
+  describe("filtros de região e SICAF", () => {
+    beforeEach(() => {
+      mocks.sugerirCnaesParaObjeto.mockResolvedValue(["4761003"]);
+      mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
+        candidato({ id: "1" }),
+      ]);
+    });
+
+    it("sem filtro de região, busca nas quatro UFs importadas", async () => {
+      await sugerirCandidatosParaObjeto("caneta", undefined, undefined, {});
+
+      const { OR } = whereDaBusca() as { OR: Array<Record<string, unknown>> };
+      expect(OR).toHaveLength(5); // baixada + demais de SP + MG + RJ + ES
+      expect(OR).toEqual(
+        expect.arrayContaining([{ estado: "MG" }, { estado: "RJ" }, { estado: "ES" }]),
+      );
+    });
+
+    it("região 'baixada' restringe às cidades da Baixada Santista, não ao estado inteiro", async () => {
+      await sugerirCandidatosParaObjeto("caneta", undefined, undefined, { regioes: ["baixada"] });
+
+      const where = whereDaBusca() as { estado: string; municipio: { in: string[] } };
+      expect(where.estado).toBe("SP");
+      expect(where.municipio.in).toEqual(expect.arrayContaining(["Santos", "Guarujá"]));
+    });
+
+    // Sem o `notIn`, marcar as duas regiões de SP traria a Baixada duas vezes.
+    it("região 'sp_demais' EXCLUI a Baixada, para não duplicar quando as duas são marcadas", async () => {
+      await sugerirCandidatosParaObjeto("caneta", undefined, undefined, { regioes: ["sp_demais"] });
+
+      const where = whereDaBusca() as { estado: string; municipio: { notIn: string[] } };
+      expect(where.estado).toBe("SP");
+      expect(where.municipio.notIn).toEqual(expect.arrayContaining(["Santos"]));
+    });
+
+    it("combina regiões de estados diferentes num OR", async () => {
+      await sugerirCandidatosParaObjeto("caneta", undefined, undefined, {
+        regioes: ["baixada", "MG"],
+      });
+
+      const { OR } = whereDaBusca() as { OR: Array<Record<string, unknown>> };
+      expect(OR).toHaveLength(2);
+      expect(OR).toContainEqual({ estado: "MG" });
+    });
+
+    it("somenteSicaf ligado filtra no BANCO (nunca depois do teto de 500)", async () => {
+      await sugerirCandidatosParaObjeto("caneta", undefined, undefined, { somenteSicaf: true });
+
+      expect(whereDaBusca().sicafHabilitado).toBe(true);
+    });
+
+    it("somenteSicaf desligado não restringe o campo — quem não está no SICAF continua vindo", async () => {
+      await sugerirCandidatosParaObjeto("caneta", undefined, undefined, { somenteSicaf: false });
+
+      expect(whereDaBusca()).not.toHaveProperty("sicafHabilitado");
+    });
+
+    // O número que a tela mostra ("21 no SICAF; 778 ocultadas") tem de sair de duas contagens
+    // reais no mesmo recorte — sem ele o analista não distingue busca fraca de filtro apertado.
+    it("informa quantas foram ocultadas pelo filtro do SICAF", async () => {
+      mocks.dbCandidatos.empresaCandidataFornecedor.count
+        .mockResolvedValueOnce(21) // com o filtro
+        .mockResolvedValueOnce(799); // mesmo recorte, sem o filtro
+
+      const r = await sugerirCandidatosParaObjeto("caneta", undefined, undefined, {
+        somenteSicaf: true,
+      });
+
+      expect(r.ocultadosPorSicaf).toBe(778);
+    });
+
+    it("com o filtro desligado não há nada ocultado a reportar", async () => {
+      const r = await sugerirCandidatosParaObjeto("caneta", undefined, undefined, {});
+
+      expect(r.ocultadosPorSicaf).toBeNull();
+    });
+
+    it("propaga sicafHabilitado até o candidato devolvido (é o que a tela usa no selo)", async () => {
+      mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
+        candidato({ id: "1", sicafHabilitado: true }),
+        candidato({ id: "2", sicafHabilitado: false }),
+      ]);
+
+      const r = await sugerirCandidatosParaObjeto("caneta");
+
+      expect(r.candidatos.map((c) => c.sicafHabilitado)).toEqual([true, false]);
+      expect(r.noSicaf).toBe(1);
+      // O campo precisa ser PEDIDO ao Prisma — com o mock, o objeto volta completo mesmo se o
+      // `select` não o incluir, então a asserção decisiva é sobre o argumento (§9.46).
+      const select = mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mock.calls[0]![0].select;
+      expect(select.sicafHabilitado).toBe(true);
+    });
   });
 });
