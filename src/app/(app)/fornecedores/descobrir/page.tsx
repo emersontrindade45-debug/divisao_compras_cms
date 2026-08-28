@@ -14,7 +14,8 @@ import {
 } from "@/lib/actions/candidatosCnpj";
 
 interface DescobrirCandidatosSearchParams {
-  municipio?: string;
+  /** Par "UF:Município" — um único `<select>` (ver `municipioEstado` abaixo). */
+  municipioEstado?: string;
   cnae?: string;
   categoria?: string;
   busca?: string;
@@ -24,7 +25,7 @@ interface DescobrirCandidatosSearchParams {
 /** Monta a query string preservando os filtros atuais, trocando só `cursor`. */
 function queryStringPagina(params: DescobrirCandidatosSearchParams, cursor: string): string {
   const usp = new URLSearchParams();
-  if (params.municipio) usp.set("municipio", params.municipio);
+  if (params.municipioEstado) usp.set("municipioEstado", params.municipioEstado);
   if (params.cnae) usp.set("cnae", params.cnae);
   if (params.categoria) usp.set("categoria", params.categoria);
   if (params.busca) usp.set("busca", params.busca);
@@ -51,7 +52,11 @@ export default async function DescobrirCandidatosCnpjPage({
   await requireAuth();
 
   const params = await searchParams;
-  const municipio = params.municipio?.trim() ?? "";
+  const municipioEstado = params.municipioEstado?.trim() ?? "";
+  // Par "UF:Município" — separado por `:` porque nome de cidade nunca contém esse caractere.
+  const [estadoSelecionado, ...restoMunicipio] = municipioEstado.split(":");
+  const municipio = restoMunicipio.join(":");
+  const estado = municipio ? estadoSelecionado : undefined;
   const cnae = params.cnae?.trim() ?? "";
   const categoria = params.categoria?.trim() ?? "";
   const busca = params.busca?.trim() ?? "";
@@ -83,8 +88,9 @@ export default async function DescobrirCandidatosCnpjPage({
   let proximoCursor: string | null = null;
   let erroBusca: string | null = null;
 
-  if (municipio) {
+  if (municipio && estado) {
     const resultado = await buscarCandidatosCnpj({
+      estado,
       municipio,
       cnae: cnae || undefined,
       categoria: categoria || undefined,
@@ -108,20 +114,20 @@ export default async function DescobrirCandidatosCnpjPage({
 
       <form method="GET" className="flex flex-wrap items-end gap-2">
         <div className="space-y-1">
-          <label htmlFor="municipio" className="text-xs font-medium text-muted-foreground">
+          <label htmlFor="municipioEstado" className="text-xs font-medium text-muted-foreground">
             Município (obrigatório)
           </label>
           <select
-            id="municipio"
-            name="municipio"
-            defaultValue={municipio}
-            className={`${SELECT_CLASS} w-48`}
+            id="municipioEstado"
+            name="municipioEstado"
+            defaultValue={municipioEstado}
+            className={`${SELECT_CLASS} w-56`}
             required
           >
             <option value="">Selecione...</option>
             {municipiosDisponiveis.map((m) => (
-              <option key={m} value={m}>
-                {m}
+              <option key={`${m.estado}:${m.municipio}`} value={`${m.estado}:${m.municipio}`}>
+                {m.municipio} ({m.estado})
               </option>
             ))}
           </select>

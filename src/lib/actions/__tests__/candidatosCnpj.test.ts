@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
     $queryRaw: vi.fn(),
     fornecedor: { findMany: vi.fn() },
   },
-  // Banco de candidatos (VPS): a tabela de 8,66M linhas.
+  // Banco de candidatos (VPS): a tabela de milhões de linhas.
   dbCandidatos: {
     empresaCandidataFornecedor: { findMany: vi.fn(), findUnique: vi.fn(), groupBy: vi.fn() },
     $queryRaw: vi.fn(),
@@ -41,6 +41,22 @@ const USUARIO = { id: "user-1", role: "pesquisa", email: "u@e.com", name: "Usuá
 // SQL bruto de importarCandidatosCnpj.ts) — ver comentário em candidatosCnpj.ts.
 const CANDIDATO_ID = "e8d4f299-603f-4510-882c-890a39f41e22";
 
+function candidatoFixture(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "cand-1",
+    cnpj: "11222333000181",
+    razaoSocial: "Empresa A",
+    nomeFantasia: null,
+    municipio: "Santos",
+    estado: "SP",
+    cnaePrincipalCodigo: "4520-0/01",
+    cnaePrincipalDescricao: "Serviços de manutenção",
+    categoriaSugerida: [],
+    sicafHabilitado: false,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireAuth.mockResolvedValue(USUARIO);
@@ -49,7 +65,7 @@ beforeEach(() => {
 
 describe("buscarCandidatosCnpj", () => {
   it("não consulta o banco quando o município está ausente", async () => {
-    const resultado = await buscarCandidatosCnpj({});
+    const resultado = await buscarCandidatosCnpj({ estado: "SP" });
 
     expect(resultado.error).toBeTruthy();
     expect(mocks.dbCandidatos.empresaCandidataFornecedor.findMany).not.toHaveBeenCalled();
@@ -57,73 +73,90 @@ describe("buscarCandidatosCnpj", () => {
   });
 
   it("não consulta o banco quando o município é string vazia", async () => {
-    const resultado = await buscarCandidatosCnpj({ municipio: "   " });
+    const resultado = await buscarCandidatosCnpj({ estado: "SP", municipio: "   " });
 
     expect(resultado.error).toBeTruthy();
     expect(mocks.dbCandidatos.empresaCandidataFornecedor.findMany).not.toHaveBeenCalled();
   });
 
-  it("usa select explícito (nunca include) e monta o where com estado fixo SP e cursor", async () => {
-    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
-      {
-        id: "cand-1",
-        cnpj: "11222333000181",
-        razaoSocial: "Empresa A",
-        nomeFantasia: null,
-        municipio: "Santos",
-        estado: "SP",
-        cnaePrincipalCodigo: "4520-0/01",
-        cnaePrincipalDescricao: "Serviços de manutenção",
-        categoriaSugerida: [],
-      },
-    ]);
+  it("não consulta o banco quando o estado está ausente ou fora da lista importada", async () => {
+    const semEstado = await buscarCandidatosCnpj({ municipio: "santos" });
+    const estadoInvalido = await buscarCandidatosCnpj({ estado: "BA", municipio: "salvador" });
+
+    expect(semEstado.error).toBeTruthy();
+    expect(estadoInvalido.error).toBeTruthy();
+    expect(mocks.dbCandidatos.empresaCandidataFornecedor.findMany).not.toHaveBeenCalled();
+  });
+
+  it("usa select explícito (nunca include), inclui sicafHabilitado e monta o where com o estado informado", async () => {
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([candidatoFixture()]);
     mocks.db.fornecedor.findMany.mockResolvedValue([]);
 
     const resultado = await buscarCandidatosCnpj({
-      municipio: "santos",
+      estado: "MG",
+      municipio: "belo horizonte",
       cnae: "4520",
       categoria: "Manutenção",
       busca: "empresa",
-      cursor: "11111111000100",
     });
 
     expect(resultado.error).toBeUndefined();
     const chamada = mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mock.calls[0]![0];
     expect(chamada.select).toBeDefined();
+    expect(chamada.select.sicafHabilitado).toBe(true);
     expect(chamada.include).toBeUndefined();
     expect(chamada.where).toMatchObject({
-      estado: "SP",
-      municipio: "Santos",
-      cnpj: { gt: "11111111000100" },
+      estado: "MG",
+      municipio: "Belo Horizonte",
       cnaePrincipalCodigo: { startsWith: "4520" },
       categoriaSugerida: { has: "Manutenção" },
       razaoSocial: { contains: "empresa", mode: "insensitive" },
     });
+    // Prioriza sicafHabilitado, cnpj como desempate — pedido do usuário de priorizar quem já
+    // licita com o governo federal.
+    expect(chamada.orderBy).toEqual([{ sicafHabilitado: "desc" }, { cnpj: "asc" }]);
+  });
+
+  it("cursor vindo do grupo habilitado continua nele e inclui o grupo comum inteiro depois", async () => {
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([candidatoFixture()]);
+    mocks.db.fornecedor.findMany.mockResolvedValue([]);
+
+    const cnpjDoCursor = "11111111000100";
+    // "1" + cnpj = cursor de uma linha com sicafHabilitado = true (ver `codificarCursor`).
+    await buscarCandidatosCnpj({ estado: "SP", municipio: "santos", cursor: `1${cnpjDoCursor}` });
+
+    const chamada = mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mock.calls[0]![0];
+    expect(chamada.where.AND[1]).toEqual({
+      OR: [
+        { sicafHabilitado: true, cnpj: { gt: cnpjDoCursor } },
+        { sicafHabilitado: false },
+      ],
+    });
+  });
+
+  it("cursor vindo do grupo comum não reabre o grupo habilitado", async () => {
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([candidatoFixture()]);
+    mocks.db.fornecedor.findMany.mockResolvedValue([]);
+
+    const cnpjDoCursor = "22222222000100";
+    // "0" + cnpj = cursor de uma linha com sicafHabilitado = false.
+    await buscarCandidatosCnpj({ estado: "SP", municipio: "santos", cursor: `0${cnpjDoCursor}` });
+
+    const chamada = mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mock.calls[0]![0];
+    expect(chamada.where.AND[1]).toEqual({ sicafHabilitado: false, cnpj: { gt: cnpjDoCursor } });
   });
 
   // A fronteira entre os dois bancos é o ponto central do desenho (ver lib/dbCandidatos.ts):
   // candidato vem do VPS, `Fornecedor` vem do transacional. Trocar um pelo outro não quebra
   // tipo nem teste de resultado — só este, que olha QUAL cliente recebeu cada consulta.
   // Em produção o erro seria silencioso e grave: consultar candidatos no Supabase devolve a
-  // amostra velha de 500 (ou estoura timeout), e consultar `Fornecedor` no VPS devolve zero,
+  // amostra velha (ou estoura timeout), e consultar `Fornecedor` no VPS devolve zero,
   // marcando todo candidato como "ainda não é fornecedor" e liberando duplicata.
   it("lê candidato do banco de candidatos e Fornecedor do transacional, nunca trocados", async () => {
-    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
-      {
-        id: "cand-1",
-        cnpj: "11222333000181",
-        razaoSocial: "Empresa A",
-        nomeFantasia: null,
-        municipio: "Santos",
-        estado: "SP",
-        cnaePrincipalCodigo: "4520-0/01",
-        cnaePrincipalDescricao: "Serviços",
-        categoriaSugerida: [],
-      },
-    ]);
+    mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([candidatoFixture()]);
     mocks.db.fornecedor.findMany.mockResolvedValue([]);
 
-    await buscarCandidatosCnpj({ municipio: "santos" });
+    await buscarCandidatosCnpj({ estado: "SP", municipio: "santos" });
 
     expect(mocks.dbCandidatos.empresaCandidataFornecedor.findMany).toHaveBeenCalledTimes(1);
     expect(mocks.db.fornecedor.findMany).toHaveBeenCalledTimes(1);
@@ -133,27 +166,25 @@ describe("buscarCandidatosCnpj", () => {
     expect(mocks.dbCandidatos).not.toHaveProperty("fornecedor");
   });
 
-  it("marca jaEhFornecedor e calcula proximoCursor quando há mais de uma página", async () => {
-    const registros = Array.from({ length: 51 }, (_, i) => ({
-      id: `cand-${i}`,
-      cnpj: String(11222333000100 + i).padStart(14, "0"),
-      razaoSocial: `Empresa ${i}`,
-      nomeFantasia: null,
-      municipio: "Santos",
-      estado: "SP",
-      cnaePrincipalCodigo: "4520-0/01",
-      cnaePrincipalDescricao: "Serviços de manutenção",
-      categoriaSugerida: [],
-    }));
+  it("marca jaEhFornecedor e calcula proximoCursor (com prefixo de sicafHabilitado) quando há mais de uma página", async () => {
+    const registros = Array.from({ length: 51 }, (_, i) =>
+      candidatoFixture({
+        id: `cand-${i}`,
+        cnpj: String(11222333000100 + i).padStart(14, "0"),
+        razaoSocial: `Empresa ${i}`,
+        sicafHabilitado: i < 10, // primeiros 10 no grupo habilitado, resto no comum
+      }),
+    );
     mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue(registros);
     mocks.db.fornecedor.findMany.mockResolvedValue([{ cnpj: "11.222.333/0001-00" }]);
 
-    const resultado = await buscarCandidatosCnpj({ municipio: "santos" });
+    const resultado = await buscarCandidatosCnpj({ estado: "SP", municipio: "santos" });
 
     expect(resultado.data?.candidatos).toHaveLength(50);
     expect(resultado.data?.candidatos[0]!.jaEhFornecedor).toBe(true);
     expect(resultado.data?.candidatos[1]!.jaEhFornecedor).toBe(false);
-    expect(resultado.data?.proximoCursor).toBe(registros[49]!.cnpj);
+    // Linha 50 (índice 49) está fora do grupo habilitado (só os 10 primeiros) → prefixo "0".
+    expect(resultado.data?.proximoCursor).toBe(`0${registros[49]!.cnpj}`);
   });
 });
 
@@ -232,50 +263,72 @@ describe("listarMunicipiosComCandidatos", () => {
     return import("../candidatosCnpj");
   }
 
-  /** Texto plano da query montada pelo template tag do Prisma (`$queryRaw`). */
-  function sqlDaChamada(): string {
-    const [template] = mocks.dbCandidatos.$queryRaw.mock.calls[0] as [TemplateStringsArray];
+  /** Texto plano da N-ésima chamada de `$queryRaw` (template tag do Prisma). */
+  function sqlDaChamada(indice = 0): string {
+    const [template] = mocks.dbCandidatos.$queryRaw.mock.calls[indice] as [TemplateStringsArray];
     return template.join(" ");
   }
 
-  it("devolve os municípios do estado importado (SP), em ordem", async () => {
-    mocks.dbCandidatos.$queryRaw.mockResolvedValue([
-      { municipio: "Campinas" },
-      { municipio: "Santos" },
-      { municipio: "Sao Paulo" },
-    ]);
+  /** Mocka `$queryRaw` para responder por UF, usando o 2º argumento do template tag (o parâmetro
+   * `${estado}`) para decidir qual página devolver — simula 4 consultas independentes. */
+  function mockPorUf(municipiosPorUf: Record<string, string[]>) {
+    mocks.dbCandidatos.$queryRaw.mockImplementation(async (..._args: unknown[]) => {
+      const params = _args.slice(1) as string[];
+      const estado = params[0];
+      return (municipiosPorUf[estado ?? ""] ?? []).map((municipio) => ({ municipio }));
+    });
+  }
+
+  it("devolve os pares (município, UF) das UFs importadas, mesclados e em ordem", async () => {
+    mockPorUf({
+      SP: ["Santos", "Campinas"],
+      MG: ["Belo Horizonte"],
+      RJ: [],
+      ES: [],
+    });
 
     const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
     const resultado = await listar();
 
-    expect(resultado).toEqual(["Campinas", "Santos", "Sao Paulo"]);
-    // O estado entra como parâmetro do template tag, nunca interpolado no SQL.
-    expect(mocks.dbCandidatos.$queryRaw.mock.calls[0]?.slice(1)).toContain("SP");
+    expect(resultado).toEqual([
+      { estado: "MG", municipio: "Belo Horizonte" },
+      { estado: "SP", municipio: "Campinas" },
+      { estado: "SP", municipio: "Santos" },
+    ]);
+    // 1 consulta por UF importada — não 1 consulta composta.
+    expect(mocks.dbCandidatos.$queryRaw).toHaveBeenCalledTimes(4);
   });
 
-  // A garantia que essa função existe para dar: em produção o `GROUP BY` varria os 8,66M
+  // A garantia que essa função existe para dar: em produção o `GROUP BY` varria os milhões de
   // candidatos, estourava o `statement_timeout` (57014) e deixava a tela em branco — e como
   // toda tentativa falhava, o cache nunca era populado. Trocar o skip scan de volta por um
   // agrupamento/DISTINCT reintroduz exatamente esse bug, então o teste ancora na forma da
   // query, não no resultado (que um GROUP BY também devolveria certo, em outro tempo).
-  it("consulta por skip scan recursivo, nunca varrendo a tabela com GROUP BY/DISTINCT", async () => {
-    mocks.dbCandidatos.$queryRaw.mockResolvedValue([{ municipio: "Santos" }]);
+  //
+  // 4 consultas single-UF, não 1 composta com `LATERAL`: essa segunda forma foi tentada e
+  // descartada por medição (ver comentário em `listarMunicipiosComCandidatos`) — o plano do
+  // `EXPLAIN` parecia barato, mas a execução real não escalava (150 pares já estourava 20s).
+  it("consulta por skip scan recursivo, 1x por UF, nunca varrendo a tabela com GROUP BY/DISTINCT/LATERAL", async () => {
+    mockPorUf({ SP: ["Santos"], MG: [], RJ: [], ES: [] });
 
     const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
     await listar();
 
-    const sql = sqlDaChamada();
-    expect(sql).toMatch(/WITH RECURSIVE/i);
-    expect(sql).toMatch(/LIMIT 1/i);
-    expect(sql).not.toMatch(/GROUP BY/i);
-    expect(sql).not.toMatch(/DISTINCT/i);
+    for (let i = 0; i < 4; i++) {
+      const sql = sqlDaChamada(i);
+      expect(sql).toMatch(/WITH RECURSIVE/i);
+      expect(sql).toMatch(/LIMIT 1/i);
+      expect(sql).not.toMatch(/GROUP BY/i);
+      expect(sql).not.toMatch(/DISTINCT/i);
+      expect(sql).not.toMatch(/LATERAL/i);
+    }
     // `groupBy` do Prisma é o caminho antigo — não pode ressurgir por baixo dos panos.
     expect(mocks.dbCandidatos.empresaCandidataFornecedor.groupBy).not.toHaveBeenCalled();
   });
 
   it("exige autenticação antes de consultar o banco", async () => {
     mocks.requireAuth.mockRejectedValue(new Error("não autenticado"));
-    mocks.dbCandidatos.$queryRaw.mockResolvedValue([]);
+    mockPorUf({ SP: [], MG: [], RJ: [], ES: [] });
 
     const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
 
@@ -284,7 +337,7 @@ describe("listarMunicipiosComCandidatos", () => {
   });
 
   it("devolve lista vazia quando não há nenhum candidato importado", async () => {
-    mocks.dbCandidatos.$queryRaw.mockResolvedValue([]);
+    mockPorUf({ SP: [], MG: [], RJ: [], ES: [] });
 
     const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
     const resultado = await listar();
@@ -293,12 +346,12 @@ describe("listarMunicipiosComCandidatos", () => {
   });
 
   it("não consulta o banco de novo dentro do TTL (cache em memória)", async () => {
-    mocks.dbCandidatos.$queryRaw.mockResolvedValue([{ municipio: "Santos" }]);
+    mockPorUf({ SP: ["Santos"], MG: [], RJ: [], ES: [] });
 
     const { listarMunicipiosComCandidatos: listar } = await importarModuloFresco();
     await listar();
     await listar();
 
-    expect(mocks.dbCandidatos.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.dbCandidatos.$queryRaw).toHaveBeenCalledTimes(4);
   });
 });

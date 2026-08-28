@@ -8,18 +8,31 @@ import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { normalizarMunicipio } from "@/lib/domain/normalizarMunicipio";
 import { mascararCnpj } from "@/lib/domain/cnpj";
-import { buscarCandidatosCnpjSchema } from "@/lib/validations/candidatosCnpj";
+import { buscarCandidatosCnpjSchema, ESTADOS_CANDIDATOS_CNPJ } from "@/lib/validations/candidatosCnpj";
 import {
   adicionarCandidatoNaPlanilha,
   FONTE_CANDIDATOS_CNPJ,
 } from "@/lib/sheets/escreverCandidatoNaPlanilha";
 import type { ActionResult } from "./processos";
 
-// Só SP foi importado nesta entrega do M27 (ver docs/PLAN.md) — sem seletor de
-// UF na UI, e fixo aqui para nunca depender de entrada do usuário.
-const ESTADO_IMPORTADO = "SP";
-
 const TAMANHO_PAGINA = 50;
+
+/** Codifica o cursor de paginação como `<0|1><cnpj>` — o prefixo carrega `sicafHabilitado` porque a
+ * ordenação primária é por ele; sem isso, retomar só por `cnpj` pularia/repetiria linhas ao cruzar
+ * do grupo "habilitado no SICAF" para o grupo comum. */
+function codificarCursor(candidato: { sicafHabilitado: boolean; cnpj: string }): string {
+  return `${candidato.sicafHabilitado ? "1" : "0"}${candidato.cnpj}`;
+}
+
+function decodificarCursor(cursor: string): { sicafHabilitado: boolean; cnpj: string } {
+  const flag = cursor.charAt(0);
+  if (flag === "0" || flag === "1") {
+    return { sicafHabilitado: flag === "1", cnpj: cursor.slice(1) };
+  }
+  // Cursor não reconhecido (ex.: URL editada à mão) — trata como continuação do grupo comum,
+  // nunca quebra a página com erro.
+  return { sicafHabilitado: false, cnpj: cursor };
+}
 
 export interface CandidatoCnpjResultado {
   id: string;
@@ -32,6 +45,8 @@ export interface CandidatoCnpjResultado {
   cnaePrincipalCodigo: string;
   cnaePrincipalDescricao: string;
   categoriaSugerida: string[];
+  /** `true` = cadastrado e habilitado a licitar no SICAF (compras.gov.br) — prioridade na lista. */
+  sicafHabilitado: boolean;
   /** `true` quando já existe um `Fornecedor` com este CNPJ. */
   jaEhFornecedor: boolean;
 }
@@ -59,17 +74,41 @@ export async function buscarCandidatosCnpj(
     return { error: parsed.error.issues[0]?.message ?? "Filtro inválido" };
   }
 
-  const { municipio, cnae, categoria, busca, cursor } = parsed.data;
+  const { estado, municipio, cnae, categoria, busca, cursor } = parsed.data;
   const municipioNormalizado = normalizarMunicipio(municipio);
 
-  const where: Prisma.EmpresaCandidataFornecedorWhereInput = {
-    estado: ESTADO_IMPORTADO,
+  const filtrosBase: Prisma.EmpresaCandidataFornecedorWhereInput = {
+    estado,
     municipio: municipioNormalizado,
-    ...(cursor ? { cnpj: { gt: cursor } } : {}),
     ...(cnae ? { cnaePrincipalCodigo: { startsWith: cnae } } : {}),
     ...(categoria ? { categoriaSugerida: { has: categoria } } : {}),
     ...(busca ? { razaoSocial: { contains: busca, mode: "insensitive" } } : {}),
   };
+
+  // Ordenação prioriza `sicafHabilitado` (quem já licita com o governo federal aparece primeiro —
+  // pedido do usuário), com `cnpj` como desempate estável. O cursor carrega os dois: continuar só
+  // por `cnpj` depois de trocar a ordenação quebraria a paginação bem no ponto em que a lista passa
+  // do grupo "habilitado" para o comum (repetiria ou pularia linhas).
+  const filtroCursor = (() => {
+    if (!cursor) return null;
+    const { sicafHabilitado, cnpj } = decodificarCursor(cursor);
+    if (sicafHabilitado) {
+      // Próxima linha: ou ainda dentro do grupo habilitado (cnpj maior), ou qualquer linha do
+      // grupo comum (que vem inteiro depois, na ordenação desc).
+      return {
+        OR: [
+          { sicafHabilitado: true, cnpj: { gt: cnpj } },
+          { sicafHabilitado: false },
+        ],
+      };
+    }
+    // Já estava no grupo comum — não há mais nada "antes" dele para pular.
+    return { sicafHabilitado: false, cnpj: { gt: cnpj } };
+  })();
+
+  const where: Prisma.EmpresaCandidataFornecedorWhereInput = filtroCursor
+    ? { AND: [filtrosBase, filtroCursor] }
+    : filtrosBase;
 
   const registros = await dbCandidatos.empresaCandidataFornecedor.findMany({
     where,
@@ -83,8 +122,9 @@ export async function buscarCandidatosCnpj(
       cnaePrincipalCodigo: true,
       cnaePrincipalDescricao: true,
       categoriaSugerida: true,
+      sicafHabilitado: true,
     },
-    orderBy: { cnpj: "asc" },
+    orderBy: [{ sicafHabilitado: "desc" }, { cnpj: "asc" }],
     // +1 para saber se há próxima página sem um COUNT(*) à parte (caro numa
     // tabela de milhões de linhas).
     take: TAMANHO_PAGINA + 1,
@@ -109,7 +149,7 @@ export async function buscarCandidatosCnpj(
         ...c,
         jaEhFornecedor: cnpjsJaFornecedor.has(mascararCnpj(c.cnpj)),
       })),
-      proximoCursor: temProximaPagina ? pagina[pagina.length - 1]!.cnpj : null,
+      proximoCursor: temProximaPagina ? codificarCursor(pagina[pagina.length - 1]!) : null,
     },
   };
 }
@@ -204,7 +244,7 @@ export async function adicionarCandidatoAPlanilha(
 }
 
 interface CacheMunicipios {
-  valor: string[];
+  valor: MunicipioComCandidatos[];
   expiraEm: number;
 }
 
@@ -224,39 +264,23 @@ interface CacheMunicipios {
 let cacheMunicipios: CacheMunicipios | null = null;
 const TTL_CACHE_MUNICIPIOS_MS = 5 * 60 * 1000;
 
+export interface MunicipioComCandidatos {
+  municipio: string;
+  estado: string;
+}
+
 /**
- * Municípios de `ESTADO_IMPORTADO` que têm ao menos um candidato — alimenta o dropdown de
- * Município em `/fornecedores/descobrir`, mesmo padrão do dropdown de Categoria (lista só o que
- * existe, evita usuário digitar cidade sem candidato nenhum ou com erro de acento/grafia — que
- * já causou um bug real, ver CLAUDE.md e docs/PLAN.md M27).
- *
- * Implementado como **loose index scan** (skip scan) emulado com `WITH RECURSIVE`, não como
- * `GROUP BY`/`DISTINCT`: o Postgres não tem skip scan nativo, então um `GROUP BY municipio`
- * varre a tabela inteira — medido em ~14s contra os 8,66M candidatos, e em produção nem chega a
- * terminar: o `statement_timeout` corta antes (SQLSTATE 57014) e a página fica em branco. Pior,
- * como toda tentativa falha, o cache abaixo nunca é populado e cada carregamento repete o erro.
- *
- * A recursão pede repetidamente "o menor município > o último que achei", e cada passo é um
- * `Index Scan ... LIMIT 1` sobre `[estado, municipio, cnpj]` — o custo passa a ser proporcional
- * ao número de municípios (645 em SP), não ao de linhas. Medido em produção: **182ms**, ~77x mais
- * rápido, dentro do `statement_timeout` com folga.
- *
- * O `WHERE municipio IS NOT NULL` no SELECT final descarta a linha-sentinela: o passo recursivo
- * devolve `NULL` quando não há mais município à frente, e é isso que encerra a recursão.
+ * Municípios de UMA UF que têm ao menos um candidato — skip scan de coluna única, mesma consulta
+ * medida em produção (182ms contra 8,66M linhas de SP). Ver `listarMunicipiosComCandidatos` para
+ * por que isso roda 1x por UF em paralelo em vez de 1 consulta composta.
  */
-export async function listarMunicipiosComCandidatos(): Promise<string[]> {
-  await requireAuth();
-
-  if (cacheMunicipios && cacheMunicipios.expiraEm > Date.now()) {
-    return cacheMunicipios.valor;
-  }
-
+async function municipiosDaUf(estado: string): Promise<string[]> {
   const linhas = await dbCandidatos.$queryRaw<Array<{ municipio: string }>>`
     WITH RECURSIVE municipios AS (
       (
         SELECT "municipio"
         FROM "empresas_candidatas_fornecedor"
-        WHERE "estado" = ${ESTADO_IMPORTADO}
+        WHERE "estado" = ${estado}
         ORDER BY "municipio"
         LIMIT 1
       )
@@ -264,7 +288,7 @@ export async function listarMunicipiosComCandidatos(): Promise<string[]> {
       SELECT (
         SELECT "municipio"
         FROM "empresas_candidatas_fornecedor"
-        WHERE "estado" = ${ESTADO_IMPORTADO}
+        WHERE "estado" = ${estado}
           AND "municipio" > municipios."municipio"
         ORDER BY "municipio"
         LIMIT 1
@@ -277,7 +301,51 @@ export async function listarMunicipiosComCandidatos(): Promise<string[]> {
     WHERE "municipio" IS NOT NULL
     ORDER BY "municipio"
   `;
-  const valor = linhas.map((l) => l.municipio);
+  return linhas.map((l) => l.municipio);
+}
+
+/**
+ * Pares (município, UF) com ao menos um candidato, nas UFs importadas (`ESTADOS_CANDIDATOS_CNPJ`)
+ * — alimenta o dropdown de Município em `/fornecedores/descobrir`, mesmo padrão do dropdown de
+ * Categoria (lista só o que existe, evita usuário digitar cidade sem candidato nenhum ou com erro
+ * de acento/grafia — que já causou um bug real, ver CLAUDE.md e docs/PLAN.md M27).
+ *
+ * Devolve o PAR, não só o nome: expandido para o Sudeste inteiro (SP+MG+RJ+ES), nomes de
+ * município colidem entre UFs vizinhas (medido: "Rio Claro" em SP e RJ, "Cantagalo" em MG e RJ,
+ * mais 7 outros) — um dropdown só com o nome deixaria o usuário escolher a cidade errada sem
+ * saber, e a busca misturaria candidatos de duas cidades diferentes.
+ *
+ * Implementado como **4 skip scans de coluna única em paralelo** (1 por UF, `municipiosDaUf`),
+ * não como 1 consulta composta por (estado, município). Uma versão com `WITH RECURSIVE` +
+ * `LATERAL` avançando o PAR de colunas foi tentada e descartada por medição: o plano do
+ * `EXPLAIN` parecia barato (`Index Cond` com o comparador de linha, custo estimado ~18), mas a
+ * execução real não bate com a estimativa — medido em produção: 10 pares em 100ms, 50 pares em
+ * 4,2s, 150 pares estourou o timeout de 20s (crescimento muito pior que linear). A causa provável
+ * é a combinação de `estado = ANY(4 valores)` com o comparador de linha, que o planner não
+ * otimiza tão bem quanto uma igualdade simples — mas a causa exata importa menos que o fato
+ * medido: essa forma não escala. A versão com 4 consultas separadas (`estado = <valor>`, sem
+ * `ANY`) é a mesma exata forma já validada em produção; 4 delas em paralelo somaram ~1s no VPS.
+ */
+export async function listarMunicipiosComCandidatos(): Promise<MunicipioComCandidatos[]> {
+  await requireAuth();
+
+  if (cacheMunicipios && cacheMunicipios.expiraEm > Date.now()) {
+    return cacheMunicipios.valor;
+  }
+
+  const porUf = await Promise.all(
+    ESTADOS_CANDIDATOS_CNPJ.map(async (estado) => ({
+      estado,
+      municipios: await municipiosDaUf(estado),
+    })),
+  );
+
+  const valor = porUf
+    .flatMap(({ estado, municipios }) => municipios.map((municipio) => ({ estado, municipio })))
+    .sort(
+      (a, b) =>
+        a.municipio.localeCompare(b.municipio, "pt-BR") || a.estado.localeCompare(b.estado),
+    );
 
   cacheMunicipios = { valor, expiraEm: Date.now() + TTL_CACHE_MUNICIPIOS_MS };
   return valor;
