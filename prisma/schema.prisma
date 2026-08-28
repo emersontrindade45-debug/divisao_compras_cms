@@ -587,14 +587,19 @@ model EmpresaCandidataFornecedor {
   competenciaRfb         String // "AAAA-MM" do dump processado
   importadoEm            DateTime  @default(now())
   atualizadoEm           DateTime  @updatedAt
+  sicafHabilitado        Boolean   @default(false) // true = cadastrado e habilitado a licitar no SICAF (compras.gov.br); referência de prioridade, não filtro exclusivo
+  sicafAtualizadoEm      DateTime? // última vez que o cruzamento com o SICAF rodou; null = nunca cruzado
 
-  // `cnpj` no fim é o que faz a busca da UI funcionar: `buscarCandidatosCnpj`
-  // filtra por `[estado, municipio]` mas ordena/pagina por `cnpj`. Com índice só
-  // em `[estado, municipio]`, o planner preferia varrer o unique de `cnpj` (já
-  // ordenado, evita o sort) filtrando município linha a linha — em 8,66M linhas
-  // isso estourava o `statement_timeout` em produção (erro 57014). Com a coluna
-  // de ordenação no índice, o mesmo SELECT caiu para ~1ms.
-  @@index([estado, municipio, cnpj])
+  // `sicafHabilitado` + `cnpj` no fim são o que fazem `buscarCandidatosCnpj` funcionar: a busca
+  // filtra por `[estado, municipio]` e ORDENA por `sicafHabilitado DESC, cnpj ASC` (prioriza quem
+  // já licita com o governo — pedido do usuário). Sem essas colunas no índice, na mesma ordem e
+  // direção da consulta, o Postgres acha as linhas rápido mas precisa ordenar o resultado inteiro
+  // em memória antes do LIMIT — medido em Santos/SP (89 mil candidatos): 16,2s. Com o índice
+  // cobrindo a ordenação inteira, o mesmo SELECT caiu para ~2,5ms (Index Scan puro, sem Sort).
+  // `sicafHabilitado(sort: Desc)` é necessário porque a ordenação mistura direções (DESC depois
+  // ASC) — um índice ascendente comum não serve varredura reversa parcial, só um scan explícito
+  // nessa direção.
+  @@index([estado, municipio, sicafHabilitado(sort: Desc), cnpj], name: "empresas_candidatas_fornecedor_busca_priorizada_idx")
   @@index([categoriaSugerida], type: Gin)
   @@map("empresas_candidatas_fornecedor")
 }

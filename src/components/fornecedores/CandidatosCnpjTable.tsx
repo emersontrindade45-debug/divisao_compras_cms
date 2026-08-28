@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { mascararCnpj } from "@/lib/domain/cnpj";
+import { VARIANT_CLASSES } from "@/lib/domain/status";
 import { AdicionarCandidatoButton } from "./AdicionarCandidatoButton";
 import type { CandidatoCnpjResultado } from "@/lib/actions/candidatosCnpj";
 
@@ -42,7 +43,14 @@ export function CandidatosCnpjTable({ candidatos }: { candidatos: CandidatoCnpjR
           {candidatos.map((candidato) => (
             <TableRow key={candidato.id}>
               <TableCell className="max-w-64 font-medium whitespace-normal">
-                {candidato.razaoSocial}
+                <div className="flex items-center gap-1.5">
+                  {candidato.razaoSocial}
+                  {candidato.sicafHabilitado && (
+                    <Badge className={VARIANT_CLASSES.success} title="Cadastrado e habilitado a licitar no SICAF (compras.gov.br)">
+                      SICAF
+                    </Badge>
+                  )}
+                </div>
                 {candidato.nomeFantasia ? (
                   <span className="block text-xs text-muted-foreground">
                     {candidato.nomeFantasia}
