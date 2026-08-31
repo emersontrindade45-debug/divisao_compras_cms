@@ -24,6 +24,7 @@ vi.mock("@/lib/sheets/preencherPrecosPublicos", () => ({
 }));
 
 import { preencherCotacao, sincronizarItemComPlanilha } from "../preencherCotacao";
+import { MAX_PRECOS_POR_ITEM } from "@/lib/sheets/limitesPrecosPublicos";
 
 describe("preencherCotacao", () => {
   beforeEach(() => {
@@ -95,6 +96,21 @@ describe("preencherCotacao", () => {
       select: { resultadosSimilaridade: { where?: Record<string, unknown> } };
     };
     expect(argumento.select.resultadosSimilaridade.where).toEqual({ descartado: false });
+  });
+
+  // A outra metade do corte de 5 do processo 1829/2024 (ver o teste-irmão em
+  // sheets/__tests__/preencherPrecosPublicos.test.ts): o `take` do Prisma nem
+  // trazia o 6º candidato do banco, então subir só o corte da escrita não
+  // mudaria nada. Os dois pontos leem a MESMA constante — este teste guarda a
+  // ponta do banco, e o número vai à mão para não acompanhar a constante.
+  it("pede ao banco os 10 melhores candidatos por item, não 5", async () => {
+    await preencherCotacao("proc-1");
+
+    const argumento = mocks.db.item.findMany.mock.calls[0]![0] as {
+      select: { resultadosSimilaridade: { take?: number } };
+    };
+    expect(argumento.select.resultadosSimilaridade.take).toBe(10);
+    expect(MAX_PRECOS_POR_ITEM).toBe(10);
   });
 
   it("envia à planilha só os preços dos candidatos, na ordem de score", async () => {

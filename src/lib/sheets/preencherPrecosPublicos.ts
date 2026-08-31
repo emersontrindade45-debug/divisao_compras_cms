@@ -1,7 +1,7 @@
 import "server-only";
 import { getSheetsClient } from "./googleAuth";
+import { MAX_PRECOS_POR_ITEM } from "./limitesPrecosPublicos";
 
-const MAX_PRECOS_POR_ITEM = 5;
 // Tamanho de fonte padrão do Sheets quando a célula não tem formatação
 // explícita — usado só se a leitura do cabeçalho não devolver um valor.
 const TAMANHO_FONTE_PADRAO = 10;
@@ -291,6 +291,29 @@ export async function preencherPrecosPublicos(
     );
   }
 
+  // Numerais já escritos no cabeçalho de OUTRAS colunas "Preço Público". Uma
+  // coluna sem numeral ("Preço Público" seco, sobra de uma planilha montada à
+  // mão) não pode receber `paraRomano(posição)` cegamente: na planilha do
+  // processo 1829/2024 a coluna vaga é a 6ª da faixa, mas "Preço Público VI"
+  // já está em uso pela coluna seguinte — duas colunas com o mesmo numeral
+  // tornam ambígua a referência do preço na memória de cálculo.
+  const numeraisEmUso = new Set<string>();
+  colunasPrecoPublico.forEach((idx) => {
+    const numeral = REGEX_NUMERAL.exec(headerRow[idx] ?? "")?.[1];
+    if (numeral) numeraisEmUso.add(numeral.toUpperCase());
+  });
+
+  /** Numeral da coluna: o que já está no cabeçalho, senão o menor romano livre. */
+  function numeralParaColuna(colIdx: number): string {
+    const existente = REGEX_NUMERAL.exec(headerRow[colIdx] ?? "")?.[1];
+    if (existente) return existente;
+    let n = colunasPrecoPublico.indexOf(colIdx) + 1;
+    while (numeraisEmUso.has(paraRomano(n))) n += 1;
+    const numeral = paraRomano(n);
+    numeraisEmUso.add(numeral);
+    return numeral;
+  }
+
   let linhasPreenchidas = 0;
 
   for (const item of itens) {
@@ -327,9 +350,7 @@ export async function preencherPrecosPublicos(
         values: [[preco.valor]],
       });
 
-      const posicao = colunasPrecoPublico.indexOf(colIdx) + 1;
-      const numeralExistente = REGEX_NUMERAL.exec(headerRow[colIdx] ?? "")?.[1];
-      const numeral = numeralExistente ?? paraRomano(posicao);
+      const numeral = numeralParaColuna(colIdx);
       cabecalhosParaAtualizar.set(colIdx, `Preço Público ${numeral} - ${abreviarOrgao(preco.orgao)}`);
       algumaEscrita = true;
     }

@@ -16,6 +16,7 @@ vi.mock("../googleAuth", () => ({
 }));
 
 import { preencherPrecosPublicos } from "../preencherPrecosPublicos";
+import { MAX_PRECOS_POR_ITEM } from "../limitesPrecosPublicos";
 
 // MATERIAL na coluna H (índice 7), como nas planilhas reais. Colunas de
 // preço público detectadas pelo PRÓPRIO RÓTULO no cabeçalho — não por
@@ -187,6 +188,78 @@ describe("preencherPrecosPublicos", () => {
       )?.updateCells.rows[0].values[0].userEnteredValue.stringValue;
     expect(textoDaColuna(8)).toBe("Preço Público I - Orgao A");
     expect(textoDaColuna(9)).toBe("Preço Público II - Orgao B");
+  });
+
+  // Regressão medida em produção (processo 1829/2024, 2026-08-31): o item 2
+  // tinha 6 candidatos ativos e a planilha, 14 colunas "Preço Público" livres —
+  // mesmo assim só 5 preços chegavam à linha, porque o corte era 5 nos dois
+  // lados (aqui e no `take` do Prisma) e nada na tela indicava o descarte.
+  // O número está escrito à mão de propósito: se a asserção usasse
+  // MAX_PRECOS_POR_ITEM ela acompanharia a constante e uma volta a 5 passaria
+  // (CLAUDE.md §9.105).
+  it("escreve até 10 preços num item quando há colunas 'Preço Público' de sobra", async () => {
+    const COLUNAS = 12;
+    const largura = 8 + COLUNAS;
+    const cabecalho = Array.from({ length: largura }, () => "");
+    cabecalho[COL_MATERIAL] = "MATERIAL";
+    for (let i = 0; i < COLUNAS; i += 1) cabecalho[8 + i] = "Preço Público";
+    const linhaVazia = Array.from({ length: largura }, () => "");
+    linhaVazia[COL_MATERIAL] = "Link de internet";
+
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({ data: { values: [cabecalho, linhaVazia] } });
+
+    const precos = Array.from({ length: COLUNAS }, (_, i) => ({
+      valor: 100 + i,
+      orgao: `ORGAO ${i}`,
+    }));
+    const resultado = await preencherPrecosPublicos("sheet-id", [
+      { descricao: "Link de internet", precos },
+    ]);
+
+    const { data } = valuesBatchUpdateMock.mock.calls[0]![0].requestBody;
+    expect(data).toHaveLength(10);
+    expect(MAX_PRECOS_POR_ITEM).toBe(10);
+    // Os 10 primeiros da lista (que chega ordenada por score), cada um na sua
+    // coluna — nunca dois preços na mesma célula.
+    expect(data.map((d: { values: number[][] }) => d.values[0]![0])).toEqual([
+      100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+    ]);
+    expect(new Set(data.map((d: { range: string }) => d.range)).size).toBe(10);
+    expect(resultado.linhasPreenchidas).toBe(1);
+  });
+
+  // Planilha real do processo 1829/2024: entre "Preço Público V" e
+  // "Preço Público VI - Fundacao…" existe uma coluna só com "Preço Público",
+  // sem numeral. Ela é a 6ª da faixa, então numerar pela posição escreveria um
+  // segundo "VI" e a memória de cálculo passaria a citar duas colunas com o
+  // mesmo nome.
+  it("não repete numeral já usado por outra coluna ao rotular uma coluna sem numeral", async () => {
+    const largura = 8 + 3;
+    const cabecalho = Array.from({ length: largura }, () => "");
+    cabecalho[COL_MATERIAL] = "MATERIAL";
+    cabecalho[8] = "Preço Público I - Orgao Antigo";
+    cabecalho[9] = "Preço Público"; // vaga sem numeral — 2ª da faixa
+    cabecalho[10] = "Preço Público II - Outro Orgao";
+    const linhaItem = Array.from({ length: largura }, () => "");
+    linhaItem[COL_MATERIAL] = "Link de internet";
+    linhaItem[8] = "R$ 10,00";
+    linhaItem[10] = "R$ 30,00";
+
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({ data: { values: [cabecalho, linhaItem] } });
+
+    await preencherPrecosPublicos("sheet-id", [
+      { descricao: "Link de internet", precos: [{ valor: 500, orgao: "MUNICIPIO DE CRATEUS" }] },
+    ]);
+
+    const { requests } = structuralBatchUpdateMock.mock.calls[0]![0].requestBody;
+    expect(requests).toHaveLength(1);
+    expect(requests[0].updateCells.range.startColumnIndex).toBe(9);
+    // III, não II: II já é de outra coluna.
+    expect(requests[0].updateCells.rows[0].values[0].userEnteredValue.stringValue).toBe(
+      "Preço Público III - Municipio De Crateus",
+    );
   });
 
   it("não escreve nada e sinaliza quando a planilha não tem nenhuma coluna 'Preço Público'", async () => {

@@ -54,9 +54,11 @@ export function PreencherCotacaoForm({ processoId }: { processoId: string }) {
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Preencher cotação</p>
         <p className="text-xs text-muted-foreground">
-          Escreve os melhores preços públicos encontrados na pesquisa de similaridade (até 5 por
+          Escreve os melhores preços públicos encontrados na pesquisa de similaridade (até 10 por
           item) diretamente na planilha de cotação já sincronizada deste processo, casando cada
-          item pela descrição (coluna MATERIAL).
+          item pela descrição (coluna MATERIAL). Cada preço ocupa uma coluna &quot;Preço
+          Público&quot;: se a planilha tiver menos colunas do que preços, os excedentes ficam de
+          fora e o resultado avisa.
         </p>
       </div>
       <Button type="button" onClick={handleClick} disabled={pending} size="sm">

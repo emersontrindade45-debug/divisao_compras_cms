@@ -6,10 +6,10 @@ import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { extrairSpreadsheetId } from "@/lib/sheets/googleSheets";
 import { preencherPrecosPublicos } from "@/lib/sheets/preencherPrecosPublicos";
+import { MAX_PRECOS_POR_ITEM } from "@/lib/sheets/limitesPrecosPublicos";
 import { valorUnitarioEfetivo } from "@/lib/domain/roteiroCalculo";
 import type { ActionResult } from "./processos";
 
-const MAX_PRECOS_POR_ITEM = 5;
 
 export interface PreencherCotacaoResultado {
   spreadsheetUrl: string;
@@ -48,7 +48,7 @@ export async function sincronizarItemComPlanilha(
           // commit "Demove candidatos já descartados"), só marcado com
           // `descartado: true` e normalmente `scoreFinal: 0`. Sem este
           // `where`, um item com poucos candidatos ativos deixava descartado
-          // preencher as vagas do top-5, entrando na planilha como se fosse
+          // preencher as vagas do topo, entrando na planilha como se fosse
           // fonte válida.
           where: { descartado: false },
           orderBy: { scoreFinal: "desc" },
