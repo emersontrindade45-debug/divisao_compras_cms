@@ -1435,3 +1435,23 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      PENDENTE no momento do evento: com 3 CNAEs e concorrência 2, o terceiro só começa depois que
      um worker libera, e é ele que prova a garantia (mutação passou a falhar: 111ms contra os
      ≥900ms esperados).
+
+110. **Mesmo limite escrito em duas camadas: o MENOR manda, e ninguém vê qual foi.** O teto de
+     preços públicos por item existia duas vezes com o mesmo nome e o mesmo valor —
+     `MAX_PRECOS_POR_ITEM = 5` no `take` do Prisma (`preencherCotacao.ts`) e outro igual no
+     `slice` da escrita (`preencherPrecosPublicos.ts`). Subir só um não muda nada: o `take` nem
+     traz o 6º candidato do banco, então o `slice` maior corta um conjunto que já veio cortado.
+     Medido no processo 1829/2024 (2026-08-31): item com 6 candidatos ativos e planilha com **14**
+     colunas "Preço Público" livres escrevia 5 preços, sem nada na tela indicando o descarte — o
+     analista via a planilha incompleta e concluía que a planilha é que estava cheia. Regra: limite
+     que atravessa camadas mora em UM módulo e é importado; quando o valor precisa ser lido por um
+     teste, o módulo não pode ter `import "server-only"` nem puxar SDK (§9.62), então extrair
+     constante para arquivo próprio é mais barato que mockar. Corolário de teste: o número vai
+     **à mão** na asserção (`toBe(10)`), nunca via a constante — asserção que importa a constante
+     acompanha a mutação e uma volta a 5 passa verde (§9.105).
+     **E cuidado com o defeito que a correção torna visível:** elevado o teto, a 6ª coluna passou a
+     ser escrita — e ela era a coluna "Preço Público" **sem numeral** no cabeçalho, que o código
+     numerava pela posição na faixa (6ª → "VI") enquanto "Preço Público VI" já pertencia à coluna
+     seguinte. Duas colunas com o mesmo numeral tornam ambígua a referência do preço na memória de
+     cálculo. Ao levantar um limite, perguntar **o que passa a ser exercitado pela primeira vez** —
+     o caminho novo é código que nunca rodou em produção, mesmo estando lá há meses (§9.55).
