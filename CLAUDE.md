@@ -1455,3 +1455,24 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      seguinte. Duas colunas com o mesmo numeral tornam ambígua a referência do preço na memória de
      cálculo. Ao levantar um limite, perguntar **o que passa a ser exercitado pela primeira vez** —
      o caminho novo é código que nunca rodou em produção, mesmo estando lá há meses (§9.55).
+
+111. **Chave de duplicata montada sobre a URL de um AGREGADO bloqueia as partes dele — no PNCP a
+     `fonteUrl` é a do EDITAL, não a do item.** `registrarCandidatoNoItem` e
+     `descartarCandidatoAssistente` deduplicavam por `(itemId, fonteUrl)`, e `montarUrlEdital`
+     devolve a mesma URL para todos os itens de uma compra. Consequência medida em produção
+     (processo 0736/2025, item 2, 2026-09-17): adicionado o primeiro candidato de um edital,
+     TODO item irmão da mesma licitação passava a ser recusado com "Esta contratação já está na
+     lista deste item" — exatamente o que o picker "outros itens desta licitação" existe para
+     permitir, e sem nenhum caminho alternativo para o analista registrar um preço legítimo e
+     distinto. O mesmo defeito, no descarte, respondia "Candidato já registrado" e não gravava
+     lápide nenhuma: o clique se perdia e a frase voltava na busca seguinte. E reviver a lápide
+     por URL sobrescrevia o registro de OUTRO item do mesmo edital. A correção reusa a chave que o
+     projeto já tinha acertado uma vez (§9.101): a identidade é `(itemId, fonteUrl, descrição
+     normalizada)` — irmãos se distinguem pela descrição, que é o que os diferencia. Regra geral:
+     ao escrever guarda de unicidade, perguntar **"esta chave identifica a coisa que estou
+     gravando, ou o contêiner dela?"**; URL de edital, de página de resultado ou de qualquer
+     agregado identifica o contêiner, e usá-la colapsa N observações legítimas em uma.
+     **Corolário, que é a §9.100 de novo:** o teste existente chamava-se "respeita a mesma dedup
+     por item+fonteUrl da adição normal" e AFIRMAVA o comportamento defeituoso, protegendo-o de
+     ser mexido. Ao corrigir um bug, ler o teste que cobre o caminho perguntando se ele descreve o
+     comportamento correto ou apenas o atual.

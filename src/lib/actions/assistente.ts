@@ -13,6 +13,7 @@ import {
   listaSugestoesSchema,
 } from "@/lib/assistente/sugestoes";
 import { getProvedorIA } from "@/lib/ia";
+import { chaveDescricao } from "@/lib/similaridade/chaveDescricao";
 import { candidatoEstaNoTempo } from "@/lib/similaridade/filtroRecencia";
 import { calcularScoreFinal } from "@/lib/similaridade/scoreFinal";
 import { janelaContratacaoPublica } from "@/lib/domain/in65Rules";
@@ -407,26 +408,39 @@ async function registrarCandidatoNoItem(params: {
 }): Promise<ResultadoAprovacao> {
   const { candidato, item, userId, conversaId, mensagemId, candidatoId, termoBuscaUsado } = params;
 
-  // Duplicata: a mesma contratação já registrada no item não precisa entrar de
-  // novo. A guarda forte contra duplicidade fica na promoção a Fonte, que tem
-  // constraint `@unique` e update condicional (CLAUDE.md §9.14) — aqui poluir a
-  // lista é o único dano, e a checagem simples resolve.
+  // Duplicata: a mesma OBSERVAÇÃO DE PREÇO já registrada no item não precisa
+  // entrar de novo. A guarda forte contra duplicidade fica na promoção a Fonte,
+  // que tem constraint `@unique` e update condicional (CLAUDE.md §9.14) — aqui
+  // poluir a lista é o único dano, e a checagem simples resolve.
+  //
+  // A chave é `(itemId, fonteUrl, descrição normalizada)`, nunca só a URL: a
+  // `fonteUrl` do PNCP é a do EDITAL (`montarUrlEdital`), compartilhada por
+  // todos os itens da compra. Com a URL sozinha, adicionar um segundo item
+  // irmão do mesmo edital — que é justamente o que o picker "outros itens desta
+  // licitação" existe para permitir — era recusado com "já está na lista",
+  // deixando o analista sem caminho nenhum para registrar um preço legítimo e
+  // distinto. Irmãos se distinguem pela descrição (é o que os diferencia), e a
+  // normalização faz a mesma frase com e sem ponto final contar como uma só.
   //
   // Exceção: linha DESCARTADA não bloqueia. O descarte grava uma lápide
   // (score 0, ver `descartarCandidatoAssistente`), e tratá-la como duplicata
   // deixava o analista sem saída — ele mandava adicionar de novo, recebia "já
   // está na lista" e o contrato não aparecia em lugar nenhum. Neste caso a
-  // lápide é revivida com os dados reais, preservando o id.
+  // lápide é revivida com os dados reais, preservando o id. Reviver exige casar
+  // a MESMA chave: com a URL sozinha, adicionar o item B do edital sobrescrevia
+  // a lápide do item A, que é outro registro.
   let idParaReviver: string | null = null;
   if (candidato.fonteUrl) {
-    const jaExiste = await db.resultadoSimilaridade.findFirst({
+    const chaveNova = chaveDescricao(candidato.fonteDescricao);
+    const registrados = await db.resultadoSimilaridade.findMany({
       where: { itemId: item.id, fonteUrl: candidato.fonteUrl },
-      select: { id: true, descartado: true },
+      select: { id: true, descartado: true, fonteDescricao: true },
     });
-    if (jaExiste && !jaExiste.descartado) {
-      return { ok: false, mensagem: "Esta contratação já está na lista deste item." };
+    const mesmoItem = registrados.filter((r) => chaveDescricao(r.fonteDescricao) === chaveNova);
+    if (mesmoItem.some((r) => !r.descartado)) {
+      return { ok: false, mensagem: "Este item da contratação já está na lista deste item." };
     }
-    if (jaExiste) idParaReviver = jaExiste.id;
+    idParaReviver = mesmoItem[0]?.id ?? null;
   }
 
   // ── 1. Validar recência com a janela da natureza cadastrada do item ───────
@@ -784,14 +798,19 @@ export async function descartarCandidatoAssistente(
     return { ok: false, mensagem: "Item pertence a outro processo." };
   }
 
-  // Se a URL já está registrada para este item (adicionado ou descartado antes),
-  // não cria duplicata — o cliente já vai esconder o card pelo state local.
+  // Se este item da contratação já está registrado (adicionado ou descartado
+  // antes), não cria duplicata — o cliente já vai esconder o card pelo state
+  // local. A chave inclui a descrição pelo mesmo motivo de
+  // `registrarCandidatoNoItem`: com a URL do edital sozinha, descartar um item
+  // irmão dava "já registrado" sem gravar lápide nenhuma, e o descarte se
+  // perdia.
   if (sugestao.fonteUrl) {
-    const jaExiste = await db.resultadoSimilaridade.findFirst({
+    const chaveNova = chaveDescricao(sugestao.fonteDescricao);
+    const registrados = await db.resultadoSimilaridade.findMany({
       where: { itemId: item.id, fonteUrl: sugestao.fonteUrl },
-      select: { id: true },
+      select: { id: true, fonteDescricao: true },
     });
-    if (jaExiste) {
+    if (registrados.some((r) => chaveDescricao(r.fonteDescricao) === chaveNova)) {
       return { ok: true, mensagem: "Candidato já registrado." };
     }
   }

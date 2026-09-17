@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
     mensagemAssistente: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
     conversaAssistente: { findFirst: vi.fn() },
     item: { findUnique: vi.fn(), findMany: vi.fn() },
-    resultadoSimilaridade: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    resultadoSimilaridade: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
     // Presentes de propósito: os testes provam que NUNCA são chamados.
     fonte: { create: vi.fn() },
     evidencia: { create: vi.fn() },
@@ -59,6 +59,7 @@ import {
   adicionarCandidatoSugerido,
   adicionarItemDaContratacao,
   completarLinksOrigemCandidatos,
+  descartarCandidatoAssistente,
   listarOutrosItensDaContratacao,
   obterConversaAtiva,
 } from "../assistente";
@@ -129,6 +130,7 @@ describe("adicionarCandidatoSugerido", () => {
     mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM);
     mocks.db.item.findUnique.mockResolvedValue(ITEM);
     mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue(null);
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([]);
     mocks.db.resultadoSimilaridade.create.mockResolvedValue({ id: "res-1" });
     mocks.db.resultadoSimilaridade.update.mockResolvedValue({ id: "res-1" });
     // Novo fluxo: recência aprovada por padrão; IA retorna avaliação com score alto.
@@ -251,11 +253,10 @@ describe("adicionarCandidatoSugerido", () => {
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
   });
 
-  it("não regrava contratação que já está na lista do item", async () => {
-    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue({
-      id: "res-existente",
-      descartado: false,
-    });
+  it("não regrava o mesmo item da contratação que já está na lista", async () => {
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+      { id: "res-existente", descartado: false, fonteDescricao: "Cadeira giratória ergonômica" },
+    ]);
 
     const r = await adicionarCandidatoSugerido(PEDIDO);
 
@@ -268,10 +269,9 @@ describe("adicionarCandidatoSugerido", () => {
   // duplicata deixava o analista sem saída: ele mandava adicionar de novo,
   // ouvia "já está na lista" e o contrato não aparecia em lugar nenhum.
   it("revive candidato descartado antes, em vez de recusá-lo como duplicata", async () => {
-    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue({
-      id: "res-lapide",
-      descartado: true,
-    });
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+      { id: "res-lapide", descartado: true, fonteDescricao: "Cadeira giratória ergonômica" },
+    ]);
 
     const r = await adicionarCandidatoSugerido(PEDIDO);
 
@@ -486,6 +486,7 @@ describe("adicionarItemDaContratacao", () => {
     mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM_COM_IDENTIDADE);
     mocks.db.item.findUnique.mockResolvedValue(ITEM);
     mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue(null);
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([]);
     mocks.db.resultadoSimilaridade.create.mockResolvedValue({ id: "res-1" });
     mocks.candidatoEstaNoTempo.mockReturnValue(true);
     mocks.rankearSimilaridade.mockResolvedValue([
@@ -545,13 +546,45 @@ describe("adicionarItemDaContratacao", () => {
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
   });
 
-  it("respeita a mesma dedup por item+fonteUrl da adição normal", async () => {
-    mocks.db.resultadoSimilaridade.findFirst.mockResolvedValue({ id: "res-existente", descartado: false });
+  // Este teste já existiu afirmando o contrário ("respeita a mesma dedup por
+  // item+fonteUrl"), e com isso protegia o defeito: como todos os itens de uma
+  // compra do PNCP dividem a URL do edital, qualquer irmão adicionado depois do
+  // primeiro era recusado com "já está na lista" — o picker de itens-irmãos
+  // ficava inutilizável a partir do segundo clique (CLAUDE.md §9.100).
+  it("aceita item irmão do mesmo edital, que divide a fonteUrl do candidato já na lista", async () => {
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+      { id: "res-existente", descartado: false, fonteDescricao: "Cadeira giratória ergonômica" },
+    ]);
+
+    const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(r.ok).toBe(true);
+    expect(mocks.db.resultadoSimilaridade.create).toHaveBeenCalled();
+  });
+
+  it("recusa o MESMO item irmão adicionado duas vezes", async () => {
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+      { id: "res-irmao", descartado: false, fonteDescricao: "Cadeira giratória sem apoio lombar" },
+    ]);
 
     const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
 
     expect(r.ok).toBe(false);
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+  });
+
+  // A lápide a reviver é a do MESMO item. Com a URL sozinha como chave, o
+  // descarte do item A seria sobrescrito ao adicionar o item B do mesmo edital.
+  it("não revive a lápide de um irmão diferente ao adicionar este item", async () => {
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+      { id: "res-lapide-do-A", descartado: true, fonteDescricao: "Cadeira giratória ergonômica" },
+    ]);
+
+    const r = await adicionarItemDaContratacao(PEDIDO_IRMAO);
+
+    expect(r.ok).toBe(true);
+    expect(mocks.db.resultadoSimilaridade.update).not.toHaveBeenCalled();
+    expect(mocks.db.resultadoSimilaridade.create).toHaveBeenCalled();
   });
 
   it("audita com o número do item irmão distinguível do candidato original", async () => {
@@ -755,5 +788,55 @@ describe("completarLinksOrigemCandidatos", () => {
     const gravado = mocks.db.mensagemAssistente.update.mock.calls[0]![0].data
       .ferramentasUsadas as Array<{ sugestoes: Array<{ fonteUrl: string }> }>;
     expect(gravado[0]!.sugestoes[0]!.fonteUrl).toBe(urlPncp);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Descarte — mesma chave da adição (item da contratação, não o edital inteiro)
+// ---------------------------------------------------------------------------
+
+describe("descartarCandidatoAssistente", () => {
+  const PEDIDO_DESCARTE = { mensagemId: "msg-1", candidatoId: "c1", itemId: "item-1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireRole.mockResolvedValue(USER);
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue(MENSAGEM);
+    mocks.db.item.findUnique.mockResolvedValue(ITEM);
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([]);
+    mocks.db.resultadoSimilaridade.create.mockResolvedValue({ id: "res-1" });
+  });
+
+  it("grava a lápide do descarte quando este item da contratação ainda não está registrado", async () => {
+    const r = await descartarCandidatoAssistente(PEDIDO_DESCARTE);
+
+    expect(r.ok).toBe(true);
+    const gravado = mocks.db.resultadoSimilaridade.create.mock.calls[0]![0].data;
+    expect(gravado.descartado).toBe(true);
+  });
+
+  // Com a URL do edital sozinha como chave, ter um irmão registrado fazia o
+  // descarte responder "já registrado" sem gravar nada: o clique se perdia e a
+  // mesma descrição voltava na busca seguinte.
+  it("grava o descarte mesmo com outro item do MESMO edital já registrado", async () => {
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+      { id: "res-irmao", fonteDescricao: "Cadeira giratória sem apoio lombar" },
+    ]);
+
+    const r = await descartarCandidatoAssistente(PEDIDO_DESCARTE);
+
+    expect(r.ok).toBe(true);
+    expect(mocks.db.resultadoSimilaridade.create).toHaveBeenCalled();
+  });
+
+  it("não duplica a lápide do mesmo item da contratação", async () => {
+    mocks.db.resultadoSimilaridade.findMany.mockResolvedValue([
+      { id: "res-mesmo", fonteDescricao: "Cadeira giratória ergonômica" },
+    ]);
+
+    const r = await descartarCandidatoAssistente(PEDIDO_DESCARTE);
+
+    expect(r.ok).toBe(true);
+    expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
   });
 });

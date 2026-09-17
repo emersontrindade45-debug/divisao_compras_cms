@@ -17,6 +17,7 @@ import {
   buscarCandidatosPublicosComDiagnostico,
   fontesQueIgnoramFiltros,
 } from "@/lib/similaridade/buscarCandidatosPublicos";
+import { chaveDescricao } from "@/lib/similaridade/chaveDescricao";
 import { ordenarResultadoBusca } from "@/lib/similaridade/ordenarResultadoBusca";
 import { rankearEmLotesParalelos } from "@/lib/similaridade/rankearEmLotesParalelos";
 import { getProvedorIA } from "@/lib/ia";
@@ -250,24 +251,6 @@ function resolverProcesso(ctx: ContextoFerramentas, informado?: string): string 
  * `total` e é anunciado na `observacao`.
  */
 const MAX_POR_DESCRICAO = 3;
-
-/**
- * Chave de comparação de descrição de item: sem acento, sem caixa, sem
- * pontuação, espaços colapsados.
- *
- * A pontuação precisa sair porque a mesma compra publica a mesma frase com e
- * sem ponto final — "ACESSO INTERNET - LINK DEDICADO 600 MBPS." e "ACESSO
- * INTERNET - LINK DEDICADO 600 MBPS" apareceram lado a lado no mesmo resultado,
- * e com `trim().toLowerCase()` sozinho contavam como itens diferentes.
- */
-function chaveDescricao(descricao: string): string {
-  return descricao
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
 
 /**
  * Tira da lista as repetições que não acrescentam decisão ao analista, em duas
