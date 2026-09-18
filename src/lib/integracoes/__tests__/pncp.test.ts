@@ -1682,6 +1682,92 @@ describe("listarItensDaCompraPNCP", () => {
     expect(candidatos).toEqual([]);
   });
 
+  // O picker é a única saída do analista quando a busca escondeu o item que ele
+  // precisa: o teto define quantos itens da ata ele consegue enxergar. O número
+  // vai à mão de propósito — importando a constante, a asserção acompanharia uma
+  // eventual volta a 30 e o teste passaria verde com a regressão (§9.105).
+  it("lista até 100 itens da contratação e sinaliza truncamento acima disso", async () => {
+    const consultados: number[] = [];
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const numeroItem = Number(url.match(/\/itens\/(\d+)\/resultados/)?.[1] ?? 0);
+      if (numeroItem) {
+        consultados.push(numeroItem);
+        return mockJson([resultadoDe({ numeroItem })]);
+      }
+      const pagina = Number(new URL(url).searchParams.get("pagina") ?? 1);
+      return mockJson(
+        pagina === 1 ? Array.from({ length: 120 }, (_, i) => itemDe({ numeroItem: i + 1 })) : [],
+      );
+    });
+
+    const { candidatos, completo } = await listarItensDaCompraPNCP(identidadePadrao, "Prefeitura Teste");
+
+    expect(candidatos).toHaveLength(100);
+    // Nem uma requisição a mais: cada item acima do teto custaria `/resultados`.
+    expect(consultados).toHaveLength(100);
+    expect(completo).toBe(false);
+  });
+
+  // A listagem não corre contra o orçamento do turno do assistente — ela é uma
+  // Server Action de clique. Enquanto herdava `TEMPO_MAX_BUSCA_MS` (10s), uma
+  // ata grande vencia o prazo e a lista voltava VAZIA, que é o pior desfecho.
+  // Mutação que confirma: trocar `criarContextoBusca(TEMPO_MAX_LISTAGEM_COMPRA_MS)`
+  // pelo `criarContextoBusca()` padrão derruba este teste.
+  it("tem prazo próprio, maior que o da busca do assistente", async () => {
+    let relogio = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => relogio);
+
+    // 40 itens a 400ms de relógio cada = 16s: passa dos 10s da busca e cabe nos
+    // 30s da listagem.
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const numeroItem = Number(url.match(/\/itens\/(\d+)\/resultados/)?.[1] ?? 0);
+      if (numeroItem) {
+        relogio += 400;
+        return mockJson([resultadoDe({ numeroItem })]);
+      }
+      relogio += 100;
+      const pagina = Number(new URL(url).searchParams.get("pagina") ?? 1);
+      return mockJson(
+        pagina === 1 ? Array.from({ length: 40 }, (_, i) => itemDe({ numeroItem: i + 1 })) : [],
+      );
+    });
+
+    const { candidatos, completo } = await listarItensDaCompraPNCP(identidadePadrao, "Prefeitura Teste");
+
+    expect(relogio).toBeGreaterThan(TEMPO_MAX_BUSCA_MS);
+    expect(candidatos).toHaveLength(40);
+    expect(completo).toBe(true);
+  });
+
+  // O custo de `/resultados` é espera, não trabalho: medido na API real, a
+  // maioria responde em dezenas de ms e alguns poucos em ~4s. Com a
+  // concorrência da busca (5), a cauda fazia 39 itens custarem 34s.
+  it("consulta os resultados com concorrência maior que a da busca", async () => {
+    let emVoo = 0;
+    let maxEmVoo = 0;
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const numeroItem = Number(url.match(/\/itens\/(\d+)\/resultados/)?.[1] ?? 0);
+      if (!numeroItem) {
+        const pagina = Number(new URL(url).searchParams.get("pagina") ?? 1);
+        return mockJson(
+          pagina === 1 ? Array.from({ length: 40 }, (_, i) => itemDe({ numeroItem: i + 1 })) : [],
+        );
+      }
+      emVoo++;
+      maxEmVoo = Math.max(maxEmVoo, emVoo);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      emVoo--;
+      return mockJson([resultadoDe({ numeroItem })]);
+    });
+
+    await listarItensDaCompraPNCP(identidadePadrao, "Prefeitura Teste");
+
+    expect(maxEmVoo).toBe(20);
+  });
+
   it("devolve completo:false quando a paginação de /itens não termina antes do prazo", async () => {
     let relogio = 0;
     vi.spyOn(Date, "now").mockImplementation(() => relogio);

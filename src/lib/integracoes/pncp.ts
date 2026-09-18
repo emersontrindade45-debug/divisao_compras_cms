@@ -290,12 +290,12 @@ export class ErroColetaPNCP extends Error {
   }
 }
 
-function criarContextoBusca(): ContextoBusca {
-  const fimEm = Date.now() + TEMPO_MAX_BUSCA_MS;
+function criarContextoBusca(tempoMaxMs: number = TEMPO_MAX_BUSCA_MS): ContextoBusca {
+  const fimEm = Date.now() + tempoMaxMs;
   const controle = new AbortController();
   const timer = setTimeout(
     () => controle.abort(new Error("[PNCP] Prazo da busca esgotado.")),
-    TEMPO_MAX_BUSCA_MS,
+    tempoMaxMs,
   );
   // Não segurar o processo (nem o teste) vivo por causa do prazo.
   timer.unref?.();
@@ -1074,8 +1074,45 @@ export async function buscarContratosPNCP(
  * assistente — diferente de `buscarContratosPNCP`, que descobre contratações a
  * partir de um termo). Uma ata de registro de preços pode ter centenas de
  * itens, e cada um custa uma requisição extra a `/resultados`.
+ *
+ * **Era 30, subiu para 100 em 2026-09-18 a pedido do usuário** — uma ata de
+ * locação de impressoras tem dezenas de itens comparáveis e o corte em 30
+ * escondia os do fim da lista, sem alternativa na tela. Os três números abaixo
+ * andam juntos e não podem ser mexidos isoladamente: 100 itens só cabem porque
+ * a listagem ganhou prazo e concorrência próprios.
  */
-const MAX_ITENS_LISTAGEM_COMPRA = 30;
+const MAX_ITENS_LISTAGEM_COMPRA = 100;
+
+/**
+ * Prazo da listagem, independente de `TEMPO_MAX_BUSCA_MS`.
+ *
+ * O teto de 10s da busca existe para caber no orçamento de um TURNO do
+ * assistente (`laco.ts`), onde `buscar_pncp` divide o tempo com o modelo e com
+ * as outras ferramentas. A listagem não é ferramenta do turno: é uma Server
+ * Action disparada por clique do analista, que só espera esta chamada. Herdar
+ * os 10s aqui era o que travava o teto de itens — e com 100 itens devolveria
+ * lista VAZIA (prazo vencido descarta a compra inteira, logo abaixo), que é
+ * pior que a lista curta de hoje.
+ *
+ * 30s deixa margem folgada contra o `maxDuration = 60` do segmento de rota, que
+ * ainda precisa responder ao cliente depois.
+ */
+const TEMPO_MAX_LISTAGEM_COMPRA_MS = 30_000;
+
+/**
+ * Concorrência das consultas a `/resultados` na listagem, maior que o
+ * `LOTE_BUSCA_RESULTADOS = 5` da busca.
+ *
+ * Medido contra a API real em 2026-09-18 na compra 46523197000144/2025/40 (39
+ * itens com julgamento): a maioria dos `/resultados` responde em 37–140ms, mas
+ * alguns custam ~4s — a cauda domina o total, não a banda. Com 5 em paralelo os
+ * 39 itens levaram 34,4s; com 20, 8,4s. Como o limite é a espera e não o
+ * trabalho, subir a concorrência é o que torna 100 itens viável dentro do
+ * prazo acima. A busca do assistente segue em 5 de propósito: lá são dezenas de
+ * editais concorrendo pelo mesmo orçamento, e martelar o PNCP em rajada é o que
+ * provoca as recusas de conexão da §9.103.
+ */
+const LOTE_LISTAGEM_RESULTADOS = 20;
 
 /**
  * Lista os itens homologados de UMA contratação específica já identificada
@@ -1102,7 +1139,7 @@ export async function listarItensDaCompraPNCP(
     numero_sequencial: identidade.numeroSequencial,
   };
 
-  const ctx = criarContextoBusca();
+  const ctx = criarContextoBusca(TEMPO_MAX_LISTAGEM_COMPRA_MS);
   try {
     const { itens: todos, completo: paginacaoCompleta } = await buscarTodosItens(processo, ctx);
     if (!paginacaoCompleta) return { candidatos: [], completo: false };
@@ -1113,7 +1150,7 @@ export async function listarItensDaCompraPNCP(
 
     const resultados = await processarComConcorrencia(
       selecionados,
-      LOTE_BUSCA_RESULTADOS,
+      LOTE_LISTAGEM_RESULTADOS,
       (item) => buscarResultadoDoItem(processo, item.numeroItem, ctx),
       (item, erro) =>
         console.warn(

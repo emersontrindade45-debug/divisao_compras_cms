@@ -1476,3 +1476,23 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      por item+fonteUrl da adição normal" e AFIRMAVA o comportamento defeituoso, protegendo-o de
      ser mexido. Ao corrigir um bug, ler o teste que cobre o caminho perguntando se ele descreve o
      comportamento correto ou apenas o atual.
+
+112. **Teto de QUANTIDADE que compartilha o orçamento de TEMPO de outro chamador não sobe
+     sozinho — subi-lo troca "lista curta" por "lista vazia".** O picker de "outros itens desta
+     licitação" (`listarItensDaCompraPNCP`) lia no máximo 30 itens, e o pedido era 100. O número
+     era a parte fácil: a função chamava `criarContextoBusca()` sem argumento e herdava o
+     `TEMPO_MAX_BUSCA_MS = 10s`, que existe para caber no orçamento de um TURNO do assistente —
+     onde `buscar_pncp` divide o tempo com o modelo e com as outras ferramentas. A listagem não é
+     ferramenta de turno: é Server Action de clique, sob `maxDuration = 60`, e o analista só espera
+     ela. Com 100 itens o prazo venceria, e prazo vencido ali descarta a compra INTEIRA (regra
+     deliberada de nunca devolver subconjunto arbitrário) — ou seja, o efeito de "mostrar mais"
+     seria mostrar nada. Ao subir um limite de quantidade, procurar de qual orçamento de tempo
+     aquele caminho vive e perguntar **de quem esse orçamento é** (§9.110: o menor manda, e ninguém
+     vê qual foi).
+     **E medir a concorrência, que aqui era o número que realmente comprava o teto:** medido contra
+     a API real em 2026-09-18 (compra 46523197000144/2025/40, 39 itens com julgamento), os
+     `/resultados` respondem em 37–140ms na maioria e ~4s em alguns — **a cauda domina, não a
+     banda**. Os mesmos 39 itens custaram 34,4s com 5 em paralelo e 8,4s com 20. Quando o custo é
+     espera e não trabalho, subir a concorrência vale mais que subir o prazo; mas só para o caminho
+     que tem o usuário esperando — a busca do assistente segue em 5 de propósito, porque lá são
+     dezenas de editais concorrendo e martelar o PNCP em rajada provoca as recusas da §9.103.
