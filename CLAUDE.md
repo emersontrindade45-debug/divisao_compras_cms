@@ -1582,3 +1582,32 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      **Corolário sobre o último recurso:** a versão antiga, sem coluna livre, escrevia na coluna de
      OUTRO órgão. Degradação tem de preservar a invariante, não o volume — preço ausente é
      recuperável, preço sob o nome errado é uma afirmação falsa que ninguém revisa (§9.93).
+
+117. **Faixa de leitura escrita à mão é um teto invisível — `A1:Z500` fez 22 colunas da planilha
+     não existirem.** O preenchimento lia a aba com range fixo até a coluna Z (índice 25). A
+     planilha do processo 0736/2025 tem 33 colunas "Preço Público" indo até AV (índice 47): as 22
+     além de Z eram invisíveis para o código, que rotulava exatamente 11 e parava. O sintoma
+     enganava de propósito — parecia teto de preços por item (e eu tinha acabado de mexer em dois
+     tetos desses), quando era teto de LEITURA. Ao ler planilha que o usuário edita, pedir a aba
+     inteira (`'{aba}'`, que devolve o intervalo usado) em vez de um retângulo literal: acrescentar
+     coluna é o uso normal, e qualquer limite fixo fica errado na primeira vez que alguém o faz.
+     Corolário de diagnóstico: quando um número observado (11 colunas rotuladas) não bate com
+     nenhuma constante do código, procurar o limite FORA da lógica de negócio — na faixa lida, no
+     tamanho de página, no buffer (§9.61 é a mesma armadilha numa API).
+118. **Célula de fórmula não é dado — `=SUM(...)` fez toda coluna parecer ocupada.** A regra "a
+     coluna só está reservada se tiver algum valor em alguma linha" existe para não deixar rótulo
+     morto bloquear coluna. Só que a planilha tem uma linha TOTAL com `=SUM(P3:P7)` nas 33 colunas
+     da faixa, e a leitura padrão do Sheets devolve o RESULTADO: toda coluna "tinha valor", nenhuma
+     tinha órgão no cabeçalho, e o preenchimento novo classificaria as 33 como ocupadas por
+     desconhecido — não sobraria coluna livre e ele escreveria NADA, reportando todos os itens como
+     sem coluna disponível. A correção é ler a mesma faixa também com `valueRenderOption:
+     "FORMULA"` e descartar o que começa com `=`. Regra geral: ao inferir "esta célula/linha/coluna
+     tem dado", perguntar **de onde o valor veio** — derivado por fórmula, herdado de formatação
+     condicional ou digitado. Só o último é dado.
+     **Corolário de método, que é o ponto desta sessão inteira:** os dois defeitos só apareceram
+     porque fui LER a planilha real para uma tarefa vizinha (apagar células). A suíte estava verde
+     em 1395 testes e teria continuado verde com o preenchimento escrevendo zero linhas em
+     produção. Antes de mandar o usuário exercitar um fluxo que escreve em sistema externo, ler o
+     estado real desse sistema e simular a decisão do código contra ele — não é teste de
+     integração completo, é uma consulta, e aqui evitou entregar uma correção que não funcionaria
+     (§9.23, §9.30).

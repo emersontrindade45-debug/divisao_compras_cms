@@ -201,6 +201,12 @@ interface AbaDeDados {
   /** Índice 0-based da linha onde "MATERIAL" foi encontrado (normalmente a linha 1). */
   linhaCabecalho: number;
   headerRow: string[];
+  /**
+   * Mesmas células de `valores`, porém com as FÓRMULAS em vez do resultado
+   * delas. Serve para distinguir "esta coluna tem preço" de "esta coluna tem o
+   * total calculado da coluna" — ver `colunaTemValor`.
+   */
+  valoresFormula: string[][];
 }
 
 /** Procura, em todas as abas da planilha, a primeira com cabeçalho "MATERIAL". */
@@ -215,9 +221,15 @@ async function localizarAbaDeDados(spreadsheetId: string): Promise<AbaDeDados> {
     .filter((s): s is { title: string; sheetId: number } => !!s.title && s.sheetId != null);
 
   for (const { title: aba, sheetId } of abas) {
+    // A aba inteira, sem recorte de colunas. Era `A1:Z500`, que parava na
+    // coluna Z (índice 25): a planilha do processo 0736/2025 tem 33 colunas
+    // "Preço Público" indo até AV (índice 47), e as 22 além de Z eram
+    // invisíveis para o código — o analista via a faixa que criou ser ignorada,
+    // sem nenhum aviso. Um teto de colunas escrito à mão erra sempre que
+    // alguém acrescenta coluna, que é o uso normal desta planilha.
     const leitura = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `'${aba}'!A1:Z500`,
+      range: `'${aba}'`,
     });
     const valores = leitura.data.values ?? [];
     const linhaCabecalho = valores.findIndex((row) =>
@@ -228,7 +240,22 @@ async function localizarAbaDeDados(spreadsheetId: string): Promise<AbaDeDados> {
       const colunaMaterial = headerRow.findIndex(
         (cell) => (cell ?? "").trim().toUpperCase() === "MATERIAL",
       );
-      return { aba, sheetId, valores, colunaMaterial, linhaCabecalho, headerRow };
+      // Segunda leitura da MESMA faixa, com as fórmulas à mostra. Uma chamada
+      // a mais, paga uma vez, para não confundir célula de total com preço.
+      const comFormulas = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `'${aba}'`,
+        valueRenderOption: "FORMULA",
+      });
+      return {
+        aba,
+        sheetId,
+        valores,
+        colunaMaterial,
+        linhaCabecalho,
+        headerRow,
+        valoresFormula: (comFormulas.data.values ?? []) as string[][],
+      };
     }
   }
 
@@ -294,7 +321,7 @@ export async function preencherPrecosPublicos(
   itens: ItemParaPreencher[],
 ): Promise<PreenchimentoResultado> {
   const sheets = getSheetsClient();
-  const { aba, sheetId, valores, colunaMaterial, linhaCabecalho, headerRow } =
+  const { aba, sheetId, valores, colunaMaterial, linhaCabecalho, headerRow, valoresFormula } =
     await localizarAbaDeDados(spreadsheetId);
   const linhaPorMaterial = localizarLinhas(valores, colunaMaterial);
   const colunasPrecoPublico = localizarColunasPrecoPublico(headerRow);
@@ -328,11 +355,21 @@ export async function preencherPrecosPublicos(
   // Fulano" sem nenhuma célula preenchida (rótulo morto de uma limpeza
   // manual), e tratar isso como reservado bloquearia a coluna para sempre
   // sem nenhum dado real por trás do nome.
+  //
+  // **Célula de FÓRMULA não conta como preço.** A planilha tem uma linha TOTAL
+  // com `=SUM(P3:P7)` em todas as 33 colunas da faixa; lendo só o resultado,
+  // toda coluna parecia "ter valor", e com isso toda coluna sem órgão no
+  // cabeçalho era classificada como ocupada-por-desconhecido. O efeito seria
+  // não sobrar coluna livre nenhuma e o preenchimento não escrever NADA,
+  // reportando todos os itens como sem coluna disponível.
   const colunaTemValor = new Map<number, boolean>();
   colunasPrecoPublico.forEach((idx) => {
-    const temValor = valores.some(
-      (row, i) => i !== linhaCabecalho && (row[idx] ?? "").trim() !== "",
-    );
+    const temValor = valores.some((row, i) => {
+      if (i === linhaCabecalho) return false;
+      if ((row[idx] ?? "").trim() === "") return false;
+      const formula = String(valoresFormula[i]?.[idx] ?? "").trim();
+      return !formula.startsWith("=");
+    });
     colunaTemValor.set(idx, temValor);
   });
   const numerais = resolverNumerais(headerRow, colunasPrecoPublico);

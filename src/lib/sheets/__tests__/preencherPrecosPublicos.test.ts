@@ -521,3 +521,90 @@ describe("coluna por órgão, não por posição na linha", () => {
     expect(resultado.itensSemColunaDisponivel).toEqual([{ descricao: "Impressora de Cartão" }]);
   });
 });
+
+// Dois defeitos achados lendo a planilha real do processo 0736/2025 em
+// 2026-09-18, ambos invisíveis para quem só olha o resultado na tela.
+describe("leitura da planilha real", () => {
+  /** Responde a leitura de valores: formatada e, quando pedida, com fórmulas. */
+  function mockLeituras(valores: string[][], formulas?: string[][]) {
+    valuesGetMock.mockImplementation((params: { valueRenderOption?: string }) =>
+      Promise.resolve({
+        data: { values: params.valueRenderOption === "FORMULA" ? (formulas ?? valores) : valores },
+      }),
+    );
+  }
+
+  // A faixa lida era "A1:Z500", que para na coluna Z (índice 25). A planilha
+  // tem 33 colunas "Preço Público" indo até AV (índice 47): as 22 além de Z
+  // eram invisíveis, e o analista via a faixa que criou ser ignorada.
+  it("lê a aba inteira, sem parar numa coluna fixa", async () => {
+    const largura = 48;
+    const cabecalho = Array.from({ length: largura }, () => "");
+    cabecalho[COL_MATERIAL] = "MATERIAL";
+    for (let i = 15; i < largura; i += 1) cabecalho[i] = "Preço Público I ";
+    const linhaItem = Array.from({ length: largura }, () => "");
+    linhaItem[COL_MATERIAL] = "Impressora de Cartão";
+
+    mockGet([]);
+    mockLeituras([cabecalho, linhaItem]);
+
+    // 20 órgãos distintos: só cabem se as colunas além de Z forem enxergadas.
+    await preencherPrecosPublicos("sheet-id", [
+      {
+        descricao: "Impressora de Cartão",
+        precos: Array.from({ length: 20 }, (_, i) => ({ valor: 100 + i, orgao: `ORGAO ${i}` })),
+      },
+    ]);
+
+    // A asserção decisiva é no pedido feito à API, não num intermediário: era
+    // ali que a faixa era cortada (§9.99).
+    const faixas = valuesGetMock.mock.calls.map((c) => (c[0] as { range: string }).range);
+    faixas.forEach((faixa) => expect(faixa).not.toMatch(/![A-Z]+\d*:[A-Z]+\d*$/));
+
+    const { data } = valuesBatchUpdateMock.mock.calls[0]![0].requestBody;
+    expect(data).toHaveLength(20);
+    // Pelo menos um preço caiu além da coluna Z — o que antes era impossível.
+    const colunas = (data as { range: string }[]).map((d) => /!([A-Z]+)\d+$/.exec(d.range)![1]);
+    expect(colunas.some((c) => c.length > 1)).toBe(true);
+  });
+
+  // A linha TOTAL tem `=SUM(P3:P7)` em todas as colunas da faixa. Lendo só o
+  // resultado, toda coluna "tem valor" — e como nenhuma tem órgão no cabeçalho,
+  // todas seriam classificadas como ocupadas por desconhecido, não sobraria
+  // coluna livre e o preenchimento não escreveria NADA.
+  it("não confunde a linha de total com preço já lançado", async () => {
+    const largura = 20;
+    const cabecalho = Array.from({ length: largura }, () => "");
+    cabecalho[COL_MATERIAL] = "MATERIAL";
+    for (let i = 15; i < largura; i += 1) cabecalho[i] = "Preço Público I ";
+
+    const linhaItem = Array.from({ length: largura }, () => "");
+    linhaItem[COL_MATERIAL] = "Impressora de Cartão";
+
+    const linhaTotal = Array.from({ length: largura }, () => "");
+    linhaTotal[COL_MATERIAL] = "TOTAL";
+    const linhaTotalFormula = [...linhaTotal];
+    for (let i = 15; i < largura; i += 1) {
+      linhaTotal[i] = "R$ -"; // o que a leitura formatada devolve
+      linhaTotalFormula[i] = `=SUM(${String.fromCharCode(80 + i - 15)}3:${String.fromCharCode(80 + i - 15)}7)`;
+    }
+
+    mockGet([]);
+    mockLeituras([cabecalho, linhaItem, linhaTotal], [cabecalho, linhaItem, linhaTotalFormula]);
+
+    const resultado = await preencherPrecosPublicos("sheet-id", [
+      {
+        descricao: "Impressora de Cartão",
+        precos: [
+          { valor: 13800, orgao: "SECRETARIA DE ESTADO DA EDUCACAO" },
+          { valor: 9698.99, orgao: "SECRETARIA DE EDUCACAO E ESPORTES" },
+        ],
+      },
+    ]);
+
+    const { data } = valuesBatchUpdateMock.mock.calls[0]![0].requestBody;
+    expect(data).toHaveLength(2);
+    expect(resultado.itensSemColunaDisponivel).toEqual([]);
+    expect(resultado.linhasPreenchidas).toBe(1);
+  });
+});
