@@ -138,9 +138,24 @@ export async function obterFontesSimilaridade(processoId: string) {
       resultadosSimilaridade: {
         where: { descartado: false },
         orderBy: { scoreFinal: "desc" },
-        // Até 10 contratos por item: a IN 65/2021 não fixa um teto, e cortar a
-        // lista abaixo do que o analista reuniu esconde preço já pesquisado.
-        take: 10,
+        // A IN 65/2021 não fixa teto, e cortar a lista abaixo do que o analista
+        // reuniu esconde preço já pesquisado — sem nada na tela dizendo que
+        // faltam linhas, que é o pior dos casos.
+        //
+        // **Era 10, subiu para 100 em 2026-09-18.** Medido em produção: 6 itens
+        // já passavam de 10 candidatos ativos e o maior tinha 25 — inclusive o
+        // item "Impressora de Cartão" do processo 0736/2025, com 12, de onde o
+        // usuário relatou a falta. O teto virou restrição justamente quando o
+        // picker de "outros itens desta licitação" passou a permitir 100 adições
+        // de uma ata só: um limite que cortava acima do uso real passou a cortar
+        // dentro dele (§9.110).
+        //
+        // ATENÇÃO ao teto vizinho, que NÃO acompanha este: a planilha de cotação
+        // escreve no máximo `MAX_PRECOS_POR_ITEM` (10) preços públicos por item
+        // (`lib/sheets/limitesPrecosPublicos.ts`). Ver mais candidatos na tela
+        // não faz mais preços irem para a planilha — são decisões diferentes, e
+        // a segunda depende de quantas colunas "Preço Público" a planilha tem.
+        take: 100,
         select: {
           id: true,
           tipoCandidato: true,

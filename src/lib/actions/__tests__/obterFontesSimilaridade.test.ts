@@ -29,16 +29,20 @@ describe("obterFontesSimilaridade", () => {
     expect(argumento.select.resultadosSimilaridade.where).toEqual({ descartado: false });
   });
 
-  // A tela mostrava só 5 contratos por item: o 6º em diante ficava invisível
-  // mesmo tendo sido pesquisado e aprovado pelo analista.
-  it("traz até 10 candidatos por item", async () => {
+  // A tela mostrava só 5 contratos por item, depois 10: o candidato seguinte
+  // ficava invisível mesmo tendo sido pesquisado e aprovado pelo analista, e
+  // nada na tela dizia que faltava linha. Medido em produção em 2026-09-18, com
+  // o teto em 10: 6 itens já o estouravam e o maior tinha 25 candidatos ativos.
+  // O número vai à mão — importando a constante, a asserção acompanharia uma
+  // volta a 10 e passaria verde com a regressão (§9.105).
+  it("traz até 100 candidatos por item", async () => {
     await obterFontesSimilaridade("proc-1");
 
     const argumento = mocks.db.item.findMany.mock.calls[0]![0] as {
       select: { resultadosSimilaridade: { take?: number } };
     };
 
-    expect(argumento.select.resultadosSimilaridade.take).toBe(10);
+    expect(argumento.select.resultadosSimilaridade.take).toBe(100);
   });
 
   // Sem estas colunas no `select`, a tela não teria como exibir o valor
