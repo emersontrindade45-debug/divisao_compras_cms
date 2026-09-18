@@ -345,3 +345,179 @@ describe("preencherPrecosPublicos", () => {
     expect(getMock).toHaveBeenCalledTimes(1); // só o get() de metadados — nunca chega a buscar fonte
   });
 });
+
+// Caso real do processo 0736/2025 (2026-09-18), com a planilha já preenchida
+// uma vez. O cabeçalho é por COLUNA e vale para todas as linhas, mas a coluna
+// era escolhida por LINHA ("a primeira vazia desta linha"), então o rótulo
+// acabava sendo o do último item preenchido e mentia sobre os demais: a coluna
+// "Preço Público III - Inst De Prev … Petropolis" guardava R$ 874,00 (Ferraz)
+// na MFP colorida, R$ 570,00 (Ferraz) na MFP PB e R$ 10.500,00 (Petrópolis) na
+// Impressora de Cartão.
+describe("coluna por órgão, não por posição na linha", () => {
+  function planilhaCom(colunas: number, itens: string[]) {
+    const largura = 8 + colunas;
+    const cabecalho = Array.from({ length: largura }, () => "");
+    cabecalho[COL_MATERIAL] = "MATERIAL";
+    for (let i = 0; i < colunas; i += 1) cabecalho[8 + i] = "Preço Público I ";
+    const linhas = itens.map((descricao) => {
+      const linha = Array.from({ length: largura }, () => "");
+      linha[COL_MATERIAL] = descricao;
+      return linha;
+    });
+    return [cabecalho, ...linhas];
+  }
+
+  /** colIdx -> { rotulo, valores por item } a partir do que foi enviado à API. */
+  function escritas() {
+    const { data } = valuesBatchUpdateMock.mock.calls[0]![0].requestBody;
+    return (data as { range: string; values: number[][] }[]).map((d) => ({
+      coluna: /!([A-Z]+)\d+$/.exec(d.range)![1],
+      linha: /(\d+)$/.exec(d.range)![1],
+      valor: d.values[0]![0],
+    }));
+  }
+
+  function rotulos() {
+    const { requests } = structuralBatchUpdateMock.mock.calls[0]![0].requestBody;
+    const mapa = new Map<number, string>();
+    (requests as {
+      updateCells: {
+        range: { startColumnIndex: number };
+        rows: { values: { userEnteredValue: { stringValue: string } }[] }[];
+      };
+    }[]).forEach((r) => {
+      mapa.set(
+        r.updateCells.range.startColumnIndex,
+        r.updateCells.rows[0]!.values[0]!.userEnteredValue.stringValue,
+      );
+    });
+    return mapa;
+  }
+
+  it("põe o mesmo órgão na mesma coluna em todos os itens", async () => {
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({
+      data: { values: planilhaCom(6, ["MFP colorida A4", "MFP PB A4"]) },
+    });
+
+    await preencherPrecosPublicos("sheet-id", [
+      {
+        descricao: "MFP colorida A4",
+        // Ferraz é o 3º aqui e o 4º no item seguinte: a ordem dentro do item
+        // não pode decidir a coluna.
+        precos: [
+          { valor: 66990, orgao: "MUNICIPIO DE VARGEM GRANDE PAULISTA" },
+          { valor: 1055.65, orgao: "ESTADO DO CEARA" },
+          { valor: 874, orgao: "MUNICIPIO DE FERRAZ DE VASCONCELOS" },
+        ],
+      },
+      {
+        descricao: "MFP PB A4",
+        precos: [
+          { valor: 180, orgao: "MUNICIPIO DE CAMPO MOURAO" },
+          { valor: 223.94, orgao: "CAMARA MUNICIPAL DE CURITIBA" },
+          { valor: 208.35, orgao: "ESTADO DO CEARA" },
+          { valor: 570, orgao: "MUNICIPIO DE FERRAZ DE VASCONCELOS" },
+        ],
+      },
+    ]);
+
+    const porValor = new Map(escritas().map((e) => [e.valor, e.coluna]));
+    // Ceará nas duas linhas, mesma coluna.
+    expect(porValor.get(1055.65)).toBe(porValor.get(208.35));
+    // Ferraz nas duas linhas, mesma coluna.
+    expect(porValor.get(874)).toBe(porValor.get(570));
+    // E órgãos diferentes nunca compartilham coluna.
+    expect(porValor.get(1055.65)).not.toBe(porValor.get(874));
+    expect(porValor.get(66990)).not.toBe(porValor.get(180));
+  });
+
+  it("rotula cada coluna com o órgão cujos preços ela guarda", async () => {
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({
+      data: { values: planilhaCom(6, ["MFP colorida A4", "MFP PB A4"]) },
+    });
+
+    await preencherPrecosPublicos("sheet-id", [
+      {
+        descricao: "MFP colorida A4",
+        precos: [{ valor: 874, orgao: "MUNICIPIO DE FERRAZ DE VASCONCELOS" }],
+      },
+      {
+        descricao: "MFP PB A4",
+        precos: [
+          { valor: 180, orgao: "MUNICIPIO DE CAMPO MOURAO" },
+          { valor: 570, orgao: "MUNICIPIO DE FERRAZ DE VASCONCELOS" },
+        ],
+      },
+    ]);
+
+    const escritos = escritas();
+    const colunaDeFerraz = escritos.find((e) => e.valor === 874)!.coluna;
+    const colunaDeCampoMourao = escritos.find((e) => e.valor === 180)!.coluna;
+    const idx = (letra: string) => letra.charCodeAt(0) - 65;
+
+    expect(rotulos().get(idx(colunaDeFerraz))).toContain("Ferraz De Vasconcelos");
+    expect(rotulos().get(idx(colunaDeCampoMourao))).toContain("Campo Mourao");
+    // O segundo preço de Ferraz (570) confirma o rótulo em vez de trocá-lo.
+    expect(escritos.find((e) => e.valor === 570)!.coluna).toBe(colunaDeFerraz);
+  });
+
+  // O mesmo órgão pode ter dois preços para o MESMO item (Brusque, em
+  // "Impressora de Cartão"), e uma coluna guarda um valor por linha. A 2ª
+  // ocorrência precisa de coluna própria — também rotulada com aquele órgão.
+  it("dá coluna própria ao segundo preço do mesmo órgão no mesmo item", async () => {
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({
+      data: { values: planilhaCom(6, ["Impressora de Cartão"]) },
+    });
+
+    await preencherPrecosPublicos("sheet-id", [
+      {
+        descricao: "Impressora de Cartão",
+        precos: [
+          { valor: 6999.98, orgao: "MUNICIPIO DE BRUSQUE" },
+          { valor: 7700, orgao: "MUNICIPIO DE BRUSQUE" },
+          { valor: 16800, orgao: "PRESIDENCIA DA REPUBLICA" },
+        ],
+      },
+    ]);
+
+    const escritos = escritas();
+    const c1 = escritos.find((e) => e.valor === 6999.98)!.coluna;
+    const c2 = escritos.find((e) => e.valor === 7700)!.coluna;
+    expect(c1).not.toBe(c2);
+
+    const idx = (letra: string) => letra.charCodeAt(0) - 65;
+    expect(rotulos().get(idx(c1))).toContain("Brusque");
+    expect(rotulos().get(idx(c2))).toContain("Brusque");
+    // Numerais distintos: a memória de cálculo precisa distinguir os dois.
+    expect(rotulos().get(idx(c1))).not.toBe(rotulos().get(idx(c2)));
+  });
+
+  // Antes, o último recurso era escrever na coluna de OUTRO órgão. Preço na
+  // coluna errada é pior que preço ausente: a memória de cálculo passaria a
+  // atribuir o valor a quem não o praticou.
+  it("deixa de escrever em vez de usar a coluna de outro órgão quando faltam colunas", async () => {
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({
+      data: { values: planilhaCom(2, ["Impressora de Cartão"]) },
+    });
+
+    const resultado = await preencherPrecosPublicos("sheet-id", [
+      {
+        descricao: "Impressora de Cartão",
+        precos: [
+          { valor: 100, orgao: "ORGAO A" },
+          { valor: 200, orgao: "ORGAO B" },
+          { valor: 300, orgao: "ORGAO C" },
+        ],
+      },
+    ]);
+
+    const escritos = escritas();
+    expect(escritos.map((e) => e.valor)).toEqual([100, 200]);
+    expect(new Set(escritos.map((e) => e.coluna)).size).toBe(2);
+    expect(resultado.itensSemColunaDisponivel).toEqual([{ descricao: "Impressora de Cartão" }]);
+  });
+});

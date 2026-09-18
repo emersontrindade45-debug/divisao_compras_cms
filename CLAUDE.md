@@ -1557,3 +1557,28 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      desenho funcionando: desde que as duas camadas leem a mesma constante (§9.110), é impossível
      subir uma e esquecer a outra. Teste que falha ao mudar uma constante compartilhada é sinal de
      acoplamento correto, não de regressão.
+
+116. **Recurso COMPARTILHADO entre linhas não pode ser escolhido linha a linha — o último a
+     escrever renomeia o de todos.** O cabeçalho de uma coluna "Preço Público" vale para a planilha
+     inteira, mas a coluna era escolhida por item ("a primeira vazia DESTA linha"). Resultado
+     medido na planilha do processo 0736/2025 em 2026-09-18, depois de um preenchimento real: a
+     coluna rotulada "Preço Público III - Inst De Prev … Petropolis" guardava R$ 874,00 (Ferraz de
+     Vasconcelos) na linha da MFP colorida, R$ 570,00 (Ferraz) na MFP PB e R$ 10.500,00
+     (Petrópolis) na Impressora de Cartão. Só a última linha preenchida batia com o rótulo, porque
+     foi ela que escreveu o cabeçalho por último. Preço atribuído ao órgão errado é defeito de
+     conformidade — a memória de cálculo passa a citar quem não praticou aquele preço. A regra:
+     quando um atributo pertence à COLUNA (ou a qualquer eixo compartilhado) e o dado varia na
+     LINHA, a atribuição é global e resolvida **antes** de escrever, nunca durante o percurso.
+     **Corolário — a guarda existia no papel e não alcançava o caso real.** Havia preferência por
+     "coluna já rotulada com o mesmo órgão", e a docstring descrevia exatamente o comportamento
+     correto. Só que ela só valia para coluna que JÁ tivesse valor, e numa faixa recém-ampliada
+     nenhuma tinha: todo item caía na primeira livre. Guarda condicionada ao estado "já usado"
+     não protege a primeira execução, que é justamente quando o estado se forma (§9.70: a
+     docstring afirmava a garantia que o código não entregava).
+     **Corolário sobre a chave:** órgão sozinho não serve, porque o mesmo órgão pode ter dois
+     preços para o MESMO item (Brusque, em "Impressora de Cartão") e uma coluna guarda um valor por
+     linha. A chave é o par (órgão, ocorrência-no-item); a 2ª ocorrência ganha coluna própria, com
+     o mesmo nome e numeral distinto.
+     **Corolário sobre o último recurso:** a versão antiga, sem coluna livre, escrevia na coluna de
+     OUTRO órgão. Degradação tem de preservar a invariante, não o volume — preço ausente é
+     recuperável, preço sob o nome errado é uma afirmação falsa que ninguém revisa (§9.93).

@@ -335,32 +335,85 @@ export async function preencherPrecosPublicos(
     );
     colunaTemValor.set(idx, temValor);
   });
-  const colunaOrgaoAtual = new Map<number, string | null>();
-  colunasPrecoPublico.forEach((idx) => {
-    if (!colunaTemValor.get(idx)) {
-      colunaOrgaoAtual.set(idx, null);
-      return;
-    }
-    const sufixo = extrairSufixoOrgao(headerRow[idx] ?? "");
-    // Coluna com valor mas sem sufixo de órgão no cabeçalho: reservada, mas
-    // para um órgão desconhecido — nunca deve "casar" por engano com um
-    // órgão real, então usa uma chave que normalizar() jamais produz.
-    colunaOrgaoAtual.set(idx, sufixo ? normalizar(sufixo) : "\0ocupada-sem-orgao");
-  });
+  const numerais = resolverNumerais(headerRow, colunasPrecoPublico);
 
-  /** Escolhe, entre as colunas vazias desta linha e ainda não usadas nesta linha, a melhor candidata para `orgKey`. */
-  function escolherColuna(
-    candidatas: number[],
-    orgKey: string,
-  ): number | undefined {
-    return (
-      candidatas.find((idx) => colunaOrgaoAtual.get(idx) === orgKey) ??
-      candidatas.find((idx) => colunaOrgaoAtual.get(idx) === null) ??
-      candidatas[0]
-    );
+  // ------------------------------------------------------------------
+  // Atribuição de coluna por ÓRGÃO, decidida antes de qualquer escrita.
+  //
+  // O cabeçalho é por COLUNA e vale para TODAS as linhas, então a coluna não
+  // pode ser escolhida linha a linha: era isso que fazia o rótulo mentir.
+  // Medido na planilha do processo 0736/2025 em 2026-09-18, depois de um
+  // preenchimento real — a coluna rotulada "Preço Público III - Inst De Prev …
+  // Petropolis" tinha R$ 874,00 (Ferraz de Vasconcelos) na linha da MFP
+  // colorida, R$ 570,00 (Ferraz) na linha da MFP PB e R$ 10.500,00
+  // (Petrópolis) na do Impressora de Cartão. Três órgãos numa coluna só, e o
+  // rótulo era o do ÚLTIMO item preenchido.
+  //
+  // A regra antiga tentava reaproveitar coluna do mesmo órgão, mas só entre as
+  // colunas vazias DAQUELA linha e só depois que algum valor já existisse na
+  // coluna. Com a faixa recém-ampliada, nenhuma coluna tinha órgão no começo
+  // da execução: todo item pegava a primeira livre, e cada um sobrescrevia o
+  // cabeçalho do anterior.
+  //
+  // O par (órgão, ocorrência) é a chave — e não o órgão sozinho — porque o
+  // mesmo órgão pode ter dois preços para o MESMO item (Brusque tem dois em
+  // "Impressora de Cartão"), e uma coluna guarda um valor por linha. A 2ª
+  // ocorrência ganha coluna própria, também rotulada com aquele órgão.
+  // ------------------------------------------------------------------
+
+  /** Quantas colunas cada órgão precisa: o máximo de preços dele num mesmo item. */
+  const chavesNecessarias: string[] = [];
+  const ocorrenciasVistas = new Map<string, number>();
+  for (const item of itens) {
+    const porOrgaoNesteItem = new Map<string, number>();
+    for (const preco of item.precos.slice(0, MAX_PRECOS_POR_ITEM)) {
+      const orgKey = normalizar(abreviarOrgao(preco.orgao));
+      const n = (porOrgaoNesteItem.get(orgKey) ?? 0) + 1;
+      porOrgaoNesteItem.set(orgKey, n);
+      if ((ocorrenciasVistas.get(orgKey) ?? 0) < n) {
+        ocorrenciasVistas.set(orgKey, n);
+        chavesNecessarias.push(`${orgKey}#${n}`);
+      }
+    }
   }
 
-  const numerais = resolverNumerais(headerRow, colunasPrecoPublico);
+  // Colunas que já pertencem a um órgão pelo cabeçalho: reusadas para ele, que
+  // é o "mesmo órgão, mesma coluna" entre execuções. Só conta quando a coluna
+  // tem VALOR em alguma linha — rótulo sem nenhum dado por trás é sobra de
+  // limpeza manual e não pode bloquear a coluna para sempre.
+  const colunaDaChave = new Map<string, number>();
+  const colunaOcupadaPor = new Map<number, string>();
+  const vistasNoCabecalho = new Map<string, number>();
+  colunasPrecoPublico.forEach((idx) => {
+    if (!colunaTemValor.get(idx)) return;
+    const sufixo = extrairSufixoOrgao(headerRow[idx] ?? "");
+    if (!sufixo) {
+      // Valor sem órgão identificável: a coluna está ocupada por alguém que
+      // não sabemos nomear, e nunca pode ser dada a um órgão real.
+      colunaOcupadaPor.set(idx, "\0ocupada-sem-orgao");
+      return;
+    }
+    const orgKey = normalizar(sufixo);
+    const n = (vistasNoCabecalho.get(orgKey) ?? 0) + 1;
+    vistasNoCabecalho.set(orgKey, n);
+    const chave = `${orgKey}#${n}`;
+    colunaDaChave.set(chave, idx);
+    colunaOcupadaPor.set(idx, chave);
+  });
+
+  // As demais chaves recebem, em ordem, as colunas ainda de ninguém.
+  const livres = colunasPrecoPublico.filter((idx) => !colunaOcupadaPor.has(idx));
+  const orgaosSemColuna: string[] = [];
+  for (const chave of chavesNecessarias) {
+    if (colunaDaChave.has(chave)) continue;
+    const idx = livres.shift();
+    if (idx === undefined) {
+      orgaosSemColuna.push(chave);
+      continue;
+    }
+    colunaDaChave.set(chave, idx);
+    colunaOcupadaPor.set(idx, chave);
+  }
 
   let linhasPreenchidas = 0;
 
@@ -373,25 +426,27 @@ export async function preencherPrecosPublicos(
     }
 
     const linhaAtual = valores[linha - 1] ?? [];
-    const colunasVaziasNestaLinha = colunasPrecoPublico.filter(
-      (idx) => !(linhaAtual[idx] ?? "").trim(),
-    );
-    if (colunasVaziasNestaLinha.length === 0) {
-      itensSemColunaDisponivel.push({ descricao: item.descricao });
-      continue;
-    }
-
-    const usadasNestaLinha = new Set<number>();
+    const porOrgaoNesteItem = new Map<string, number>();
     let algumaEscrita = false;
+    let algumPrecoSemVaga = false;
 
     for (const preco of item.precos.slice(0, MAX_PRECOS_POR_ITEM)) {
-      const candidatas = colunasVaziasNestaLinha.filter((idx) => !usadasNestaLinha.has(idx));
-      if (candidatas.length === 0) break;
-
       const orgKey = normalizar(abreviarOrgao(preco.orgao));
-      const colIdx = escolherColuna(candidatas, orgKey)!;
-      usadasNestaLinha.add(colIdx);
-      colunaOrgaoAtual.set(colIdx, orgKey);
+      const n = (porOrgaoNesteItem.get(orgKey) ?? 0) + 1;
+      porOrgaoNesteItem.set(orgKey, n);
+
+      const colIdx = colunaDaChave.get(`${orgKey}#${n}`);
+      if (colIdx === undefined) {
+        // Mais órgãos distintos do que colunas na planilha: limite de
+        // capacidade, não erro de rotulagem. Preço nenhum vai para a coluna de
+        // outro órgão — antes deixar de escrever do que escrever no lugar
+        // errado, que é o defeito que esta função acabou de corrigir.
+        algumPrecoSemVaga = true;
+        continue;
+      }
+
+      // Nunca sobrescreve valor já lançado (manual ou de execução anterior).
+      if ((linhaAtual[colIdx] ?? "").trim()) continue;
 
       dataValores.push({
         range: `'${aba}'!${letraColuna(colIdx)}${linha}`,
@@ -402,8 +457,9 @@ export async function preencherPrecosPublicos(
       cabecalhosParaAtualizar.set(colIdx, `Preço Público ${numeral} - ${abreviarOrgao(preco.orgao)}`);
       algumaEscrita = true;
     }
+
     if (algumaEscrita) linhasPreenchidas += 1;
-    else itensSemColunaDisponivel.push({ descricao: item.descricao });
+    if (algumPrecoSemVaga) itensSemColunaDisponivel.push({ descricao: item.descricao });
   }
 
   if (dataValores.length > 0) {
