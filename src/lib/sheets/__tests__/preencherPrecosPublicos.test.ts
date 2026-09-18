@@ -197,7 +197,7 @@ describe("preencherPrecosPublicos", () => {
   // O número está escrito à mão de propósito: se a asserção usasse
   // MAX_PRECOS_POR_ITEM ela acompanharia a constante e uma volta a 5 passaria
   // (CLAUDE.md §9.105).
-  it("escreve até 10 preços num item quando há colunas 'Preço Público' de sobra", async () => {
+  it("escreve um preço por coluna disponível quando há colunas de sobra", async () => {
     const COLUNAS = 12;
     const largura = 8 + COLUNAS;
     const cabecalho = Array.from({ length: largura }, () => "");
@@ -218,15 +218,80 @@ describe("preencherPrecosPublicos", () => {
     ]);
 
     const { data } = valuesBatchUpdateMock.mock.calls[0]![0].requestBody;
-    expect(data).toHaveLength(10);
-    expect(MAX_PRECOS_POR_ITEM).toBe(10);
-    // Os 10 primeiros da lista (que chega ordenada por score), cada um na sua
-    // coluna — nunca dois preços na mesma célula.
-    expect(data.map((d: { values: number[][] }) => d.values[0]![0])).toEqual([
-      100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
-    ]);
-    expect(new Set(data.map((d: { range: string }) => d.range)).size).toBe(10);
+    // Todas as 12: o teto não pode cortar abaixo do que a planilha comporta.
+    expect(data).toHaveLength(COLUNAS);
+    // Cada um na sua coluna — nunca dois preços na mesma célula.
+    expect(data.map((d: { values: number[][] }) => d.values[0]![0])).toEqual(
+      Array.from({ length: COLUNAS }, (_, i) => 100 + i),
+    );
+    expect(new Set(data.map((d: { range: string }) => d.range)).size).toBe(COLUNAS);
     expect(resultado.linhasPreenchidas).toBe(1);
+  });
+
+  // O teto existe como válvula de segurança, não como o limite do dia a dia:
+  // quem manda é o número de colunas da planilha. O número vai à mão — com a
+  // constante na asserção, uma volta a 10 passaria verde (§9.105).
+  it("respeita o teto de preços por item quando a planilha tem mais colunas que ele", async () => {
+    const COLUNAS = 60;
+    const largura = 8 + COLUNAS;
+    const cabecalho = Array.from({ length: largura }, () => "");
+    cabecalho[COL_MATERIAL] = "MATERIAL";
+    for (let i = 0; i < COLUNAS; i += 1) cabecalho[8 + i] = "Preço Público";
+    const linhaVazia = Array.from({ length: largura }, () => "");
+    linhaVazia[COL_MATERIAL] = "Link de internet";
+
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({ data: { values: [cabecalho, linhaVazia] } });
+
+    await preencherPrecosPublicos("sheet-id", [
+      {
+        descricao: "Link de internet",
+        precos: Array.from({ length: COLUNAS }, (_, i) => ({ valor: 100 + i, orgao: `ORGAO ${i}` })),
+      },
+    ]);
+
+    const { data } = valuesBatchUpdateMock.mock.calls[0]![0].requestBody;
+    expect(data).toHaveLength(50);
+    expect(MAX_PRECOS_POR_ITEM).toBe(50);
+  });
+
+  // Planilha real do processo 0736/2025, depois que o usuário ampliou a faixa
+  // copiando a primeira coluna: as 33 colunas ficaram com o rótulo idêntico
+  // "Preço Público I ". Reaproveitar o numeral escrito renomearia as 33 para
+  // "Preço Público I - <Órgão>", e a memória de cálculo passaria a citar 33
+  // preços indistinguíveis — a ambiguidade que a regra existe para evitar.
+  it("renumera colunas cujo numeral escrito está repetido, em vez de propagar o repetido", async () => {
+    const COLUNAS = 33;
+    const largura = 8 + COLUNAS;
+    const cabecalho = Array.from({ length: largura }, () => "");
+    cabecalho[COL_MATERIAL] = "MATERIAL";
+    // Rótulo idêntico em todas, com o espaço final que está na planilha real.
+    for (let i = 0; i < COLUNAS; i += 1) cabecalho[8 + i] = "Preço Público I ";
+    const linhaVazia = Array.from({ length: largura }, () => "");
+    linhaVazia[COL_MATERIAL] = "Link de internet";
+
+    mockGet([]);
+    valuesGetMock.mockResolvedValue({ data: { values: [cabecalho, linhaVazia] } });
+
+    await preencherPrecosPublicos("sheet-id", [
+      {
+        descricao: "Link de internet",
+        precos: Array.from({ length: COLUNAS }, (_, i) => ({ valor: 100 + i, orgao: `ORGAO ${i}` })),
+      },
+    ]);
+
+    const { requests } = structuralBatchUpdateMock.mock.calls[0]![0].requestBody;
+    const rotulos = requests.map(
+      (r: { updateCells: { rows: { values: { userEnteredValue: { stringValue: string } }[] }[] } }) =>
+        r.updateCells.rows[0]!.values[0]!.userEnteredValue.stringValue,
+    );
+    expect(rotulos).toHaveLength(COLUNAS);
+
+    const numerais = rotulos.map((t: string) => /Preço Público (\S+) -/.exec(t)![1]);
+    // O que importa: nenhum numeral se repete. São 33 colunas, 33 numerais.
+    expect(new Set(numerais).size).toBe(COLUNAS);
+    expect(numerais.slice(0, 4)).toEqual(["I", "II", "III", "IV"]);
+    expect(numerais[32]).toBe("XXXIII");
   });
 
   // Planilha real do processo 1829/2024: entre "Preço Público V" e

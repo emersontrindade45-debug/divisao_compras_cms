@@ -1534,3 +1534,26 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      se repetiriam ou sumiriam na virada), o "+1 no `take`" responde "tem página anterior?" sem um
      `count`, e o efeito de rolagem precisa saber distinguir inserção no topo de mensagem nova —
      senão carregar o passado joga a tela para o fim, desfazendo o clique.
+
+115. **Identificador copiado junto com a coluna deixa de identificar — e reaproveitar o que está
+     escrito propaga a ambiguidade em vez de resolvê-la.** O usuário ampliou a faixa "Preço
+     Público" da planilha do processo 0736/2025 copiando a primeira coluna, e as **33** colunas
+     ficaram com o rótulo idêntico `"Preço Público I "`. A regra de numeração dizia "reusa o
+     numeral que já está no cabeçalho" — nascida do caso oposto (§9.110: coluna SEM numeral não
+     pode ser numerada pela posição) — e com ela as 33 colunas seriam renomeadas para
+     `"Preço Público I - <Órgão>"`: 33 preços que a memória de cálculo não distingue, exatamente a
+     ambiguidade que a regra existia para evitar. A regra certa tem a condição que faltava: o
+     numeral escrito só vale **quando é único na faixa**; repetido, ele não é dado, é ruído, e a
+     coluna é renumerada pela posição desviando dos numerais unicamente atribuídos. Ao ler um
+     identificador de dado que humano edita, perguntar **"o que acontece se ele estiver
+     duplicado?"** — copiar-e-colar é a forma mais comum de criar coluna, linha ou registro, e ela
+     duplica o rótulo por construção.
+     **Corolário sobre ordem de atribuição:** a versão antiga escolhia o numeral sob demanda,
+     durante a escrita, então o numeral de uma coluna dependia de qual ITEM fosse preenchido
+     primeiro — resultado não determinístico para a mesma planilha. Numeração/identidade de coluna
+     é propriedade do cabeçalho, não do percurso: resolver tudo de uma vez, antes de escrever.
+     **Corolário que deu certo:** o teto que o usuário ampliou (`MAX_PRECOS_POR_ITEM`, 10 → 50)
+     quebrou o teste da OUTRA camada (o `take` do Prisma em `preencherCotacao`), e isso é o
+     desenho funcionando: desde que as duas camadas leem a mesma constante (§9.110), é impossível
+     subir uma e esquecer a outra. Teste que falha ao mudar uma constante compartilhada é sinal de
+     acoplamento correto, não de regressão.

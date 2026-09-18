@@ -113,6 +113,75 @@ function localizarColunasPrecoPublico(headerRow: string[]): number[] {
   return indices;
 }
 
+/**
+ * Numeral de CADA coluna da faixa "Preço Público", resolvido de uma vez.
+ *
+ * O numeral vira a referência do preço na memória de cálculo, então duas
+ * colunas não podem terminar com o mesmo. Duas armadilhas, ambas vindas de
+ * planilha montada à mão:
+ *
+ * 1. Coluna SEM numeral ("Preço Público" seco) não pode receber
+ *    `paraRomano(posição)` cegamente — na planilha do processo 1829/2024 a
+ *    coluna vaga é a 6ª da faixa, mas "Preço Público VI" já pertence à
+ *    seguinte.
+ * 2. Numeral REPETIDO não identifica coluna nenhuma, e reaproveitá-lo propaga a
+ *    ambiguidade em vez de resolvê-la. Medido na planilha do processo 0736/2025
+ *    em 2026-09-18, depois que o usuário acrescentou colunas copiando a
+ *    primeira: as **33** colunas tinham o rótulo "Preço Público I ", e a regra
+ *    antiga ("reusa o que está escrito") renomearia as 33 para
+ *    "Preço Público I - <Órgão>". Trinta e três preços indistinguíveis na
+ *    memória de cálculo.
+ *
+ * Daí a regra: o numeral escrito só vale quando é ÚNICO na faixa; caso
+ * contrário a coluna é renumerada pela posição, pulando os numerais que
+ * pertencem a colunas unicamente identificadas.
+ *
+ * Resolver tudo de uma vez também tira uma dependência de ordem que existia
+ * antes: a versão anterior atribuía numeral sob demanda, enquanto escrevia,
+ * então o numeral de uma coluna dependia de qual item fosse preenchido primeiro.
+ */
+function resolverNumerais(headerRow: string[], colunas: number[]): Map<number, string> {
+  const escrito = new Map<number, string>();
+  const ocorrencias = new Map<string, number>();
+  colunas.forEach((idx) => {
+    const numeral = REGEX_NUMERAL.exec(headerRow[idx] ?? "")?.[1]?.toUpperCase();
+    if (!numeral) return;
+    escrito.set(idx, numeral);
+    ocorrencias.set(numeral, (ocorrencias.get(numeral) ?? 0) + 1);
+  });
+
+  /** Confiável = escrito e pertencente a uma única coluna. */
+  const confiavel = (idx: number) => {
+    const numeral = escrito.get(idx);
+    return numeral && ocorrencias.get(numeral) === 1 ? numeral : null;
+  };
+
+  // Reservar ANTES de distribuir: quem for renumerado precisa desviar de todos
+  // os numerais confiáveis, inclusive os de colunas à direita.
+  const reservados = new Set<string>();
+  colunas.forEach((idx) => {
+    const numeral = confiavel(idx);
+    if (numeral) reservados.add(numeral);
+  });
+
+  const numerais = new Map<number, string>();
+  let proximo = 1;
+  colunas.forEach((idx) => {
+    const numeral = confiavel(idx);
+    if (numeral) {
+      numerais.set(idx, numeral);
+      return;
+    }
+    while (reservados.has(paraRomano(proximo))) proximo += 1;
+    const novo = paraRomano(proximo);
+    reservados.add(novo);
+    numerais.set(idx, novo);
+    proximo += 1;
+  });
+
+  return numerais;
+}
+
 /** Encontra a linha (1-based) de cada item na aba, casando pelo texto da coluna MATERIAL. */
 function localizarLinhas(valoresAba: string[][], colunaMaterial: number): Map<string, number> {
   const linhaPorMaterial = new Map<string, number>();
@@ -291,28 +360,7 @@ export async function preencherPrecosPublicos(
     );
   }
 
-  // Numerais já escritos no cabeçalho de OUTRAS colunas "Preço Público". Uma
-  // coluna sem numeral ("Preço Público" seco, sobra de uma planilha montada à
-  // mão) não pode receber `paraRomano(posição)` cegamente: na planilha do
-  // processo 1829/2024 a coluna vaga é a 6ª da faixa, mas "Preço Público VI"
-  // já está em uso pela coluna seguinte — duas colunas com o mesmo numeral
-  // tornam ambígua a referência do preço na memória de cálculo.
-  const numeraisEmUso = new Set<string>();
-  colunasPrecoPublico.forEach((idx) => {
-    const numeral = REGEX_NUMERAL.exec(headerRow[idx] ?? "")?.[1];
-    if (numeral) numeraisEmUso.add(numeral.toUpperCase());
-  });
-
-  /** Numeral da coluna: o que já está no cabeçalho, senão o menor romano livre. */
-  function numeralParaColuna(colIdx: number): string {
-    const existente = REGEX_NUMERAL.exec(headerRow[colIdx] ?? "")?.[1];
-    if (existente) return existente;
-    let n = colunasPrecoPublico.indexOf(colIdx) + 1;
-    while (numeraisEmUso.has(paraRomano(n))) n += 1;
-    const numeral = paraRomano(n);
-    numeraisEmUso.add(numeral);
-    return numeral;
-  }
+  const numerais = resolverNumerais(headerRow, colunasPrecoPublico);
 
   let linhasPreenchidas = 0;
 
@@ -350,7 +398,7 @@ export async function preencherPrecosPublicos(
         values: [[preco.valor]],
       });
 
-      const numeral = numeralParaColuna(colIdx);
+      const numeral = numerais.get(colIdx)!;
       cabecalhosParaAtualizar.set(colIdx, `Preço Público ${numeral} - ${abreviarOrgao(preco.orgao)}`);
       algumaEscrita = true;
     }

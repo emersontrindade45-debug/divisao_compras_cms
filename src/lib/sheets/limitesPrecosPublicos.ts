@@ -14,4 +14,14 @@
  * tem. Este teto nunca cria coluna — item com mais preços do que colunas
  * disponíveis continua sendo reportado em `itensSemColunaDisponivel`.
  */
-export const MAX_PRECOS_POR_ITEM = 10;
+export const MAX_PRECOS_POR_ITEM = 50;
+
+/*
+ * **Era 10, subiu para 50 em 2026-09-18.** O usuário ampliou a planilha do
+ * processo 0736/2025 para 33 colunas "Preço Público": o teto de 10 passou a
+ * cortar bem abaixo do que a planilha comporta, que é o mesmo defeito de agosto
+ * (5 contra 14 colunas) reaparecendo por cima. 50 dá folga sobre as 33 sem
+ * autorizar escrita ilimitada — e o limite que realmente manda continua sendo o
+ * número de colunas livres, já respeitado pelo laço de escrita e reportado em
+ * `itensSemColunaDisponivel`.
+ */
