@@ -96,7 +96,7 @@ export function VigenciaContratoCelula({
       type="button"
       onClick={() => void buscar()}
       disabled={buscando}
-      className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
+      className="mt-1 flex w-fit items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
     >
       <CalendarClock className="size-3" aria-hidden />
       {buscando ? "consultando…" : "ver vigência"}
