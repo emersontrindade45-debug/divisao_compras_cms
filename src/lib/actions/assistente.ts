@@ -37,7 +37,19 @@ import type { CandidatoSimilaridade, ItemExtraidoTR } from "@/lib/ia/types";
 // Escopo é `(userId, processoId)`: dentro de um processo, a conversa é daquele
 // processo; fora dele, é a conversa global do atalho da barra superior.
 
-/** Teto de mensagens devolvidas ao reabrir — o mesmo do histórico enviado ao modelo. */
+/**
+ * Teto de mensagens devolvidas por PÁGINA ao reabrir uma conversa. Independente
+ * do `MAX_MENSAGENS_HISTORICO` da rota do chat, que limita o que vai ao modelo:
+ * o número aqui é só quanto a tela carrega de uma vez, e subi-lo não encarece
+ * nem alonga o prompt.
+ *
+ * Com uma página só, uma conversa longa reabria mostrando apenas o fim — e os
+ * cartões de candidato do começo ficavam inalcançáveis. Medido em produção em
+ * 2026-09-18: numa conversa de 60 mensagens, os cartões da contratação de
+ * Ferraz de Vasconcelos estavam nas mensagens 6, 10 e 12, todas fora da janela.
+ * Daí a paginação para trás (`antesDe`), em vez de um teto maior — que só
+ * adiaria o mesmo problema para a conversa seguinte.
+ */
 const MAX_MENSAGENS = 30;
 
 const escopoSchema = z.object({
@@ -69,6 +81,8 @@ export interface MensagemCarregada {
 export interface ConversaCarregada {
   conversaId: string;
   mensagens: MensagemCarregada[];
+  /** Existe mensagem mais antiga que a primeira devolvida — a tela oferece carregar. */
+  temMais: boolean;
 }
 
 /**
@@ -138,7 +152,32 @@ export async function obterConversaAtiva(
 async function carregarConversa(
   conversaId: string,
   userId: string,
+  antesDe?: string,
 ): Promise<ConversaCarregada | null> {
+  // Paginação para trás: o cursor é a mensagem mais antiga que a tela já tem.
+  // Usa `createdAt` e não o id porque é por ele que a ordem é definida; o id
+  // entra como desempate para o caso de duas mensagens no mesmo milissegundo,
+  // que sem isso poderiam se repetir ou sumir na virada de página.
+  let corte: { createdAt: Date; id: string } | null = null;
+  if (antesDe) {
+    corte = await db.mensagemAssistente.findFirst({
+      where: { id: antesDe, conversa: { id: conversaId, userId } },
+      select: { createdAt: true, id: true },
+    });
+    // Cursor que não é desta conversa (ou não é do usuário) não pode virar
+    // "primeira página" em silêncio: seria devolver o fim da conversa de novo.
+    if (!corte) return null;
+  }
+
+  const filtroAnteriores = corte
+    ? {
+        OR: [
+          { createdAt: { lt: corte.createdAt } },
+          { createdAt: corte.createdAt, id: { lt: corte.id } },
+        ],
+      }
+    : {};
+
   const conversa = await db.conversaAssistente.findFirst({
     where: { id: conversaId, userId },
     select: {
@@ -146,12 +185,14 @@ async function carregarConversa(
       mensagens: {
         // Só o que a tela mostra. Mensagens `tool` são JSON bruto de busca,
         // já resumidas no texto do assistente.
-        where: { papel: { in: ["user", "assistant"] } },
+        where: { papel: { in: ["user", "assistant"] }, ...filtroAnteriores },
         // `desc` + `take` pega as ÚLTIMAS N e a ordem de leitura é restaurada
         // depois. Com `asc` o `take` traria as N mais ANTIGAS, e uma conversa
         // longa reabriria mostrando o começo esquecido em vez do fim.
-        orderBy: { createdAt: "desc" },
-        take: MAX_MENSAGENS,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        // Um a mais que a página: é como se sabe que existe mensagem anterior
+        // sem pagar um `count` na conversa inteira. O extra é descartado.
+        take: MAX_MENSAGENS + 1,
         select: {
           id: true,
           papel: true,
@@ -165,10 +206,14 @@ async function carregarConversa(
 
   if (!conversa) return null;
 
+  const temMais = conversa.mensagens.length > MAX_MENSAGENS;
+  const pagina = temMais ? conversa.mensagens.slice(0, MAX_MENSAGENS) : conversa.mensagens;
+
   return {
     conversaId: conversa.id,
+    temMais,
     // Desfaz o `desc` usado para pegar as últimas: a tela lê de cima para baixo.
-    mensagens: [...conversa.mensagens].reverse().map((m) => ({
+    mensagens: [...pagina].reverse().map((m) => ({
       id: m.id,
       papel: m.papel as "user" | "assistant",
       conteudo: m.conteudo,
@@ -178,7 +223,11 @@ async function carregarConversa(
   };
 }
 
-const conversaIdSchema = z.object({ conversaId: z.string().min(1) });
+const conversaIdSchema = z.object({
+  conversaId: z.string().min(1),
+  /** Cursor: carrega a página ANTERIOR a esta mensagem. Ausente = a mais recente. */
+  antesDe: z.string().min(1).optional(),
+});
 
 /**
  * Abre uma conversa específica do histórico.
@@ -194,8 +243,8 @@ export async function obterConversa(
   entrada: z.input<typeof conversaIdSchema>,
 ): Promise<ConversaCarregada | null> {
   const user = await requireAuth();
-  const { conversaId } = conversaIdSchema.parse(entrada);
-  return carregarConversa(conversaId, user.id);
+  const { conversaId, antesDe } = conversaIdSchema.parse(entrada);
+  return carregarConversa(conversaId, user.id, antesDe);
 }
 
 export interface ConversaNaLista {

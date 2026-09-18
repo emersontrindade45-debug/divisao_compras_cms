@@ -1513,3 +1513,24 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      (`PROD_READ_URL`) antes de propor qualquer coisa — provou em uma consulta que nada fora
      perdido e mudou a tarefa de "recuperar dados" para "abrir caminho de leitura". Relato de perda
      de dados se verifica no banco, não se aceita pela descrição (§9.69).
+
+114. **Dar acesso à conversa não é dar acesso ao que ela contém — janela de leitura é um segundo
+     corte, invisível como o primeiro.** A §9.113 abriu o histórico e o usuário ainda não achou o
+     que procurava: a conversa certa estava listada, mas reabria mostrando só as últimas 30 de 60
+     mensagens, e os cartões de Ferraz de Vasconcelos estavam nas de número **6, 10 e 12** — no
+     começo. Duas verdades que enganam juntas: "a conversa está acessível" e "os cartões estão na
+     conversa", ambas certas, e mesmo assim o analista não alcançava os cartões. Ao remover um
+     limite que escondia dados, procurar o **próximo** limite no mesmo caminho antes de dar a
+     tarefa por encerrada — aqui bastava perguntar "e se a conversa tiver mais que `MAX_MENSAGENS`?",
+     que era pergunta respondível com uma consulta (§9.110: o menor teto manda, e ninguém vê qual
+     foi).
+     **Corolário sobre o que o número parece medir:** `MAX_MENSAGENS = 30` tinha o comentário "o
+     mesmo do histórico enviado ao modelo", o que sugeria acoplamento a custo de IA e desencorajava
+     mexer. Eram constantes independentes — a do modelo vive em `chat/route.ts`. Docstring não é
+     especificação (§9.70), e um comentário que insinua acoplamento inexistente congela o código
+     tanto quanto um `const`.
+     **Corolário de implementação:** paginar para trás é mais barato que subir o teto e resolve
+     permanentemente; o cursor precisa de desempate por `id` (duas mensagens no mesmo milissegundo
+     se repetiriam ou sumiriam na virada), o "+1 no `take`" responde "tem página anterior?" sem um
+     `count`, e o efeito de rolagem precisa saber distinguir inserção no topo de mensagem nova —
+     senão carregar o passado joga a tela para o fim, desfazendo o clique.

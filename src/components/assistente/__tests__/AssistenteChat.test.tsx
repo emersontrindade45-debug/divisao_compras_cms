@@ -100,6 +100,7 @@ describe("AssistenteChat", () => {
   it("retoma a conversa anterior do banco e continua nela", async () => {
     obterConversaAtivaMock.mockResolvedValue({
       conversaId: "conv-antiga",
+      temMais: false,
       mensagens: [
         { id: "m1", papel: "user", conteudo: "procure brises", passos: [], citacoes: [] },
         { id: "m2", papel: "assistant", conteudo: "achei 5 contratos", passos: [], citacoes: [] },
@@ -125,6 +126,7 @@ describe("AssistenteChat", () => {
   it("não retoma nada quando o painel pede conversa nova", async () => {
     obterConversaAtivaMock.mockResolvedValue({
       conversaId: "conv-antiga",
+      temMais: false,
       mensagens: [
         { id: "m1", papel: "user", conteudo: "procure brises", passos: [], citacoes: [] },
       ],

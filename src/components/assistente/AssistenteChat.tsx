@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, ExternalLink, Send, Sparkles } from "lucide-react";
+import { AlertCircle, ChevronUp, ExternalLink, Send, Sparkles } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -75,7 +75,12 @@ export function AssistenteChat({
   const [enviando, setEnviando] = useState(false);
   const [carregando, setCarregando] = useState(retomarConversa || conversaIdInicial !== null);
   const [itens, setItens] = useState<{ id: string; descricao: string }[]>([]);
+  const [temMaisAntigas, setTemMaisAntigas] = useState(false);
+  const [carregandoAntigas, setCarregandoAntigas] = useState(false);
   const conversaId = useRef<string | null>(null);
+  // Carregar mensagens antigas insere no TOPO. Sem esta marca o efeito de
+  // rolagem levaria o painel de volta ao fim, desfazendo o que o clique pediu.
+  const prepararParaTopo = useRef(false);
   const fimDaLista = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -97,6 +102,7 @@ export function AssistenteChat({
       .then((conversa) => {
         if (cancelado || !conversa) return;
         conversaId.current = conversa.conversaId;
+        setTemMaisAntigas(conversa.temMais);
         setMensagens(
           conversa.mensagens.map((m) => ({
             id: m.id,
@@ -147,8 +153,52 @@ export function AssistenteChat({
   }, [processoId, itensKey]);
 
   useEffect(() => {
+    if (prepararParaTopo.current) {
+      prepararParaTopo.current = false;
+      return;
+    }
     fimDaLista.current?.scrollIntoView({ block: "end" });
   }, [mensagens]);
+
+  /**
+   * Carrega a página anterior da conversa e a insere no topo.
+   *
+   * Existe porque a conversa reabre mostrando só as últimas N mensagens, e os
+   * cartões de candidato de uma busca antiga ficavam inalcançáveis — medido em
+   * produção numa conversa de 60 mensagens cujos cartões estavam nas de número
+   * 6, 10 e 12 (CLAUDE.md §9.114).
+   */
+  const carregarAntigas = useCallback(async () => {
+    const primeira = mensagens[0];
+    const conversa = conversaId.current;
+    if (!primeira || !conversa || carregandoAntigas) return;
+
+    setCarregandoAntigas(true);
+    try {
+      const anterior = await obterConversa({ conversaId: conversa, antesDe: primeira.id });
+      if (!anterior) return;
+      prepararParaTopo.current = true;
+      setTemMaisAntigas(anterior.temMais);
+      setMensagens((atuais) => [
+        ...anterior.mensagens.map((m) => ({
+          id: m.id,
+          papel: m.papel,
+          conteudo: m.conteudo,
+          passos: m.passos.map((passo) => ({ ...passo, emAndamento: false })),
+          citacoes: m.citacoes,
+          // Mesma regra da retomada: os cartões gravados voltam aprováveis.
+          sugestoes: m.passos.flatMap((passo) => passo.sugestoes ?? []),
+          mensagemId: m.id,
+        })),
+        ...atuais,
+      ]);
+    } catch {
+      // Falhar aqui não pode derrubar a conversa já carregada: o botão continua
+      // na tela e o analista pode tentar de novo.
+    } finally {
+      setCarregandoAntigas(false);
+    }
+  }, [mensagens, carregandoAntigas]);
 
   // Cancela o stream em curso se o componente sair da tela (fechar o Sheet,
   // trocar de aba). Sem isso o `setState` continuaria sendo chamado depois da
@@ -348,6 +398,18 @@ export function AssistenteChat({
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-2">
         {carregando && (
           <p className="px-1 py-2 text-sm text-muted-foreground">Retomando a conversa…</p>
+        )}
+
+        {temMaisAntigas && !carregando && (
+          <button
+            type="button"
+            onClick={() => void carregarAntigas()}
+            disabled={carregandoAntigas}
+            className="mx-auto flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            <ChevronUp className="size-3" aria-hidden />
+            {carregandoAntigas ? "Carregando…" : "Carregar mensagens anteriores"}
+          </button>
         )}
 
         {vazio && (

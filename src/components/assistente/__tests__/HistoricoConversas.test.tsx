@@ -137,3 +137,76 @@ describe("histórico de conversas do assistente", () => {
     expect(await screen.findByText(/Nenhuma conversa anterior/i)).toBeTruthy();
   });
 });
+
+// Conversa longa reabre mostrando só o fim. Os cartões de candidato de uma
+// busca antiga ficam acima da janela — foi assim que a contratação de Ferraz de
+// Vasconcelos (mensagens 6, 10 e 12 de 60) ficou inalcançável em produção.
+describe("carregar mensagens anteriores", () => {
+  const PAGINA_RECENTE = {
+    conversaId: "conv-longa",
+    temMais: true,
+    mensagens: [
+      { id: "m31", papel: "user" as const, conteudo: "mensagem recente", passos: [], citacoes: [] },
+    ],
+  };
+
+  const PAGINA_ANTIGA = {
+    conversaId: "conv-longa",
+    temMais: false,
+    mensagens: [
+      { id: "m1", papel: "user" as const, conteudo: "mensagem do começo", passos: [], citacoes: [] },
+    ],
+  };
+
+  it("oferece carregar anteriores e usa a mensagem do topo como cursor", async () => {
+    obterConversaMock.mockResolvedValue(PAGINA_RECENTE);
+
+    await abrirPainel();
+    await abrirHistorico();
+    fireEvent.click(await screen.findByText("preciso que encontre contratos similares"));
+    await screen.findByText("mensagem recente");
+
+    obterConversaMock.mockResolvedValue(PAGINA_ANTIGA);
+    fireEvent.click(screen.getByRole("button", { name: /Carregar mensagens anteriores/i }));
+
+    await waitFor(() => {
+      expect(obterConversaMock).toHaveBeenLastCalledWith({
+        conversaId: "conv-longa",
+        antesDe: "m31",
+      });
+    });
+    // A página antiga entra ACIMA da que já estava: a conversa continua legível
+    // de cima para baixo.
+    expect(await screen.findByText("mensagem do começo")).toBeTruthy();
+    expect(screen.getByText("mensagem recente")).toBeTruthy();
+  });
+
+  // Prometer o botão quando não há página anterior é a §9.40: clique sem efeito.
+  it("some com o botão quando a conversa já está inteira na tela", async () => {
+    obterConversaMock.mockResolvedValue({ ...PAGINA_RECENTE, temMais: false });
+
+    await abrirPainel();
+    await abrirHistorico();
+    fireEvent.click(await screen.findByText("preciso que encontre contratos similares"));
+    await screen.findByText("mensagem recente");
+
+    expect(screen.queryByRole("button", { name: /Carregar mensagens anteriores/i })).toBeNull();
+  });
+
+  it("some com o botão depois de chegar ao começo da conversa", async () => {
+    obterConversaMock.mockResolvedValue(PAGINA_RECENTE);
+
+    await abrirPainel();
+    await abrirHistorico();
+    fireEvent.click(await screen.findByText("preciso que encontre contratos similares"));
+    await screen.findByText("mensagem recente");
+
+    obterConversaMock.mockResolvedValue(PAGINA_ANTIGA);
+    fireEvent.click(screen.getByRole("button", { name: /Carregar mensagens anteriores/i }));
+    await screen.findByText("mensagem do começo");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Carregar mensagens anteriores/i })).toBeNull();
+    });
+  });
+});

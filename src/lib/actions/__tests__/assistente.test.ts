@@ -957,3 +957,101 @@ describe("obterConversa", () => {
     expect(await obterConversa({ conversaId: "conv-de-outro" })).toBeNull();
   });
 });
+
+// Paginação para trás da conversa.
+//
+// Sem ela, reabrir uma conversa longa mostrava só o fim: medido em produção em
+// 2026-09-18, os cartões da contratação de Ferraz de Vasconcelos estavam nas
+// mensagens 6, 10 e 12 de 60 — fora da janela, e com eles o picker de "outros
+// itens desta licitação", que era o que o analista precisava.
+describe("obterConversa — carregar mensagens anteriores", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireAuth.mockResolvedValue(USER);
+  });
+
+  function mensagensDe(quantidade: number) {
+    return Array.from({ length: quantidade }, (_, i) => ({
+      id: `m${i}`,
+      papel: "user",
+      conteudo: `msg ${i}`,
+      ferramentasUsadas: null,
+      citacoes: null,
+    }));
+  }
+
+  // O "+1" é como se sabe que há página anterior sem contar a conversa inteira.
+  // O extra não pode vazar para a tela.
+  it("sinaliza temMais sem devolver a mensagem extra usada para detectá-lo", async () => {
+    mocks.db.conversaAssistente.findFirst.mockResolvedValue({
+      id: "conv-1",
+      mensagens: mensagensDe(31),
+    });
+
+    const conversa = await obterConversa({ conversaId: "conv-1" });
+
+    expect(conversa?.temMais).toBe(true);
+    expect(conversa?.mensagens).toHaveLength(30);
+    expect(mocks.db.conversaAssistente.findFirst.mock.calls[0]![0].select.mensagens.take).toBe(31);
+  });
+
+  it("não promete página anterior quando a conversa cabe inteira", async () => {
+    mocks.db.conversaAssistente.findFirst.mockResolvedValue({
+      id: "conv-1",
+      mensagens: mensagensDe(12),
+    });
+
+    const conversa = await obterConversa({ conversaId: "conv-1" });
+
+    expect(conversa?.temMais).toBe(false);
+    expect(conversa?.mensagens).toHaveLength(12);
+  });
+
+  // A asserção decisiva é no filtro que vai ao banco, não no resultado: com o
+  // Prisma mockado o retorno é o que o teste mandou, então só o argumento prova
+  // que o cursor foi aplicado (§9.99).
+  it("filtra pelas mensagens ANTERIORES ao cursor, com desempate por id", async () => {
+    const corte = new Date("2026-09-18T12:00:00Z");
+    mocks.db.mensagemAssistente.findFirst.mockResolvedValue({ createdAt: corte, id: "m30" });
+    mocks.db.conversaAssistente.findFirst.mockResolvedValue({ id: "conv-1", mensagens: [] });
+
+    await obterConversa({ conversaId: "conv-1", antesDe: "m30" });
+
+    const where = mocks.db.conversaAssistente.findFirst.mock.calls[0]![0].select.mensagens.where;
+    expect(where.OR).toEqual([
+      { createdAt: { lt: corte } },
+      { createdAt: corte, id: { lt: "m30" } },
+    ]);
+  });
+
+  // Cursor de outra conversa não pode cair em "primeira página": devolveria o
+  // FIM da conversa de novo, duplicando o que já está na tela.
+  it("recusa cursor que não pertence à conversa do usuário", async () => {
+    mocks.db.mensagemAssistente.findFirst.mockResolvedValue(null);
+
+    expect(await obterConversa({ conversaId: "conv-1", antesDe: "m-de-outra" })).toBeNull();
+    expect(mocks.db.conversaAssistente.findFirst).not.toHaveBeenCalled();
+  });
+
+  // O cursor é buscado com o dono no filtro, não conferido depois.
+  it("busca o cursor amarrado à conversa e ao usuário", async () => {
+    mocks.db.mensagemAssistente.findFirst.mockResolvedValue(null);
+
+    await obterConversa({ conversaId: "conv-1", antesDe: "m30" });
+
+    expect(mocks.db.mensagemAssistente.findFirst.mock.calls[0]![0].where).toEqual({
+      id: "m30",
+      conversa: { id: "conv-1", userId: "user-1" },
+    });
+  });
+
+  it("sem cursor não filtra por data — carrega a página mais recente", async () => {
+    mocks.db.conversaAssistente.findFirst.mockResolvedValue({ id: "conv-1", mensagens: [] });
+
+    await obterConversa({ conversaId: "conv-1" });
+
+    const where = mocks.db.conversaAssistente.findFirst.mock.calls[0]![0].select.mensagens.where;
+    expect(where.OR).toBeUndefined();
+    expect(mocks.db.mensagemAssistente.findFirst).not.toHaveBeenCalled();
+  });
+});
