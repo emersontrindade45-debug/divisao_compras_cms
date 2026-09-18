@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CalendarClock, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { buscarVigenciaContrato } from "@/lib/actions/buscarVigenciaContrato";
+import { enfileirarBuscaVigencia } from "@/lib/domain/filaVigenciaContrato";
 import type { ContratoVigencia } from "@/lib/domain/contratosVigencia";
 
 // Vigência dos contratos gerados pela contratação do candidato.
@@ -43,7 +44,12 @@ export function VigenciaContratoCelula({
   const buscar = async () => {
     setBuscando(true);
     try {
-      const resultado = await buscarVigenciaContrato(resultadoId);
+      // Enfileirado, não disparado direto: clicar em vários botões "ver
+      // vigência" em sequência não pode rodar N varreduras do PNCP ao mesmo
+      // tempo — cada uma já martela o PNCP sozinha (ver
+      // `enfileirarBuscaVigencia`). As chamadas esperam a vez em vez de
+      // competir e falharem juntas.
+      const resultado = await enfileirarBuscaVigencia(() => buscarVigenciaContrato(resultadoId));
       if (resultado.error || !resultado.data) {
         toast.error(resultado.error ?? "Não foi possível consultar os contratos no PNCP.");
         return;
