@@ -2,10 +2,11 @@
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { PanelRightClose, Sparkles } from "lucide-react";
+import { History, PanelRightClose, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AssistenteChat } from "./AssistenteChat";
+import { HistoricoConversas } from "./HistoricoConversas";
 
 // Painel do assistente como COLUNA fixa, montada no layout da área autenticada.
 //
@@ -98,14 +99,28 @@ function PainelAssistente({
   aoFechar: () => void;
 }) {
   const [reinicios, setReinicios] = useState(0);
+  const [historicoAberto, setHistoricoAberto] = useState(false);
+  const [conversaEscolhida, setConversaEscolhida] = useState<string | null>(null);
 
   // Trocar a `key` desmonta e remonta o chat com estado limpo. É o que faz
-  // "Nova conversa" começar do zero e o que troca de conversa ao navegar para
-  // outro processo, sem precisar de um efeito que espelhe props em estado
-  // (CLAUDE.md §9.41).
-  const chave = `${processoId ?? "global"}-${reinicios}`;
+  // "Nova conversa" começar do zero, o que troca de conversa ao navegar para
+  // outro processo e o que abre uma conversa do histórico, sem precisar de um
+  // efeito que espelhe props em estado (CLAUDE.md §9.41).
+  const chave = `${processoId ?? "global"}-${reinicios}-${conversaEscolhida ?? "atual"}`;
 
-  const novaConversa = useCallback(() => setReinicios((n) => n + 1), []);
+  const novaConversa = useCallback(() => {
+    // Sair da conversa escolhida junto: sem isto, "Nova conversa" logo depois
+    // de abrir uma do histórico remontaria o chat NELA de novo — o botão
+    // pareceria não fazer nada (CLAUDE.md §9.40).
+    setConversaEscolhida(null);
+    setHistoricoAberto(false);
+    setReinicios((n) => n + 1);
+  }, []);
+
+  const escolherConversa = useCallback((conversaId: string) => {
+    setConversaEscolhida(conversaId);
+    setHistoricoAberto(false);
+  }, []);
 
   return (
     <aside
@@ -127,17 +142,44 @@ function PainelAssistente({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">Assistente de pesquisa</p>
           <p className="truncate text-xs text-muted-foreground">
-            {processoId ? "Conversa deste processo" : "Conversa geral"}
+            {/* Sem isto, uma conversa aberta do histórico é indistinguível da
+                atual — e o analista continuaria escrevendo nela sem perceber. */}
+            {conversaEscolhida
+              ? "Conversa anterior"
+              : processoId
+                ? "Conversa deste processo"
+                : "Conversa geral"}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={novaConversa}>
-          Nova conversa
+        <Button
+          variant="outline"
+          size="icon-sm"
+          onClick={() => setHistoricoAberto((aberto) => !aberto)}
+          aria-pressed={historicoAberto}
+          title="Conversas anteriores"
+        >
+          <History aria-hidden />
+          <span className="sr-only">Conversas anteriores</span>
+        </Button>
+        <Button variant="outline" size="icon-sm" onClick={novaConversa} title="Nova conversa">
+          <Plus aria-hidden />
+          <span className="sr-only">Nova conversa</span>
         </Button>
         <Button variant="ghost" size="icon-sm" onClick={aoFechar}>
           <PanelRightClose aria-hidden />
           <span className="sr-only">Fechar assistente</span>
         </Button>
       </header>
+
+      {historicoAberto && (
+        <div className="max-h-64 shrink-0 overflow-y-auto border-b px-3">
+          <HistoricoConversas
+            processoId={processoId}
+            conversaAtual={conversaEscolhida}
+            aoEscolher={escolherConversa}
+          />
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 px-4 pb-4">
         <AssistenteChat
@@ -147,7 +189,8 @@ function PainelAssistente({
           // Só a primeira montagem de um escopo retoma do banco. Depois de
           // "Nova conversa", retomar traria de volta exatamente a conversa que
           // o usuário acabou de pedir para deixar de lado.
-          retomarConversa={reinicios === 0}
+          retomarConversa={reinicios === 0 && conversaEscolhida === null}
+          conversaIdInicial={conversaEscolhida}
           className="h-full"
         />
       </div>

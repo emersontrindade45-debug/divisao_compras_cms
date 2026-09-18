@@ -123,8 +123,24 @@ export async function obterConversaAtiva(
 
   if (!ultima) return null;
 
+  return carregarConversa(ultima.conversaId, user.id);
+}
+
+/**
+ * Carrega UMA conversa pelo id, já no formato da tela. Extraído de
+ * `obterConversaAtiva` quando o histórico passou a existir: as duas entradas
+ * (retomar a última / abrir uma do histórico) precisam do mesmo recorte de
+ * mensagens, e duplicar o `select` faria uma delas envelhecer sozinha.
+ *
+ * `userId` entra no `where`, nunca só na conferência posterior: conversa é do
+ * usuário que a criou, e um id vindo do navegador não pode alcançar a de outro.
+ */
+async function carregarConversa(
+  conversaId: string,
+  userId: string,
+): Promise<ConversaCarregada | null> {
   const conversa = await db.conversaAssistente.findFirst({
-    where: { id: ultima.conversaId, userId: user.id },
+    where: { id: conversaId, userId },
     select: {
       id: true,
       mensagens: {
@@ -160,6 +176,91 @@ export async function obterConversaAtiva(
       citacoes: lerCitacoes(m.citacoes),
     })),
   };
+}
+
+const conversaIdSchema = z.object({ conversaId: z.string().min(1) });
+
+/**
+ * Abre uma conversa específica do histórico.
+ *
+ * Existe porque `obterConversaAtiva` só alcança a ÚLTIMA conversa do escopo:
+ * toda vez que o analista clicava em "Nova conversa", a anterior continuava
+ * gravada e ficava sem nenhum caminho até ela na tela — junto com os cartões de
+ * candidato daquela busca, que são a única porta para o picker de "outros itens
+ * desta licitação". Relatado pelo usuário em 2026-09-18, com uma conversa de 60
+ * mensagens escondida por outra de 3.
+ */
+export async function obterConversa(
+  entrada: z.input<typeof conversaIdSchema>,
+): Promise<ConversaCarregada | null> {
+  const user = await requireAuth();
+  const { conversaId } = conversaIdSchema.parse(entrada);
+  return carregarConversa(conversaId, user.id);
+}
+
+export interface ConversaNaLista {
+  id: string;
+  titulo: string;
+  /** ISO — a tela formata. Vem da última MENSAGEM, não do `updatedAt`. */
+  ultimaMensagemEm: string;
+  totalMensagens: number;
+}
+
+/** Teto de conversas listadas no histórico. Além disso a lista deixa de ser navegável. */
+const MAX_CONVERSAS_HISTORICO = 50;
+
+/**
+ * Conversas do usuário neste escopo, da mais recente para a mais antiga.
+ *
+ * Ordena pela última MENSAGEM e não por `updatedAt`, pelo mesmo motivo
+ * documentado em `obterConversaAtiva`: escrever uma mensagem não toca o
+ * `updatedAt` da conversa (a escrita é na tabela filha), então ordenar por ele
+ * colocaria no topo a conversa aberta por último em vez da usada por último.
+ *
+ * Conversa sem nenhuma mensagem fica de fora: ela nasce no primeiro envio, mas
+ * uma que tenha falhado no meio do caminho seria uma linha vazia e inútil na
+ * lista.
+ */
+export async function listarConversas(processoId: string | null): Promise<ConversaNaLista[]> {
+  const user = await requireAuth();
+  const { processoId: escopo } = escopoSchema.parse({ processoId });
+
+  const conversas = await db.conversaAssistente.findMany({
+    where: {
+      userId: user.id,
+      processoId: escopo ?? null,
+      mensagens: { some: {} },
+    },
+    select: {
+      id: true,
+      titulo: true,
+      mensagens: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { createdAt: true },
+      },
+      _count: { select: { mensagens: true } },
+    },
+    // Cortar ANTES de ordenar é o defeito da §9.91, e sem `orderBy` aqui o
+    // `take` pegaria 50 linhas em ordem indefinida. O `orderBy` do Prisma não
+    // alcança o máximo de uma relação, então o banco corta pelo que ele sabe
+    // ordenar — a criação da conversa — e a ordem de EXIBIÇÃO (última mensagem)
+    // é aplicada depois, em memória. Os dois critérios são monótonos entre si
+    // no uso normal: retomar uma conversa antiga reordena a lista, não a faz
+    // sumir, porque ela só sairia do corte se houvesse 50 conversas mais NOVAS
+    // neste mesmo processo.
+    orderBy: { createdAt: "desc" },
+    take: MAX_CONVERSAS_HISTORICO,
+  });
+
+  return conversas
+    .map((c) => ({
+      id: c.id,
+      titulo: c.titulo,
+      ultimaMensagemEm: (c.mensagens[0]?.createdAt ?? new Date(0)).toISOString(),
+      totalMensagens: c._count.mensagens,
+    }))
+    .sort((a, b) => b.ultimaMensagemEm.localeCompare(a.ultimaMensagemEm));
 }
 
 /** Itens do processo, para o cartão de candidato saber a qual deles adicionar. */

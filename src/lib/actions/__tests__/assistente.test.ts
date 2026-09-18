@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   db: {
     mensagemAssistente: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-    conversaAssistente: { findFirst: vi.fn() },
+    conversaAssistente: { findFirst: vi.fn(), findMany: vi.fn() },
     item: { findUnique: vi.fn(), findMany: vi.fn() },
     resultadoSimilaridade: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
     // Presentes de propósito: os testes provam que NUNCA são chamados.
@@ -60,7 +60,9 @@ import {
   adicionarItemDaContratacao,
   completarLinksOrigemCandidatos,
   descartarCandidatoAssistente,
+  listarConversas,
   listarOutrosItensDaContratacao,
+  obterConversa,
   obterConversaAtiva,
 } from "../assistente";
 
@@ -838,5 +840,120 @@ describe("descartarCandidatoAssistente", () => {
 
     expect(r.ok).toBe(true);
     expect(mocks.db.resultadoSimilaridade.create).not.toHaveBeenCalled();
+  });
+});
+
+// Histórico de conversas: antes de existir, `obterConversaAtiva` era a única
+// porta de entrada e alcançava só a ÚLTIMA conversa do escopo. Cada clique em
+// "Nova conversa" empurrava a anterior para fora da tela, ainda gravada e
+// inalcançável — junto com os cartões de candidato, que são a única porta para
+// o picker de "outros itens desta licitação". Relatado pelo usuário em
+// 2026-09-18, com uma conversa de 60 mensagens escondida por outra de 3.
+describe("listarConversas", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireAuth.mockResolvedValue(USER);
+  });
+
+  function conversaDe(
+    id: string,
+    ultimaMensagem: string | null,
+    total: number,
+    titulo = `titulo ${id}`,
+  ) {
+    return {
+      id,
+      titulo,
+      mensagens: ultimaMensagem ? [{ createdAt: new Date(ultimaMensagem) }] : [],
+      _count: { mensagens: total },
+    };
+  }
+
+  // O critério é a última MENSAGEM, não a criação: a conversa antiga que o
+  // analista retomou hoje tem de voltar ao topo. Ordenar por `updatedAt` da
+  // conversa não serve — escrever mensagem não o toca (a escrita é na filha).
+  it("ordena pela última mensagem, não pela ordem que o banco devolveu", async () => {
+    mocks.db.conversaAssistente.findMany.mockResolvedValue([
+      conversaDe("nova-mas-parada", "2026-09-01T10:00:00Z", 3),
+      conversaDe("antiga-retomada", "2026-09-18T12:21:00Z", 60),
+      conversaDe("do-meio", "2026-09-10T08:00:00Z", 12),
+    ]);
+
+    const lista = await listarConversas("proc-1");
+
+    expect(lista.map((c) => c.id)).toEqual(["antiga-retomada", "do-meio", "nova-mas-parada"]);
+    expect(lista[0]).toMatchObject({ totalMensagens: 60 });
+  });
+
+  // Cortar antes de ordenar é o defeito da §9.91. O `take` do banco precisa de
+  // um `orderBy` próprio, senão pega 50 linhas em ordem indefinida.
+  it("pede ao banco um recorte ordenado e só do usuário e do escopo", async () => {
+    mocks.db.conversaAssistente.findMany.mockResolvedValue([]);
+
+    await listarConversas("proc-1");
+
+    const args = mocks.db.conversaAssistente.findMany.mock.calls[0]![0];
+    expect(args.where).toMatchObject({ userId: "user-1", processoId: "proc-1" });
+    // Conversa sem mensagem nenhuma não vira linha vazia na lista.
+    expect(args.where.mensagens).toEqual({ some: {} });
+    expect(args.orderBy).toBeDefined();
+    expect(args.take).toBeGreaterThan(0);
+  });
+
+  // `processoId: null` é o escopo global (atalho da Topbar) e NÃO pode virar
+  // "qualquer processo": traria para a lista geral conversas de processos.
+  it("trata a ausência de processo como escopo global, não como filtro aberto", async () => {
+    mocks.db.conversaAssistente.findMany.mockResolvedValue([]);
+
+    await listarConversas(null);
+
+    expect(mocks.db.conversaAssistente.findMany.mock.calls[0]![0].where).toMatchObject({
+      processoId: null,
+    });
+  });
+});
+
+describe("obterConversa", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireAuth.mockResolvedValue(USER);
+  });
+
+  // O id vem do navegador. Sem `userId` no `where`, bastaria trocá-lo para ler
+  // a conversa de outro usuário — e conversa carrega preço, fornecedor e o
+  // rastro da pesquisa.
+  it("filtra por userId no banco, não só depois de ler", async () => {
+    mocks.db.conversaAssistente.findFirst.mockResolvedValue(null);
+
+    await obterConversa({ conversaId: "conv-de-outro" });
+
+    expect(mocks.db.conversaAssistente.findFirst.mock.calls[0]![0].where).toEqual({
+      id: "conv-de-outro",
+      userId: "user-1",
+    });
+  });
+
+  it("devolve as mensagens na ordem de leitura, da mais antiga para a mais nova", async () => {
+    // O banco devolve `desc` (é assim que se pegam as ÚLTIMAS N); a tela lê de
+    // cima para baixo.
+    mocks.db.conversaAssistente.findFirst.mockResolvedValue({
+      id: "conv-1",
+      mensagens: [
+        { id: "m3", papel: "assistant", conteudo: "terceira", ferramentasUsadas: null, citacoes: null },
+        { id: "m2", papel: "user", conteudo: "segunda", ferramentasUsadas: null, citacoes: null },
+        { id: "m1", papel: "user", conteudo: "primeira", ferramentasUsadas: null, citacoes: null },
+      ],
+    });
+
+    const conversa = await obterConversa({ conversaId: "conv-1" });
+
+    expect(conversa?.conversaId).toBe("conv-1");
+    expect(conversa?.mensagens.map((m) => m.conteudo)).toEqual(["primeira", "segunda", "terceira"]);
+  });
+
+  it("devolve null quando a conversa não é do usuário", async () => {
+    mocks.db.conversaAssistente.findFirst.mockResolvedValue(null);
+
+    expect(await obterConversa({ conversaId: "conv-de-outro" })).toBeNull();
   });
 });

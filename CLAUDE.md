@@ -1496,3 +1496,20 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      espera e não trabalho, subir a concorrência vale mais que subir o prazo; mas só para o caminho
      que tem o usuário esperando — a busca do assistente segue em 5 de propósito, porque lá são
      dezenas de editais concorrendo e martelar o PNCP em rajada provoca as recusas da §9.103.
+
+113. **Dado gravado sem caminho de leitura na UI é dado perdido do ponto de vista de quem usa — e
+     o relato chega como "sumiu".** As conversas do assistente sempre foram persistidas
+     (`ConversaAssistente`, com título, escopo e mensagens), mas a única porta de entrada era
+     `obterConversaAtiva`, que carrega a ÚLTIMA conversa do escopo. Cada clique em "Nova conversa"
+     empurrava a anterior para um estado gravado e inalcançável. Em 2026-09-18 o usuário relatou
+     perda de histórico: a conversa real tinha **60 mensagens** e estava escondida por uma de 3,
+     aberta três minutos depois. O prejuízo não era o texto — os cartões de candidato vivem na
+     mensagem do assistente, e com eles some o picker de "outros itens desta licitação", única
+     forma de aproveitar o resto de uma ata já encontrada. Antes de dar por pronto um módulo que
+     grava histórico, perguntar **por qual clique o usuário chega em cada linha que eu gravei**; se
+     não houver um, a persistência é custo sem benefício (§9.40 no eixo da leitura: lá o elemento
+     prometia o que não entregava, aqui o sistema entregava sem oferecer).
+     **Corolário de diagnóstico:** o primeiro passo certo foi consultar o banco de produção
+     (`PROD_READ_URL`) antes de propor qualquer coisa — provou em uma consulta que nada fora
+     perdido e mudou a tarefa de "recuperar dados" para "abrir caminho de leitura". Relato de perda
+     de dados se verifica no banco, não se aceita pela descrição (§9.69).

@@ -6,7 +6,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { lerStreamSSE } from "@/lib/assistente/sse";
-import { obterConversaAtiva, listarItensDoProcesso } from "@/lib/actions/assistente";
+import { obterConversa, obterConversaAtiva, listarItensDoProcesso } from "@/lib/actions/assistente";
 import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 import { PassoFerramenta, type PassoExibido } from "./PassoFerramenta";
 import { RespostaFormatada } from "./RespostaFormatada";
@@ -55,6 +55,7 @@ export function AssistenteChat({
    * conversa", que remonta o componente para começar do zero.
    */
   retomarConversa = true,
+  conversaIdInicial = null,
 }: {
   processoId?: string | null;
   processoNumero?: string;
@@ -62,11 +63,17 @@ export function AssistenteChat({
   /** Incrementar força o recarregamento dos itens (ex.: após sync da planilha). */
   itensKey?: number;
   retomarConversa?: boolean;
+  /**
+   * Conversa escolhida no histórico. Quando presente, o chat abre NELA em vez
+   * da última do escopo — é o que dá acesso às conversas que "Nova conversa"
+   * deixava para trás.
+   */
+  conversaIdInicial?: string | null;
 }) {
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [rascunho, setRascunho] = useState("");
   const [enviando, setEnviando] = useState(false);
-  const [carregando, setCarregando] = useState(retomarConversa);
+  const [carregando, setCarregando] = useState(retomarConversa || conversaIdInicial !== null);
   const [itens, setItens] = useState<{ id: string; descricao: string }[]>([]);
   const conversaId = useRef<string | null>(null);
   const fimDaLista = useRef<HTMLDivElement>(null);
@@ -77,10 +84,16 @@ export function AssistenteChat({
   // criava uma conversa nova a cada abertura, porque o `conversaId` voltava a
   // ser nulo.
   useEffect(() => {
-    if (!retomarConversa) return;
+    // Abrir uma conversa do histórico tem precedência sobre retomar a última:
+    // quem clicou num item da lista pediu AQUELA conversa.
+    if (!retomarConversa && !conversaIdInicial) return;
     let cancelado = false;
 
-    void obterConversaAtiva(processoId)
+    const carga = conversaIdInicial
+      ? obterConversa({ conversaId: conversaIdInicial })
+      : obterConversaAtiva(processoId);
+
+    void carga
       .then((conversa) => {
         if (cancelado || !conversa) return;
         conversaId.current = conversa.conversaId;
@@ -109,7 +122,7 @@ export function AssistenteChat({
     return () => {
       cancelado = true;
     };
-  }, [processoId, retomarConversa]);
+  }, [processoId, retomarConversa, conversaIdInicial]);
 
   // Itens do processo: é o destino de cada candidato aprovado. Fora de um
   // processo a lista fica vazia e o cartão desabilita o botão com o motivo.
