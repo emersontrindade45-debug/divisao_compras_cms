@@ -66,4 +66,25 @@ describe("obterFontesSimilaridade", () => {
       expect(argumento.select.resultadosSimilaridade.select).toHaveProperty(coluna, true);
     }
   });
+  // Coluna nova no schema que o `select` não pede viaja no banco e nunca chega
+  // à tela, sem erro em lugar nenhum (§9.104). A asserção é sobre o ARGUMENTO
+  // passado ao Prisma: com o client mockado, o retorno vem completo por
+  // construção e uma asserção sobre ele passaria mesmo sem o `select`.
+  it("lê as colunas da vigência de contrato (M29)", async () => {
+    await obterFontesSimilaridade("proc-1");
+
+    const argumento = mocks.db.item.findMany.mock.calls[0]![0] as {
+      select: { resultadosSimilaridade: { select: Record<string, unknown> } };
+    };
+
+    expect(argumento.select.resultadosSimilaridade.select).toHaveProperty(
+      "contratosVigencia",
+      true,
+    );
+    // Sem esta, a tela não distingue "ainda não busquei" de "busquei e não há".
+    expect(argumento.select.resultadosSimilaridade.select).toHaveProperty(
+      "vigenciaBuscadaEm",
+      true,
+    );
+  });
 });

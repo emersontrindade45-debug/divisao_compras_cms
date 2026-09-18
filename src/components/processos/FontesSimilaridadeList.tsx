@@ -9,6 +9,7 @@ import {
   type CandidatoSimilaridadeView,
 } from "@/components/processos/LinhaCandidatoSimilaridade";
 import { obterFontesSimilaridade } from "@/lib/actions/listar";
+import { lerContratosVigencia } from "@/lib/domain/contratosVigencia";
 import { lerRoteiro } from "@/lib/validations/roteiroCalculo";
 import {
   classificarGrandeza,
@@ -40,6 +41,8 @@ function paraView(fonte: ResultadoDoBanco): CandidatoSimilaridadeView {
     fonteUrl: fonte.fonteUrl,
     valorUnitario: Number(fonte.valorUnitario),
     dataFormatada: formatarData(fonte.dataReferencia),
+    contratosVigencia: lerContratosVigencia(fonte.contratosVigencia),
+    vigenciaBuscadaEm: fonte.vigenciaBuscadaEm?.toISOString() ?? null,
     dataReferenciaISO: fonte.dataReferencia.toISOString(),
     scoreFinal: Number(fonte.scoreFinal),
     promovidoParaFonte: fonte.promovidoParaFonte,
@@ -151,7 +154,18 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
                     <TableHead>Órgão / Origem</TableHead>
                     <TableHead>Objeto do contrato</TableHead>
                     <TableHead>Valor considerado</TableHead>
-                    <TableHead>Data</TableHead>
+                    {/* A data exibida é `dataReferencia`, que nas duas fontes desta
+                        tabela vem do RESULTADO do julgamento: `dataResultado` dos
+                        `/resultados` do PNCP e `dataResultado` do Painel de Preços
+                        (§9.61, §9.76). Chamar de "Data" escondia o que ela significa —
+                        e é ela que sustenta a recência exigida pela IN 65/2021.
+                        O `title` registra a ressalva: no PNCP, quando o resultado vem
+                        sem data publicada, o valor cai para a última atualização do
+                        item (medido em 2026-09-18: 17 de 17 resultados tinham
+                        `dataResultado`, então o recurso é rede de segurança). */}
+                    <TableHead title="Data do resultado do julgamento (homologação) publicada na fonte">
+                      Homologação
+                    </TableHead>
                     <TableHead>Referência</TableHead>
                     <TableHead>Score</TableHead>
                     <TableHead>Fonte</TableHead>

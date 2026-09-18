@@ -8,6 +8,7 @@ import { TableCell, TableRow } from "@/components/ui/table";
 import { PromoverFonteButton } from "@/components/processos/PromoverFonteButton";
 import { DescartarResultadoButton } from "@/components/processos/DescartarResultadoButton";
 import { ReferenciaSinapiInfo } from "@/components/processos/ReferenciaSinapiInfo";
+import { VigenciaContratoCelula } from "@/components/processos/VigenciaContratoCelula";
 import {
   PERIODICIDADE_LABEL,
   RoteiroCalculoEditor,
@@ -22,6 +23,7 @@ import {
   type RoteiroCalculo,
 } from "@/lib/domain/roteiroCalculo";
 import { ehUrlGenericaPainel, linkOrigemDeHref, resolverLinkOrigem } from "@/lib/similaridade/linkOrigem";
+import type { ContratoVigencia } from "@/lib/domain/contratosVigencia";
 
 
 /**
@@ -48,6 +50,19 @@ export interface CandidatoSimilaridadeView {
   /** Valor que vale como preço deste candidato na série (null = sem roteiro). */
   valorConsiderado: number | null;
   roteiro: RoteiroCalculo | null;
+  /** Contratos gerados pela contratação (M29). Vazio = buscado e não há, ou não buscado. */
+  contratosVigencia: ContratoVigencia[];
+  /** ISO de quando a vigência foi buscada; `null` = nunca. Distingue os dois vazios acima. */
+  vigenciaBuscadaEm: string | null;
+}
+
+/**
+ * Só contratação com link de edital do PNCP tem contrato consultável por aqui.
+ * Painel de Preços e SINAPI não passam por este caminho — sem isto o botão
+ * apareceria neles prometendo algo que a consulta não entrega (§9.40).
+ */
+function ehContratacaoPncp(fonteUrl: string | null): boolean {
+  return /^https:\/\/pncp\.gov\.br\/app\/editais\/[^/]+\/[^/]+\/[^/]+$/.test(fonteUrl ?? "");
 }
 
 function scoreVariant(score: number): "default" | "secondary" | "destructive" {
@@ -110,7 +125,18 @@ export function LinhaCandidatoSimilaridade({
             </span>
           )}
         </TableCell>
-        <TableCell className="whitespace-nowrap">{candidato.dataFormatada}</TableCell>
+        <TableCell className="whitespace-nowrap align-top">
+          {candidato.dataFormatada}
+          {/* A vigência mora sob a homologação porque as três datas contam a
+              mesma história em ordem: preço homologado, contrato começa,
+              contrato termina. */}
+          <VigenciaContratoCelula
+            resultadoId={candidato.id}
+            contratosIniciais={candidato.contratosVigencia}
+            buscadaEm={candidato.vigenciaBuscadaEm}
+            temLinkPncp={ehContratacaoPncp(candidato.fonteUrl)}
+          />
+        </TableCell>
         <TableCell>
           {candidato.tipoCandidato === "preco_referencia" ? (
             <ReferenciaSinapiInfo

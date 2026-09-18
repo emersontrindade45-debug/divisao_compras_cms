@@ -210,3 +210,37 @@ describe("FontesSimilaridadeList", () => {
     expect(screen.queryByText("Nenhum item cadastrado")).not.toBeInTheDocument();
   });
 });
+
+// A data desta tabela é o que sustenta a recência exigida pela IN 65/2021, e
+// nas duas fontes que a alimentam (PNCP `/resultados` e Painel de Preços) ela é
+// a data do RESULTADO do julgamento — §9.61 e §9.76. O cabeçalho dizia só
+// "Data", que não diz de qual data se trata.
+it("nomeia a coluna de data como Homologação", async () => {
+  mocks.obterFontesSimilaridade.mockResolvedValue([
+    {
+      ...ITEM_BASE,
+      resultadosSimilaridade: [
+        {
+          id: "res-1",
+          tipoCandidato: "contratacao_publica",
+          fonteDescricao: "Locação de multifuncional",
+          fonteOrgaoOuId: "MUNICIPIO DE FERRAZ DE VASCONCELOS",
+          fonteUrl: "https://pncp.gov.br/app/editais/46523197000144/2025/40",
+          valorUnitario: 874,
+          dataReferencia: new Date("2025-03-27"),
+          scoreFinal: 62,
+          justificativa: "match",
+          promovidoParaFonte: false,
+          competenciaReferencia: null,
+          regimeReferencia: null,
+          localidadeReferencia: null,
+        },
+      ],
+    },
+  ]);
+
+  render(await FontesSimilaridadeList({ processoId: "proc-1" }));
+
+  expect(screen.getByRole("columnheader", { name: /Homologação/ })).toBeTruthy();
+  expect(screen.queryByRole("columnheader", { name: /^Data$/ })).toBeNull();
+});

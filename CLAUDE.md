@@ -1611,3 +1611,37 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      estado real desse sistema e simular a decisão do código contra ele — não é teste de
      integração completo, é uma consulta, e aqui evitou entregar uma correção que não funcionaria
      (§9.23, §9.30).
+
+119. **HTTP 410 Gone é ausência, não falha — e confundir os dois derruba a varredura inteira.** Ao
+     ligar a vigência de contrato (M29), o PNCP respondeu **410** com "O contrato/empenho informado
+     foi excluído e não pode ser consultado" (medido no sequencial 464/2025 de Ferraz de
+     Vasconcelos). O código tratava todo não-2xx que não fosse 404 como erro, e uma sondagem que
+     caísse num contrato excluído abortava a busca toda, devolvendo "não foi possível consultar"
+     para uma compra que tinha 3 contratos. Contrato excluído é buraco na numeração, exatamente
+     como um sequencial nunca usado. Ao integrar endpoint que se consulta por identificador
+     sequencial, enumerar **quais status significam "não existe"** (404 e 410, no mínimo) em vez de
+     tratar só o que se viu no caminho feliz — é a §9.93 no eixo do HTTP.
+120. **Laço em ondas paga a cauda de latência uma vez por onda; pool única paga uma vez só.**
+     A varredura de contratos era um `for` externo chamando `processarComConcorrencia` em lotes de
+     15. Cada lote esperava a requisição mais lenta DELE antes do próximo começar e, com a cauda
+     do PNCP (mediana 108ms, máximo 1962ms medidos), 500 requisições estouravam o teto de 30s —
+     as mesmas 500 numa pool única custam ~2s. A pool só existe de verdade quando recebe a lista
+     inteira: fatiar por fora desfaz o que ela resolve. Ao dividir trabalho em lotes, perguntar
+     **por que o lote existe** — se for só para "não mandar tudo de uma vez", a concorrência da
+     pool já faz isso, e o lote está transformando latência paralela em latência somada.
+     **Corolário sobre o teto do percurso:** `MAX_CONTRATOS_POR_ANO` foi posto em 400 com base
+     numa medição parcial (uma varredura que havia parado em ~255). A medição completa mostrou o
+     sequencial 400 respondendo 200 e o 600 respondendo 404 — entre 400 e 600 contratos num ano de
+     um município médio. Teto derivado de medição TRUNCADA é palpite com aparência de dado: quando
+     o número vier de uma varredura, conferir se ela chegou ao fim antes de virar constante
+     (§9.61, §9.69).
+121. **Exercitar contra a API real antes de ligar na UI achou 4 defeitos que a suíte verde não
+     acharia — e o mais caro era perda silenciosa de resultado.** Nenhum dos quatro (410 tratado
+     como erro, ondas estourando o prazo, teto truncando o ano, e o ano 2 falhando DESCARTAR o que
+     o ano 1 achou) aparece em teste com fetch mockado, porque o mock devolve o que o autor
+     imaginou. O quarto é a §9.103 de novo num contexto novo: acumulei resultados num laço e
+     abortei com `return null` no primeiro tropeço, jogando fora o que já estava pago. Regra de
+     método que esta sessão inteira sustenta: para código que fala com serviço externo, entre
+     escrever o teste e ligar na tela existe um passo obrigatório — **rodar a função de verdade
+     contra o serviço**, com um caso cujo resultado esperado se conhece de antemão. Aqui custou
+     quatro execuções de ~10s e evitou entregar uma funcionalidade que não funcionaria.

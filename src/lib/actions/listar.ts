@@ -180,6 +180,11 @@ export async function obterFontesSimilaridade(processoId: string) {
           ajusteBaseSerie: true,
           valorConsiderado: true,
           roteiroCalculo: true,
+          // Vigência dos contratos (M29). Sem estas duas no `select`, a coluna
+          // viaja no schema e nunca chega à tela — e o teste que protege isso
+          // olha o ARGUMENTO passado ao Prisma, não o retorno (§9.104).
+          contratosVigencia: true,
+          vigenciaBuscadaEm: true,
         },
       },
     },

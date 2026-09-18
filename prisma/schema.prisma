@@ -226,7 +226,7 @@ model Processo {
 }
 
 model Item {
-  id                      String            @id @default(cuid())
+  id                      String              @id @default(cuid())
   processoId              String
   descricao               String
   unidade                 String
@@ -243,14 +243,14 @@ model Item {
   // candidato só cria oportunidade de divergirem entre si.
   // `trMedida` é a medida física do objeto (940 m² de fachada), distinta de
   // `quantidade`/`unidade`, que é como o item foi cadastrado no TR (12 unidade).
-  trMedida                Decimal?          @db.Decimal(14, 4)
+  trMedida                Decimal?            @db.Decimal(14, 4)
   trMedidaUnidade         String?
   // Frequência e vigência PRETENDIDA pela Câmara — não a vigência do contrato
   // de referência, que é outro dado e mora em ResultadoSimilaridade.
   trFrequencia            FrequenciaExecucao?
   trVigenciaMeses         Int?
-  createdAt               DateTime          @default(now())
-  updatedAt               DateTime          @updatedAt
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 
   processo               Processo                @relation(fields: [processoId], references: [id], onDelete: Cascade)
   fontes                 Fonte[]
@@ -335,6 +335,26 @@ model ResultadoSimilaridade {
   // campos acima e gravado para que série, Fonte e memória de cálculo leiam um
   // número só, sem recalcular cada uma por conta própria.
   valorConsiderado       Decimal?                  @db.Decimal(12, 2)
+  // ── Vigência do(s) contrato(s) que nasceram desta contratação (M29) ─────────
+  // Buscado SOB DEMANDA, por clique do analista, e não durante a pesquisa: o
+  // PNCP não expõe "contratos desta compra". O único vínculo é o campo
+  // `numeroControlePncpCompra`, que só aparece DENTRO de cada contrato, então é
+  // preciso varrer os contratos do órgão no ano e comparar (medido em
+  // 2026-09-18: 254 contratos de um órgão em ~1s com concorrência 15).
+  //
+  // Array porque uma compra gera N contratos — a compra 40/2025 de Ferraz de
+  // Vasconcelos, que está em produção, gerou 3 (registro de preços com mais de
+  // um fornecedor), com vigências diferentes entre si. Guardar só o primeiro
+  // afirmaria uma vigência única que não existe.
+  //
+  // JSON e não tabela porque é lido sempre inteiro, junto do candidato, e nunca
+  // consultado por contrato. Validado com Zod ao sair (CLAUDE.md §9.12).
+  contratosVigencia      Json?
+  // Quando a busca rodou. Distingue "ainda não procurei" de "procurei e o PNCP
+  // não tem contrato para esta compra" — dois estados que a tela precisa dizer
+  // de forma diferente (CLAUDE.md §9.93). Sem ele, `contratosVigencia` vazio
+  // seria ambíguo.
+  vigenciaBuscadaEm      DateTime?
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
 
@@ -498,40 +518,40 @@ model CapturaEvidencia {
 }
 
 model Fornecedor {
-  id                 String           @id @default(cuid())
-  cnpj               String?          @unique
-  razaoSocial        String
-  nomeFantasia       String?
-  categoria          String[]
-  cidade             String           @default("")
-  estado             String           @default("")
-  responsavelContato String           @default("")
-  email              String           @default("")
-  emailsAdicionais   String[]         @default([])
-  telefone           String?
+  id                         String             @id @default(cuid())
+  cnpj                       String?            @unique
+  razaoSocial                String
+  nomeFantasia               String?
+  categoria                  String[]
+  cidade                     String             @default("")
+  estado                     String             @default("")
+  responsavelContato         String             @default("")
+  email                      String             @default("")
+  emailsAdicionais           String[]           @default([])
+  telefone                   String?
   /**
    * Chave de upsert da sincronização com a planilha Google Sheets de
    * fornecedores (M24) — não o `cnpj`, que falta em boa parte dos registros
    * reais da planilha. Valor tipicamente `"${spreadsheetId}:${#}"`.
    */
-  origemPlanilhaLinhaId      String?  @unique
+  origemPlanilhaLinhaId      String?            @unique
   origemPlanilhaFonte        String?
   origemPlanilhaAtualizadoEm DateTime?
-  score              Int              @default(0)
-  totalCotacoes      Int              @default(0)
-  totalRespostas     Int              @default(0)
-  taxaResposta       Decimal          @default(0) @db.Decimal(5, 2)
-  ultimaResposta     DateTime?
-  status             StatusFornecedor @default(ativo)
+  score                      Int                @default(0)
+  totalCotacoes              Int                @default(0)
+  totalRespostas             Int                @default(0)
+  taxaResposta               Decimal            @default(0) @db.Decimal(5, 2)
+  ultimaResposta             DateTime?
+  status                     StatusFornecedor   @default(ativo)
   /**
    * Espelho da qualificação mais recente (M19), para listar/filtrar fornecedores
    * sem precisar de subquery em `qualificacoes`. A fonte de verdade fica em
    * `QualificacaoFornecedor` — este campo é atualizado junto, na mesma
    * transação, sempre que uma consulta nova roda.
    */
-  statusQualificacao StatusQualificacao @default(nao_verificado)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  statusQualificacao         StatusQualificacao @default(nao_verificado)
+  createdAt                  DateTime           @default(now())
+  updatedAt                  DateTime           @updatedAt
 
   cotacoes          Cotacao[]
   historicoCotacoes HistoricoCotacao[]
@@ -643,7 +663,6 @@ model CategoriaSugeridaPorCnae {
  * — histórico completo, nunca sobrescrito, com a data em que a consulta foi
  * feita, porque a mesma exigência de rastreabilidade que vale para preço
  * (fonte + data + evidência, CLAUDE.md §1) vale para qualificação de fornecedor.
- *
  * `consultaNegada`, `sancoesEncontradas` e `motivoNegacao` são resquício da
  * consulta a CEIS/CNEP (Portal da Transparência), removida por decisão do
  * usuário em 2026-08-08 — mantidas no schema (sempre `false`/`null` a partir
@@ -651,19 +670,27 @@ model CategoriaSugeridaPorCnae {
  * limpeza; ver docs/ApiPlan.md §4.3.
  */
 model QualificacaoFornecedor {
-  id                  String             @id @default(cuid())
-  fornecedorId        String
-  dataConsulta        DateTime
-  statusQualificacao  StatusQualificacao
-  /** Resquício de CEIS/CNEP (ver comentário do model) — sempre `false` daqui em diante. */
-  consultaNegada      Boolean            @default(false)
-  /** Resquício de CEIS/CNEP (ver comentário do model) — sempre `null` daqui em diante. */
-  sancoesEncontradas  Json?
-  /** Situação cadastral da Receita (ex.: "ATIVA", "BAIXADA"), ou null quando a consulta não pôde ser feita. */
-  situacaoCadastral   String?
-  /** Resquício de CEIS/CNEP (ver comentário do model) — sempre `null` daqui em diante. */
-  motivoNegacao       String?
-  createdAt           DateTime           @default(now())
+  id                 String             @id @default(cuid())
+  fornecedorId       String
+  dataConsulta       DateTime
+  statusQualificacao StatusQualificacao
+  /**
+   * Resquício de CEIS/CNEP (ver comentário do model) — sempre `false` daqui em diante.
+   */
+  consultaNegada     Boolean            @default(false)
+  /**
+   * Resquício de CEIS/CNEP (ver comentário do model) — sempre `null` daqui em diante.
+   */
+  sancoesEncontradas Json?
+  /**
+   * Situação cadastral da Receita (ex.: "ATIVA", "BAIXADA"), ou null quando a consulta não pôde ser feita.
+   */
+  situacaoCadastral  String?
+  /**
+   * Resquício de CEIS/CNEP (ver comentário do model) — sempre `null` daqui em diante.
+   */
+  motivoNegacao      String?
+  createdAt          DateTime           @default(now())
 
   fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Cascade)
 
@@ -707,28 +734,28 @@ model Cotacao {
 }
 
 model Proposta {
-  id                  String          @id @default(cuid())
-  cotacaoId           String          @unique
-  cnpjValido          StatusChecklist
-  descricaoValida     StatusChecklist
-  valorUnitarioValido StatusChecklist
-  valorTotalValido    StatusChecklist
-  dataValida          StatusChecklist
-  responsavelValido   StatusChecklist
-  statusGeral         StatusGeral
-  valorUnitario       Decimal?        @db.Decimal(12, 2)
-  valorTotal          Decimal?        @db.Decimal(12, 2)
-  dataProposta        DateTime?
-  responsavel         String?
-  observacoes         String?
+  id                           String              @id @default(cuid())
+  cotacaoId                    String              @unique
+  cnpjValido                   StatusChecklist
+  descricaoValida              StatusChecklist
+  valorUnitarioValido          StatusChecklist
+  valorTotalValido             StatusChecklist
+  dataValida                   StatusChecklist
+  responsavelValido            StatusChecklist
+  statusGeral                  StatusGeral
+  valorUnitario                Decimal?            @db.Decimal(12, 2)
+  valorTotal                   Decimal?            @db.Decimal(12, 2)
+  dataProposta                 DateTime?
+  responsavel                  String?
+  observacoes                  String?
   /**
    * Alerta de qualificação (M19): espelha `Fornecedor.statusQualificacao` no
    * momento em que a proposta é revisada, para o checklist mostrar o achado
    * sem precisar de join. `null` quando o fornecedor nunca foi consultado.
    */
   statusQualificacaoFornecedor StatusQualificacao?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
 
   cotacao Cotacao @relation(fields: [cotacaoId], references: [id], onDelete: Cascade)
 
@@ -756,15 +783,15 @@ model SeriePreco {
 }
 
 model PrecoConsolidado {
-  id                String      @id @default(cuid())
-  seriePrecoId      String
-  fonte             TipoFonte
-  descricaoFonte    String
-  fornecedorOuOrgao String
-  dataReferencia    DateTime
-  valorUnitario     Decimal     @db.Decimal(12, 2)
-  status            StatusPreco @default(incluido)
-  motivoExclusao    String?
+  id                      String      @id @default(cuid())
+  seriePrecoId            String
+  fonte                   TipoFonte
+  descricaoFonte          String
+  fornecedorOuOrgao       String
+  dataReferencia          DateTime
+  valorUnitario           Decimal     @db.Decimal(12, 2)
+  status                  StatusPreco @default(incluido)
+  motivoExclusao          String?
   // Preenchido quando o preço nasce da promoção de um candidato de
   // similaridade. Sem este vínculo, corrigir o valor de um candidato já
   // promovido não teria como alcançar a linha correspondente da série (os
@@ -772,7 +799,7 @@ model PrecoConsolidado {
   // fluxos de entrada de preço; não é @unique porque as linhas gravadas antes
   // desta coluna existir permanecem nulas.
   resultadoSimilaridadeId String?
-  createdAt         DateTime    @default(now())
+  createdAt               DateTime    @default(now())
 
   seriePreco            SeriePreco             @relation(fields: [seriePrecoId], references: [id], onDelete: Cascade)
   resultadoSimilaridade ResultadoSimilaridade? @relation(fields: [resultadoSimilaridadeId], references: [id], onDelete: SetNull)
@@ -998,24 +1025,32 @@ model PrecoReferencia {
  * nunca alimenta a estimativa sozinho.
  */
 model ItemCatalogoReferencia {
-  id           String @id @default(cuid())
+  id                   String   @id @default(cuid())
   /**
    * Casa com `FonteReferencia.chave` ("catmat" | "catser", ...). FK direta na
    * chave textual (não em `id`): o código de ingestão já trata `chave` como
    * identificador estável (ver `runner.ts`, `fontesComprasGov.ts`), então
    * gravar cada linha do lote não depende de resolver o `id` primeiro.
    */
-  fonteChave   String
-  /** `codigoItem` (CATMAT) / `codigoServico` (CATSER). */
-  codigo       Int
-  /** Nem toda fonte classifica por classe — nullable. */
-  codigoClasse Int?
-  descricao    String
-  /** `normalizar()` de `src/lib/similaridade/texto.ts` — não reimplementar. */
+  fonteChave           String
+  /**
+   * `codigoItem` (CATMAT) / `codigoServico` (CATSER).
+   */
+  codigo               Int
+  /**
+   * Nem toda fonte classifica por classe — nullable.
+   */
+  codigoClasse         Int?
+  descricao            String
+  /**
+   * `normalizar()` de `src/lib/similaridade/texto.ts` — não reimplementar.
+   */
   descricaoNormalizada String
-  /** De `statusItem`/`statusServico` quando a fonte expõe o campo. */
-  ativo        Boolean  @default(true)
-  atualizadoEm DateTime @updatedAt
+  /**
+   * De `statusItem`/`statusServico` quando a fonte expõe o campo.
+   */
+  ativo                Boolean  @default(true)
+  atualizadoEm         DateTime @updatedAt
 
   fonteReferencia FonteReferencia @relation(fields: [fonteChave], references: [chave], onDelete: Cascade)
 

@@ -407,6 +407,16 @@ interface PNCPSearchItem {
   numero_sequencial_compra_ata?: string;
 }
 
+/** Campos usados do contrato do PNCP (`/orgaos/{cnpj}/contratos/{ano}/{seq}`). */
+interface PNCPContratoResponse {
+  /** Liga o contrato à COMPRA: `{cnpj}-1-{seq6}/{ano}`. É o único vínculo que a API expõe. */
+  numeroControlePncpCompra?: string | null;
+  dataAssinatura?: string | null;
+  dataVigenciaInicio?: string | null;
+  dataVigenciaFim?: string | null;
+  objetoContrato?: string | null;
+}
+
 interface PNCPItemResponse {
   numeroItem: number;
   descricao: string;
@@ -1201,4 +1211,263 @@ export async function listarItensDaCompraPNCP(
   } finally {
     ctx.encerrar();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Vigência dos contratos de uma contratação (M29)
+// ---------------------------------------------------------------------------
+
+/**
+ * Um contrato que nasceu da contratação consultada.
+ *
+ * `objeto` entra para o analista conferir que o contrato é mesmo daquela
+ * compra: o PNCP já devolveu, num caminho vizinho, itens de outra compra sob
+ * HTTP 200 (CLAUDE.md §9.96), e aqui o vínculo é conferido campo a campo — mas
+ * ter o objeto à vista é a checagem que um humano faz em um segundo.
+ */
+export interface ContratoDaContratacao {
+  sequencial: number;
+  ano: string;
+  dataAssinatura: string | null;
+  dataVigenciaInicio: string | null;
+  dataVigenciaFim: string | null;
+  objeto: string | null;
+  url: string;
+}
+
+/**
+ * Número de controle da COMPRA no formato que o contrato publica em
+ * `numeroControlePncpCompra`: `{cnpj}-1-{sequencial com 6 dígitos}/{ano}`.
+ *
+ * O `1` é o tipo do documento (compra/edital); contrato é `2`. Medido contra a
+ * API real em 2026-09-18 — é este campo, e só ele, que liga contrato a compra.
+ */
+function numeroControleDaCompra(identidade: {
+  cnpjOrgao: string;
+  ano: string;
+  numeroSequencial: string;
+}): string {
+  const seq = String(identidade.numeroSequencial).padStart(6, "0");
+  return `${identidade.cnpjOrgao}-1-${seq}/${identidade.ano}`;
+}
+
+/**
+ * Teto de sequenciais de contrato varridos por ano — trava contra varredura
+ * infinita se a API mudar de contrato, não o corte esperado no dia a dia (quem
+ * corta é `descobrirUltimoSequencial`).
+ *
+ * Medido em 2026-09-18 no Município de Ferraz de Vasconcelos: o sequencial 400
+ * de 2025 responde 200 e o 600 responde 404 — ou seja, entre 400 e 600
+ * contratos num ano. Um teto de 400 truncava o ano de um município de porte
+ * médio, que é o caso comum desta plataforma.
+ */
+const MAX_CONTRATOS_POR_ANO = 800;
+
+/** Concorrência da varredura. 15 em paralelo leram 254 contratos em ~1s. */
+const LOTE_CONTRATOS = 15;
+
+/**
+ * Prazo desta busca. É uma Server Action de clique (o analista espera por ela),
+ * sob `maxDuration = 60`, então não divide orçamento com turno de assistente
+ * nenhum — mesma justificativa de `TEMPO_MAX_LISTAGEM_COMPRA_MS`.
+ */
+const TEMPO_MAX_VIGENCIA_MS = 30_000;
+
+/**
+ * Anos de contrato varridos a partir do ano da compra.
+ *
+ * O contrato é sempre assinado DEPOIS da compra, e pode cair no ano seguinte:
+ * medido, o contrato 2025/1 de Ferraz pertence à compra `000147/2024`. Por isso
+ * o ano da compra sozinho não basta, e olhar para trás nunca faz sentido.
+ */
+const ANOS_A_VARRER = 2;
+
+/**
+ * Maior sequencial de contrato que o órgão tem no ano, para varrer só até ele.
+ *
+ * Sem isto a varredura pagaria `MAX_CONTRATOS_POR_ANO` requisições sempre —
+ * 400 por ano mesmo num órgão com 10 contratos, martelando o PNCP à toa
+ * (CLAUDE.md §9.103). A sondagem custa ~15 requisições e responde em um salto.
+ *
+ * Confirma com uma JANELA de sequenciais seguidos ausentes em vez de um só: a
+ * numeração é quase densa, mas medi um buraco no meio (254 contratos com 1
+ * ausente), e parar no primeiro 404 truncaria o ano ali.
+ *
+ * `null` = não deu para concluir (prazo/rede); `0` = o órgão não tem contrato
+ * nesse ano.
+ */
+async function descobrirUltimoSequencial(
+  ano: string,
+  lerContrato: (ano: string, sequencial: number) => Promise<PNCPContratoResponse | null>,
+  ctx: ContextoBusca,
+): Promise<number | null> {
+  const JANELA = 3;
+
+  const existeAlgumEm = async (inicio: number): Promise<boolean | null> => {
+    if (ctx.vencido()) return null;
+    try {
+      const sondas = await Promise.all(
+        Array.from({ length: JANELA }, (_, k) => lerContrato(ano, inicio + k)),
+      );
+      return sondas.some((c) => c !== null);
+    } catch {
+      return null;
+    }
+  };
+
+  const primeiro = await existeAlgumEm(1);
+  if (primeiro === null) return null;
+  if (!primeiro) return 0;
+
+  // Dobra até encontrar uma janela vazia; daí o último existente está entre
+  // `baixo` (existe) e `alto` (janela vazia).
+  let baixo = 1;
+  let alto = MAX_CONTRATOS_POR_ANO;
+  for (let passo = 32; passo <= MAX_CONTRATOS_POR_ANO; passo *= 2) {
+    const existe = await existeAlgumEm(passo);
+    if (existe === null) return null;
+    if (existe) {
+      baixo = passo;
+      continue;
+    }
+    alto = passo;
+    break;
+  }
+
+  // Busca binária entre os dois, sempre com a janela para não cair num buraco.
+  while (alto - baixo > JANELA) {
+    const meio = Math.floor((baixo + alto) / 2);
+    const existe = await existeAlgumEm(meio);
+    if (existe === null) return null;
+    if (existe) baixo = meio;
+    else alto = meio;
+  }
+
+  // Margem de uma janela: o último existente pode estar logo acima de `baixo`.
+  return Math.min(baixo + JANELA, MAX_CONTRATOS_POR_ANO);
+}
+
+/**
+ * Contratos que nasceram de uma contratação, para exibir a vigência ao analista.
+ *
+ * Por que varrer em vez de consultar direto: **o PNCP não tem endpoint de
+ * "contratos desta compra"** — medido em 2026-09-18,
+ * `/compras/{ano}/{seq}/contratos` responde 404; o índice de busca devolve
+ * contratos rápido mas sem nenhuma referência à compra
+ * (`numero_sequencial_compra_ata` vem nulo); e a API de consulta com filtro por
+ * CNPJ estourou 60s. Sobra ler os contratos do órgão e comparar o
+ * `numeroControlePncpCompra` de cada um.
+ *
+ * **Nunca usar o sequencial da compra como sequencial de contrato**: são
+ * espaços de numeração diferentes (CLAUDE.md §9.96). Medido — o contrato
+ * `2025/40` de Ferraz pertence à compra `000008/2025` e é de reconstrução de
+ * bueiros, não da locação de impressoras da compra `40`.
+ *
+ * Devolve `null` quando a varredura não pôde ser concluída (prazo ou falha de
+ * rede): vazio significaria "esta compra não gerou contrato", que é afirmação
+ * sobre o mundo e não pode sair de uma busca interrompida (CLAUDE.md §9.93).
+ */
+export async function buscarContratosDaContratacao(identidade: {
+  cnpjOrgao: string;
+  ano: string;
+  numeroSequencial: string;
+}): Promise<ContratoDaContratacao[] | null> {
+  const alvo = numeroControleDaCompra(identidade);
+  const anoInicial = Number(identidade.ano);
+  if (!Number.isFinite(anoInicial)) return null;
+
+  const ctx = criarContextoBusca(TEMPO_MAX_VIGENCIA_MS);
+  const encontrados: ContratoDaContratacao[] = [];
+  let houveFalha = false;
+
+  /**
+   * Lê um contrato. `null` = este sequencial não tem contrato consultável, o
+   * que é RESPOSTA e não falha.
+   *
+   * Dois códigos significam ausência, e confundir o segundo com erro derrubava
+   * a varredura inteira: **404** (sequencial nunca usado) e **410 Gone**, que o
+   * PNCP devolve com "O contrato/empenho informado foi excluído e não pode ser
+   * consultado" — medido em 2026-09-18 no sequencial 464/2025 de Ferraz de
+   * Vasconcelos. Contrato excluído é buraco na numeração, exatamente como um
+   * sequencial inexistente.
+   */
+  const lerContrato = async (ano: string, sequencial: number) => {
+    const url = `${PNCP_ITENS_BASE_URL}/orgaos/${identidade.cnpjOrgao}/contratos/${ano}/${sequencial}`;
+    const res = await fetchComRetry(url, ctx);
+    if (res.status === 404 || res.status === 410) return null;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as PNCPContratoResponse;
+  };
+
+  try {
+    for (let i = 0; i < ANOS_A_VARRER; i += 1) {
+      const ano = String(anoInicial + i);
+      if (ctx.vencido()) return null;
+
+      const ultimo = await descobrirUltimoSequencial(ano, lerContrato, ctx);
+      // Ano que não pôde ser sondado não derruba o que outro ano já achou.
+      if (ultimo === null) {
+        houveFalha = true;
+        continue;
+      }
+      if (ultimo === 0) continue;
+
+      // UMA pool sobre o ano inteiro, não ondas de N. Com ondas, cada onda
+      // espera a requisição mais lenta dela antes de começar a próxima, e a
+      // cauda de latência do PNCP (medida: mediana 108ms, máximo 1962ms)
+      // multiplicava por onda — a varredura estourava o prazo de 30s em vez
+      // dos ~2s que as mesmas requisições custam numa pool só.
+      const sequenciais = Array.from({ length: ultimo }, (_, k) => k + 1);
+      const contratos = await processarComConcorrencia(
+        sequenciais,
+        LOTE_CONTRATOS,
+        (sequencial) => lerContrato(ano, sequencial),
+        () => {
+          houveFalha = true;
+        },
+      );
+
+      if (ctx.vencido()) {
+        houveFalha = true;
+        break;
+      }
+
+      const achadosAntes = encontrados.length;
+
+      contratos.forEach((contrato, indice) => {
+        if (!contrato || contrato.numeroControlePncpCompra !== alvo) return;
+        const sequencial = sequenciais[indice]!;
+        encontrados.push({
+          sequencial,
+          ano,
+          dataAssinatura: contrato.dataAssinatura ?? null,
+          dataVigenciaInicio: contrato.dataVigenciaInicio ?? null,
+          dataVigenciaFim: contrato.dataVigenciaFim ?? null,
+          objeto: contrato.objetoContrato ?? null,
+          url: `https://pncp.gov.br/app/contratos/${identidade.cnpjOrgao}/${ano}/${sequencial}`,
+        });
+      });
+
+      // O ano seguinte só é varrido quando o ano da compra não rendeu nada: o
+      // contrato costuma sair no mesmo ano, e varrer o outro à toa dobraria
+      // ~500 requisições por clique contra o PNCP (CLAUDE.md §9.103).
+      if (encontrados.length > achadosAntes) break;
+    }
+  } catch (err) {
+    console.error(`[PNCP] Falha ao varrer contratos de ${alvo}:`, err);
+    return null;
+  } finally {
+    ctx.encerrar();
+  }
+
+  // Falha de rede com nenhum achado é indistinguível de "não tem contrato" —
+  // e o segundo é uma afirmação que o analista levaria para a instrução
+  // processual. Só reporta vazio quando a varredura foi limpa.
+  if (encontrados.length === 0 && houveFalha) return null;
+
+  // Ordem estável para a tela: assinatura mais antiga primeiro.
+  return encontrados.sort(
+    (a, b) =>
+      (a.dataAssinatura ?? "").localeCompare(b.dataAssinatura ?? "") || a.sequencial - b.sequencial,
+  );
 }

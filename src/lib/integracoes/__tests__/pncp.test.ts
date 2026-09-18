@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  buscarContratosDaContratacao,
   buscarContratosPNCP,
   listarItensDaCompraPNCP,
   ErroColetaPNCP,
@@ -1787,5 +1788,144 @@ describe("listarItensDaCompraPNCP", () => {
 
     expect(completo).toBe(false);
     expect(candidatos).toEqual([]);
+  });
+});
+
+// Vigência dos contratos de uma contratação (M29).
+//
+// Os quatro casos abaixo saíram de defeitos que só a API REAL mostrou, em
+// 2026-09-18 — a suíte passava verde com todos eles.
+describe("buscarContratosDaContratacao", () => {
+  const IDENTIDADE = { cnpjOrgao: "46523197000144", ano: "2025", numeroSequencial: "40" };
+  /** Como o contrato referencia a compra: {cnpj}-1-{seq com 6 dígitos}/{ano}. */
+  const ALVO = "46523197000144-1-000040/2025";
+
+  function contratoDe(over: Record<string, unknown> = {}) {
+    return {
+      numeroControlePncpCompra: "46523197000144-1-000999/2025",
+      dataAssinatura: "2025-04-07",
+      dataVigenciaInicio: "2025-04-07",
+      dataVigenciaFim: "2026-04-07",
+      objetoContrato: "Objeto qualquer",
+      ...over,
+    };
+  }
+
+  /**
+   * Responde `/contratos/{ano}/{seq}`: `mapa[ano][seq]` define o corpo, e o que
+   * não estiver lá vira 404 (sequencial inexistente).
+   */
+  function mockContratos(mapa: Record<string, Record<number, unknown>>, statusExtra?: Record<number, number>) {
+    return vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const m = /\/contratos\/(\d{4})\/(\d+)$/.exec(url);
+      if (!m) throw new Error(`URL inesperada: ${url}`);
+      const [, ano, seqTexto] = m;
+      const seq = Number(seqTexto);
+      const status = statusExtra?.[seq];
+      if (status) return { ok: false, status, json: async () => ({}) } as Response;
+      const corpo = mapa[ano!]?.[seq];
+      if (!corpo) return { ok: false, status: 404, json: async () => ({}) } as Response;
+      return mockJson(corpo);
+    });
+  }
+
+  it("acha os contratos da compra pelo numeroControlePncpCompra", async () => {
+    mockContratos({
+      "2025": {
+        1: contratoDe(),
+        2: contratoDe({ numeroControlePncpCompra: ALVO, dataAssinatura: "2025-04-07" }),
+        3: contratoDe({ numeroControlePncpCompra: ALVO, dataAssinatura: "2025-04-08" }),
+      },
+    });
+
+    const contratos = await buscarContratosDaContratacao(IDENTIDADE);
+
+    expect(contratos).not.toBeNull();
+    expect(contratos!.map((c) => c.sequencial)).toEqual([2, 3]);
+    expect(contratos![0]).toMatchObject({
+      ano: "2025",
+      dataVigenciaInicio: "2025-04-07",
+      dataVigenciaFim: "2026-04-07",
+      url: "https://pncp.gov.br/app/contratos/46523197000144/2025/2",
+    });
+  });
+
+  // O PNCP devolve 410 com "O contrato/empenho informado foi excluído e não
+  // pode ser consultado" — medido no sequencial 464/2025 de Ferraz. Tratar como
+  // erro abortava a varredura inteira e a busca voltava vazia.
+  it("trata 410 (contrato excluído) como ausência, não como falha", async () => {
+    mockContratos(
+      { "2025": { 1: contratoDe(), 3: contratoDe({ numeroControlePncpCompra: ALVO }) } },
+      { 2: 410 },
+    );
+
+    const contratos = await buscarContratosDaContratacao(IDENTIDADE);
+
+    expect(contratos).not.toBeNull();
+    expect(contratos!.map((c) => c.sequencial)).toEqual([3]);
+  });
+
+  // O contrato pode sair no ano seguinte ao da compra — medido: o contrato
+  // 2025/1 de Ferraz pertence à compra 000147/2024.
+  it("varre o ano seguinte quando o ano da compra não tem contrato da compra", async () => {
+    mockContratos({
+      "2025": { 1: contratoDe(), 2: contratoDe() },
+      "2026": { 1: contratoDe({ numeroControlePncpCompra: ALVO }) },
+    });
+
+    const contratos = await buscarContratosDaContratacao(IDENTIDADE);
+
+    expect(contratos!.map((c) => `${c.ano}/${c.sequencial}`)).toEqual(["2026/1"]);
+  });
+
+  // Antes, uma falha no segundo ano descartava o que o primeiro já tinha achado
+  // — o mesmo tudo-ou-nada da §9.103. Medido em produção: os 3 contratos de
+  // Ferraz eram encontrados em 2025 e jogados fora quando 2026 falhava.
+  it("não descarta o que um ano achou quando outro ano falha", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Achado em 2025 e, como o ano rende, 2026 nem é varrido.
+    mockContratos({ "2025": { 1: contratoDe({ numeroControlePncpCompra: ALVO }) } });
+
+    const contratos = await buscarContratosDaContratacao(IDENTIDADE);
+
+    expect(contratos!.map((c) => c.sequencial)).toEqual([1]);
+  });
+
+  // Vazio com falha de rede é indistinguível de "esta compra não gerou
+  // contrato", e o segundo é afirmação que o analista leva para a instrução
+  // processual (§9.93).
+  it("devolve null quando a varredura não se completou, em vez de vazio", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(global, "fetch").mockRejectedValue(new Error("ECONNRESET"));
+
+    // Timers falsos porque o backoff entre as tentativas (1s, 2s) estoura o
+    // limite de 5s do teste em tempo real. O handler é anexado ANTES de avançar
+    // os timers: adiantar primeiro resolveria a promessa sem ninguém escutando
+    // (CLAUDE.md §9.103).
+    vi.useFakeTimers();
+    const promessa = buscarContratosDaContratacao(IDENTIDADE);
+    const esperado = expect(promessa).resolves.toBeNull();
+    await vi.runAllTimersAsync();
+    await esperado;
+  });
+
+  // Nunca usar o sequencial da compra como sequencial de contrato: são espaços
+  // de numeração diferentes (§9.96). Medido — o contrato 2025/40 de Ferraz é da
+  // compra 000008/2025 e é de reconstrução de bueiros.
+  it("ignora o contrato de mesmo sequencial que aponta para outra compra", async () => {
+    mockContratos({
+      "2025": {
+        40: contratoDe({
+          numeroControlePncpCompra: "46523197000144-1-000008/2025",
+          objetoContrato: "RECONSTRUÇÃO DE BUEIROS",
+        }),
+      },
+    });
+
+    const contratos = await buscarContratosDaContratacao(IDENTIDADE);
+
+    expect(contratos).toEqual([]);
   });
 });
