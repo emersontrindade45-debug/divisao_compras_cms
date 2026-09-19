@@ -166,7 +166,9 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
                     <TableHead title="Data do resultado do julgamento (homologação) publicada na fonte">
                       Homologação
                     </TableHead>
-                    <TableHead>Referência</TableHead>
+                    <TableHead title="Vigência do contrato gerado por esta contratação, quando consultada no PNCP">
+                      Período do contrato
+                    </TableHead>
                     <TableHead>Score</TableHead>
                     <TableHead>Fonte</TableHead>
                     <TableHead>Ação</TableHead>

@@ -96,6 +96,15 @@ export function LinhaCandidatoSimilaridade({
         </TableCell>
         <TableCell className="max-w-xs whitespace-normal break-words text-xs text-muted-foreground">
           {candidato.fonteDescricao}
+          {candidato.tipoCandidato === "preco_referencia" && (
+            <div className="mt-1">
+              <ReferenciaSinapiInfo
+                competencia={candidato.competenciaReferencia}
+                regime={candidato.regimeReferencia}
+                localidade={candidato.localidadeReferencia}
+              />
+            </div>
+          )}
         </TableCell>
         <TableCell className="whitespace-nowrap font-mono tabular-nums">
           <span>
@@ -127,26 +136,14 @@ export function LinhaCandidatoSimilaridade({
         </TableCell>
         <TableCell className="whitespace-nowrap align-top">
           {candidato.dataFormatada}
-          {/* A vigência mora sob a homologação porque as três datas contam a
-              mesma história em ordem: preço homologado, contrato começa,
-              contrato termina. */}
+        </TableCell>
+        <TableCell className="whitespace-nowrap align-top">
           <VigenciaContratoCelula
             resultadoId={candidato.id}
             contratosIniciais={candidato.contratosVigencia}
             buscadaEm={candidato.vigenciaBuscadaEm}
             temLinkPncp={ehContratacaoPncp(candidato.fonteUrl)}
           />
-        </TableCell>
-        <TableCell>
-          {candidato.tipoCandidato === "preco_referencia" ? (
-            <ReferenciaSinapiInfo
-              competencia={candidato.competenciaReferencia}
-              regime={candidato.regimeReferencia}
-              localidade={candidato.localidadeReferencia}
-            />
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )}
         </TableCell>
         <TableCell>
           <Badge variant={scoreVariant(candidato.scoreFinal)}>

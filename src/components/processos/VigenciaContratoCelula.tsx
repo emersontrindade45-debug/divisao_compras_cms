@@ -9,11 +9,11 @@ import type { ContratoVigencia } from "@/lib/domain/contratosVigencia";
 
 // Vigência dos contratos gerados pela contratação do candidato.
 //
-// Fica sob a data de homologação porque as três datas contam a mesma história
-// em ordem: quando o preço foi homologado, quando o contrato começou e quando
-// termina. Buscada por clique — o PNCP não tem endpoint de "contratos desta
-// compra", e descobrir custa uma varredura nos contratos do órgão (ver
-// `buscarContratosDaContratacao`).
+// Coluna própria "Período do contrato" — antes ficava sob a data de
+// homologação, mas não pertence a ela e a sequência de cliques dependia de
+// remexer célula alheia. Buscada por clique — o PNCP não tem endpoint de
+// "contratos desta compra", e descobrir custa uma varredura nos contratos do
+// órgão (ver `buscarContratosDaContratacao`).
 
 /** dd/mm/aaaa a partir de "2025-04-07", sem passar por `Date` (que desloca fuso). */
 function formatarDataISO(iso: string | null): string {
@@ -68,7 +68,7 @@ export function VigenciaContratoCelula({
 
   if (contratos.length > 0) {
     return (
-      <div className="mt-1 space-y-1">
+      <div className="space-y-1">
         {contratos.map((contrato) => (
           <div key={`${contrato.ano}-${contrato.sequencial}`} className="text-xs">
             <a
@@ -94,7 +94,7 @@ export function VigenciaContratoCelula({
   // Buscado e sem contrato é resposta, não ausência de tentativa — o analista
   // precisa distinguir para não ficar clicando de novo (CLAUDE.md §9.93).
   if (jaBuscou) {
-    return <span className="mt-1 block text-xs text-muted-foreground">sem contrato no PNCP</span>;
+    return <span className="text-xs text-muted-foreground">sem contrato no PNCP</span>;
   }
 
   return (
@@ -102,7 +102,7 @@ export function VigenciaContratoCelula({
       type="button"
       onClick={() => void buscar()}
       disabled={buscando}
-      className="mt-1 flex w-fit items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
+      className="flex w-fit items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
     >
       <CalendarClock className="size-3" aria-hidden />
       {buscando ? "consultando…" : "ver vigência"}

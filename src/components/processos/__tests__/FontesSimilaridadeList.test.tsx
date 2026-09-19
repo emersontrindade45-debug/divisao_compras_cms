@@ -244,3 +244,42 @@ it("nomeia a coluna de data como Homologação", async () => {
   expect(screen.getByRole("columnheader", { name: /Homologação/ })).toBeTruthy();
   expect(screen.queryByRole("columnheader", { name: /^Data$/ })).toBeNull();
 });
+
+// A coluna "Referência" só tinha conteúdo para candidato SINAPI (a maioria
+// dos candidatos — PNCP e Painel de Preços — mostrava "—"); no lugar dela
+// entra "Período do contrato" (vigência buscada via M29), útil para toda
+// contratação pública. Os dados de referência SINAPI passam a aparecer junto
+// da descrição do candidato, não somem da tela.
+it("substitui a coluna Referência por Período do contrato, sem perder o dado SINAPI", async () => {
+  mocks.obterFontesSimilaridade.mockResolvedValue([
+    {
+      ...ITEM_BASE,
+      resultadosSimilaridade: [
+        {
+          id: "res-sinapi",
+          tipoCandidato: "preco_referencia",
+          fonteDescricao: "Composição SINAPI 97141",
+          fonteOrgaoOuId: "SINAPI (Caixa Econômica Federal)",
+          fonteUrl: "https://www.caixa.gov.br/site/Paginas/downloads.aspx",
+          valorUnitario: 5.4,
+          dataReferencia: new Date("2024-12-01"),
+          scoreFinal: 90,
+          justificativa: "match direto",
+          promovidoParaFonte: false,
+          competenciaReferencia: "2024-12",
+          regimeReferencia: "nao_desonerado",
+          localidadeReferencia: "SAO PAULO",
+        },
+      ],
+    },
+  ]);
+
+  render(await FontesSimilaridadeList({ processoId: "proc-1" }));
+
+  expect(screen.queryByRole("columnheader", { name: /^Referência$/ })).toBeNull();
+  expect(
+    screen.getByRole("columnheader", { name: /Período do contrato/ }),
+  ).toBeInTheDocument();
+  // O dado SINAPI continua visível, só que fora de uma coluna dedicada.
+  expect(screen.getByText("Não desonerado")).toBeInTheDocument();
+});
