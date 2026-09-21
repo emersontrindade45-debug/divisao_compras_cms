@@ -322,4 +322,27 @@ describe("POST /api/assistente/chat", () => {
       expect.objectContaining({ processoId: null }),
     );
   });
+
+  it("repassa as preferências de busca da tela ao registry de ferramentas", async () => {
+    await POST(
+      requisicao({
+        mensagem: "procure cadeiras",
+        processoId: "proc-1",
+        preferenciasBusca: { filtrarPorAderencia: false, valorMinimo: 18, valorMaximo: 25 },
+      }),
+    );
+
+    expect(mocks.montarRegistry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferenciasBusca: { filtrarPorAderencia: false, valorMinimo: 18, valorMaximo: 25 },
+      }),
+    );
+  });
+
+  it("não inclui preferenciasBusca no registry quando o cliente não manda nada", async () => {
+    await POST(requisicao({ mensagem: "procure cadeiras", processoId: "proc-1" }));
+
+    const args = mocks.montarRegistry.mock.calls[0]![0] as Record<string, unknown>;
+    expect(args).not.toHaveProperty("preferenciasBusca");
+  });
 });

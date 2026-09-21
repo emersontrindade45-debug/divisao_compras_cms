@@ -54,6 +54,18 @@ const corpoSchema = z.object({
   conversaId: z.string().min(1).nullish(),
   /** Nulo/ausente = conversa global (atalho da Topbar). */
   processoId: z.string().min(1).nullish(),
+  /**
+   * Preferências de busca escolhidas pelo analista na tela (dropdown de
+   * aderência + faixa de valor) — ver `PreferenciasBusca` em `ferramentas.ts`.
+   * Ausente = comportamento padrão.
+   */
+  preferenciasBusca: z
+    .object({
+      filtrarPorAderencia: z.boolean(),
+      valorMinimo: z.number().positive().optional(),
+      valorMaximo: z.number().positive().optional(),
+    })
+    .optional(),
 });
 
 function evento(nome: string, dados: unknown): string {
@@ -173,6 +185,7 @@ export async function POST(request: Request) {
     userId: user.id,
     processoId,
     conversaId: conversa.id,
+    ...(parsed.data.preferenciasBusca ? { preferenciasBusca: parsed.data.preferenciasBusca } : {}),
   });
 
   const temPerplexity = perplexityConfigurada();

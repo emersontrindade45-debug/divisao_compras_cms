@@ -86,11 +86,35 @@ const TIMEOUT_BUSCA_ASSISTENTE_MS = TEMPO_MAX_BUSCA_MS + MARGEM_ENTREGA_MS;
  */
 const PROVEDOR_PRIORITARIO = "pncp";
 
+/**
+ * Preferências de busca escolhidas pelo analista na tela do chat (dropdown +
+ * campos de valor), não pelo modelo.
+ *
+ * Existem porque a ordenação por aderência (`filtrarPorRelevanciaIA`) é uma
+ * decisão automática de qualidade que às vezes o analista quer desligar: para
+ * um objeto muito específico ele prefere ver tudo o que a busca lexical trouxe
+ * e decidir manualmente, em vez de confiar no corte por IA. Faixa de valor pelo
+ * mesmo motivo: o analista já sabe o preço de referência antes de pedir a
+ * busca e quer aplicar o filtro sempre, sem depender do modelo interpretar o
+ * pedido em linguagem natural.
+ *
+ * Prevalecem sobre o que o modelo mandar no `tool call` — são escolha humana
+ * explícita, o modelo só estima.
+ */
+export interface PreferenciasBusca {
+  /** `false` pula o corte por IA; `true`/ausente é o comportamento padrão. */
+  filtrarPorAderencia: boolean;
+  valorMinimo?: number;
+  valorMaximo?: number;
+}
+
 export interface ContextoFerramentas {
   userId: string;
   /** Nulo na conversa global; preenchido na aba de um processo. */
   processoId: string | null;
   conversaId: string;
+  /** Ausente = comportamento padrão (filtra por aderência, sem faixa forçada). */
+  preferenciasBusca?: PreferenciasBusca;
 }
 
 /** Definição enviada ao modelo — espelha `DefinicaoFerramenta` de `lib/ia`. */
@@ -765,6 +789,22 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
    * não teria como saber o que houve com os outros: a tela prometendo o que não
    * mostra é o modo de falha da §9.40.
    */
+  /**
+   * Avisa quando o analista desligou o corte por IA na tela — sem isto o
+   * modelo continuaria comentando "checagem de aderência" sobre candidatos que
+   * não passaram por ela, e o analista leria uma garantia que não existiu
+   * nesta busca.
+   */
+  function avisoAderenciaDesativada(desativada: boolean): string {
+    if (!desativada) return "";
+    return (
+      " O usuário desligou o filtro automático de aderência (IA) para esta busca: os candidatos " +
+      "abaixo NÃO foram avaliados quanto a especificação/unidade, só ordenados por relevância " +
+      "textual ao termo. Diga isso e deixe a triagem manual com ele — não afirme que algum " +
+      "candidato \"passou\" na checagem de aderência."
+    );
+  }
+
   function avisoDuplicatas(suprimidos: number): string {
     if (suprimidos <= 0) return "";
     return (
@@ -807,7 +847,13 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     valorMaximo?: number,
     filtros?: FiltrosBuscaPNCP,
   ) {
-    const temFiltroValor = valorMinimo !== undefined || valorMaximo !== undefined;
+    // Preferência da tela prevalece sobre o argumento do modelo — ver
+    // `PreferenciasBusca`.
+    const valorMinimoEfetivo = ctx.preferenciasBusca?.valorMinimo ?? valorMinimo;
+    const valorMaximoEfetivo = ctx.preferenciasBusca?.valorMaximo ?? valorMaximo;
+    const aderenciaLigada = ctx.preferenciasBusca?.filtrarPorAderencia ?? true;
+
+    const temFiltroValor = valorMinimoEfetivo !== undefined || valorMaximoEfetivo !== undefined;
     const temRecorte = Boolean(filtros?.uf || filtros?.esfera || filtros?.status);
     const item = await itemDaBusca(itemIdSugerido);
     const { candidatos: buscados, provedoresQueFalharam } =
@@ -815,7 +861,10 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
         ...(filtros ? { filtros } : {}),
       });
-    const filtrados = filtrarPorValor(buscados, { valorMinimo, valorMaximo });
+    const filtrados = filtrarPorValor(buscados, {
+      valorMinimo: valorMinimoEfetivo,
+      valorMaximo: valorMaximoEfetivo,
+    });
 
     // Ordenação lexical primeiro: é ela que decide QUAIS candidatos valem a
     // chamada de IA. Ranquear os 190 devolvidos custaria 24 lotes; ranquear os
@@ -838,11 +887,10 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     // candidato ainda não julgado, e não um que o analista já descartou.
     const consolidados = consolidarDuplicatas(priorizados);
 
-    const encontrados = await filtrarPorRelevanciaIA(
-      consolidados.candidatos.slice(0, MAX_SUGESTOES_POR_BUSCA),
-      item?.itemTR ?? null,
-      item?.natureza ?? null,
-    );
+    const candidatosParaAvaliar = consolidados.candidatos.slice(0, MAX_SUGESTOES_POR_BUSCA);
+    const encontrados = aderenciaLigada
+      ? await filtrarPorRelevanciaIA(candidatosParaAvaliar, item?.itemTR ?? null, item?.natureza ?? null)
+      : candidatosParaAvaliar;
 
     // Nenhum candidato é excluído por já ter sido descartado numa busca
     // anterior — o card continua podendo aparecer, e o analista pode mudar de
@@ -936,6 +984,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           "adicionar à lista do processo. Você NÃO registra nada: comente o que achou de cada " +
           "um (por que é ou não comparável) e deixe a decisão com o servidor. Os valores vêm " +
           "da fonte — não os repita de memória nem estime score." +
+          avisoAderenciaDesativada(!aderenciaLigada) +
           avisoDuplicatas(consolidados.suprimidos) +
           avisoRecorteParcial(filtros),
       },
@@ -1292,7 +1341,8 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
             description:
               "Opcional. Use quando o usuário pedir uma faixa de preço (ex.: 'entre R$ 18 e " +
               "R$ 25'). Filtra sobre o preço homologado do candidato — o PNCP não tem esse " +
-              "filtro nativamente, é aplicado depois da busca.",
+              "filtro nativamente, é aplicado depois da busca. Se o usuário já tiver fixado uma " +
+              "faixa nos filtros da tela do chat, ela prevalece sobre este parâmetro.",
           },
           valorMaximo: {
             type: "number",

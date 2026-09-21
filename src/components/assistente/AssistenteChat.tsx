@@ -1,9 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, ChevronUp, ExternalLink, Send, Sparkles } from "lucide-react";
+import { AlertCircle, ChevronUp, ExternalLink, Send, SlidersHorizontal, Sparkles } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { lerStreamSSE } from "@/lib/assistente/sse";
 import { obterConversa, obterConversaAtiva, listarItensDoProcesso } from "@/lib/actions/assistente";
@@ -45,6 +54,14 @@ interface Mensagem {
 const CONTINUAR =
   "Continue procurando: tente outros termos, diferentes dos que você já usou neste processo.";
 
+/** Converte o texto do campo de valor em número positivo, ou `undefined` se vazio/inválido. */
+function paraNumeroPositivo(texto: string): number | undefined {
+  const normalizado = texto.trim().replace(",", ".");
+  if (normalizado === "") return undefined;
+  const numero = Number(normalizado);
+  return Number.isFinite(numero) && numero > 0 ? numero : undefined;
+}
+
 export function AssistenteChat({
   processoId = null,
   processoNumero,
@@ -77,6 +94,16 @@ export function AssistenteChat({
   const [itens, setItens] = useState<{ id: string; descricao: string }[]>([]);
   const [temMaisAntigas, setTemMaisAntigas] = useState(false);
   const [carregandoAntigas, setCarregandoAntigas] = useState(false);
+  /**
+   * Flexibilização de busca (dropdown + faixa de valor) — escolha do analista,
+   * enviada em toda mensagem para `buscar_pncp` prevalecer sobre o palpite do
+   * modelo. Desligar a aderência existe para o objeto específico em que o
+   * corte automático por IA erra e o analista prefere olhar tudo e decidir à
+   * mão (ver `PreferenciasBusca` em `lib/assistente/ferramentas.ts`).
+   */
+  const [filtrarAderencia, setFiltrarAderencia] = useState(true);
+  const [valorMinimoTexto, setValorMinimoTexto] = useState("");
+  const [valorMaximoTexto, setValorMaximoTexto] = useState("");
   const conversaId = useRef<string | null>(null);
   // Carregar mensagens antigas insere no TOPO. Sem esta marca o efeito de
   // rolagem levaria o painel de volta ao fim, desfazendo o que o clique pediu.
@@ -241,6 +268,8 @@ export function AssistenteChat({
 
       const controller = new AbortController();
       abortRef.current = controller;
+      const valorMinimoNumero = paraNumeroPositivo(valorMinimoTexto);
+      const valorMaximoNumero = paraNumeroPositivo(valorMaximoTexto);
 
       // `fim` e `erro` são os dois únicos finais legítimos do stream, e ambos
       // apagam o giro dos passos. Quando a função serverless é morta por
@@ -258,6 +287,11 @@ export function AssistenteChat({
             mensagem: pergunta,
             conversaId: conversaId.current,
             processoId,
+            preferenciasBusca: {
+              filtrarPorAderencia: filtrarAderencia,
+              ...(valorMinimoNumero !== undefined ? { valorMinimo: valorMinimoNumero } : {}),
+              ...(valorMaximoNumero !== undefined ? { valorMaximo: valorMaximoNumero } : {}),
+            },
           }),
           signal: controller.signal,
         });
@@ -388,10 +422,12 @@ export function AssistenteChat({
         setEnviando(false);
       }
     },
-    [enviando, processoId],
+    [enviando, processoId, filtrarAderencia, valorMinimoTexto, valorMaximoTexto],
   );
 
   const vazio = !carregando && mensagens.length === 0;
+  const filtrosBuscaAtivos =
+    !filtrarAderencia || valorMinimoTexto.trim() !== "" || valorMaximoTexto.trim() !== "";
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
@@ -533,6 +569,89 @@ export function AssistenteChat({
           void enviar(rascunho);
         }}
       >
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="relative shrink-0"
+                aria-label="Filtros de busca do assistente"
+              >
+                <SlidersHorizontal aria-hidden />
+                {filtrosBuscaAtivos && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary"
+                    aria-hidden
+                  />
+                )}
+              </Button>
+            }
+          />
+          <PopoverContent align="start" side="top" className="space-y-3 p-3">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-foreground">Filtro de aderência (IA)</p>
+              <Select
+                value={filtrarAderencia ? "com" : "sem"}
+                onValueChange={(v) => setFiltrarAderencia(v !== "sem")}
+              >
+                <SelectTrigger size="sm" className="w-full" aria-label="Filtro de aderência (IA)">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="com">Com filtro de aderência (padrão)</SelectItem>
+                  <SelectItem value="sem">Sem filtro — quero analisar manualmente</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Desligado, a busca mostra tudo o que achou no PNCP/catálogo, sem o corte automático
+                por IA — útil para objeto específico que você prefere avaliar candidato a candidato.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-foreground">Faixa de valor (preço homologado)</p>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  placeholder="Mínimo"
+                  aria-label="Valor mínimo"
+                  value={valorMinimoTexto}
+                  onChange={(e) => setValorMinimoTexto(e.target.value)}
+                />
+                <span className="text-xs text-muted-foreground">a</span>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  placeholder="Máximo"
+                  aria-label="Valor máximo"
+                  value={valorMaximoTexto}
+                  onChange={(e) => setValorMaximoTexto(e.target.value)}
+                />
+              </div>
+            </div>
+            {filtrosBuscaAtivos && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                onClick={() => {
+                  setFiltrarAderencia(true);
+                  setValorMinimoTexto("");
+                  setValorMaximoTexto("");
+                }}
+              >
+                Limpar filtros
+              </Button>
+            )}
+          </PopoverContent>
+        </Popover>
         <Textarea
           value={rascunho}
           onChange={(e) => setRascunho(e.target.value)}

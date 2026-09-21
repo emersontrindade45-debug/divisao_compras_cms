@@ -351,6 +351,68 @@ describe("AssistenteChat", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Flexibilização de busca: dropdown de aderência + faixa de valor, escolha
+  // do analista na tela (não do modelo) — ver `PreferenciasBusca`.
+  // -------------------------------------------------------------------------
+
+  it("manda o filtro de aderência ligado por padrão, sem faixa de valor", async () => {
+    const fetchMock = mockFetch(respostaSSE(TURNO_SIMPLES));
+    render(<AssistenteChat processoId="proc-1" />);
+
+    perguntar("procure cadeiras");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const corpo = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)) as {
+      preferenciasBusca: { filtrarPorAderencia: boolean; valorMinimo?: number; valorMaximo?: number };
+    };
+    expect(corpo.preferenciasBusca).toEqual({ filtrarPorAderencia: true });
+  });
+
+  it("desliga o filtro de aderência pelo dropdown e manda isso na próxima busca", async () => {
+    const fetchMock = mockFetch(respostaSSE(TURNO_SIMPLES));
+    render(<AssistenteChat processoId="proc-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Filtros de busca do assistente" }));
+    fireEvent.click(await screen.findByLabelText("Filtro de aderência (IA)"));
+    const opcaoSemFiltro = await screen.findByText("Sem filtro — quero analisar manualmente");
+    // O item do Select (Base UI) escolhe pelo par pointerdown/pointerup, não
+    // por um `click` sintético isolado — sem os dois a lista fica aberta e o
+    // valor não muda.
+    fireEvent.pointerDown(opcaoSemFiltro, { button: 0, pointerId: 1 });
+    fireEvent.mouseDown(opcaoSemFiltro, { button: 0 });
+    fireEvent.pointerUp(opcaoSemFiltro, { button: 0, pointerId: 1 });
+    fireEvent.mouseUp(opcaoSemFiltro, { button: 0 });
+    fireEvent.click(opcaoSemFiltro);
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+
+    perguntar("procure cadeiras");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const corpo = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)) as {
+      preferenciasBusca: { filtrarPorAderencia: boolean };
+    };
+    expect(corpo.preferenciasBusca.filtrarPorAderencia).toBe(false);
+  });
+
+  it("manda a faixa de valor digitada nos campos da tela", async () => {
+    const fetchMock = mockFetch(respostaSSE(TURNO_SIMPLES));
+    render(<AssistenteChat processoId="proc-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Filtros de busca do assistente" }));
+    fireEvent.change(await screen.findByLabelText("Valor mínimo"), { target: { value: "18" } });
+    fireEvent.change(screen.getByLabelText("Valor máximo"), { target: { value: "25" } });
+
+    perguntar("procure cadeiras");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const corpo = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)) as {
+      preferenciasBusca: { valorMinimo?: number; valorMaximo?: number };
+    };
+    expect(corpo.preferenciasBusca.valorMinimo).toBe(18);
+    expect(corpo.preferenciasBusca.valorMaximo).toBe(25);
+  });
+
+  // -------------------------------------------------------------------------
   // Stream cortado no meio (CLAUDE.md §9.64).
   //
   // Quando a Vercel mata a função por `maxDuration`, o corpo da resposta fecha

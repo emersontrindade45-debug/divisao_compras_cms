@@ -925,4 +925,78 @@ describe("registry de ferramentas do assistente", () => {
       expect(props.esfera?.enum).toEqual(["F", "E", "M"]);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Preferências de busca escolhidas pelo analista na tela do chat (dropdown
+  // de aderência + faixa de valor), não pelo modelo — ver `PreferenciasBusca`.
+  // -------------------------------------------------------------------------
+  describe("buscar_pncp — preferências de busca do analista", () => {
+    it("pula o corte por IA quando o analista desliga o filtro de aderência", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({})]);
+      const registry = montarRegistry({
+        ...CTX_PROCESSO,
+        preferenciasBusca: { filtrarPorAderencia: false },
+      });
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        itemId: "item-1",
+      });
+
+      // A mutação que prova a garantia: sem o corte, `rankearCandidatos`
+      // (chamado dentro de `rankearEmLotesParalelos`) nunca roda.
+      expect(mocks.rankearCandidatos).not.toHaveBeenCalled();
+      expect(resposta.total).toBe(1);
+      expect(resposta.observacao).toMatch(/desligou o filtro automático de aderência/i);
+    });
+
+    it("aplica o corte por IA normalmente quando a preferência não é informada", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({})]);
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        itemId: "item-1",
+      });
+
+      expect(mocks.rankearCandidatos).toHaveBeenCalled();
+      expect(resposta.observacao).not.toMatch(/desligou o filtro automático de aderência/i);
+    });
+
+    it("a faixa de valor da tela prevalece sobre a que o modelo pediu", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({ valorUnitario: 20 }),
+        candidato({ valorUnitario: 999, fonteUrl: "https://pncp.gov.br/app/editais/fora-da-faixa" }),
+      ]);
+      const registry = montarRegistry({
+        ...CTX_PROCESSO,
+        // A tela pede 18–25; o modelo, por conta própria, pediria 900–1000 —
+        // se o argumento do modelo vencesse, o candidato de 20 seria excluído.
+        preferenciasBusca: { filtrarPorAderencia: true, valorMinimo: 18, valorMaximo: 25 },
+      });
+
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        valorMinimo: 900,
+        valorMaximo: 1000,
+      });
+
+      expect(resposta.total).toBe(1);
+    });
+
+    it("a faixa de valor da tela vale mesmo quando o modelo não pediu nenhuma", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([
+        candidato({ valorUnitario: 20 }),
+        candidato({ valorUnitario: 999, fonteUrl: "https://pncp.gov.br/app/editais/fora-da-faixa" }),
+      ]);
+      const registry = montarRegistry({
+        ...CTX_PROCESSO,
+        preferenciasBusca: { filtrarPorAderencia: true, valorMinimo: 18, valorMaximo: 25 },
+      });
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(resposta.total).toBe(1);
+    });
+  });
 });
