@@ -3,6 +3,7 @@ import { buscarContratosPNCP, type FiltrosBuscaPNCP } from "@/lib/integracoes/pn
 import { buscarPrecosPainelPrecos } from "@/lib/integracoes/painelPrecos";
 import { buscarCandidatosComprasGovContratacoes } from "./provedorComprasGovContratacoes";
 import { buscarCandidatosSinapi } from "./provedorSinapi";
+import { buscarCandidatosPainelMateriais } from "./provedorPainelMateriais";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 
 /**
@@ -22,8 +23,8 @@ export interface ProvedorBuscaPublica {
   timeoutMs: number;
   /**
    * O provedor aplica os `FiltrosBuscaPNCP` (UF, esfera, situação) que o analista
-   * informar? **Hoje só o PNCP aplica** — as demais fontes não têm parâmetro
-   * equivalente na origem.
+   * informar? **Hoje aplicam o PNCP e o Painel de materiais** — as demais
+   * fontes não têm parâmetro equivalente na origem.
    *
    * O campo existe para que a diferença seja DECLARADA em vez de silenciosa: o
    * chamador (`lib/assistente`) usa esta lista para avisar o analista de quais
@@ -61,6 +62,18 @@ export const REGISTRY_PROVEDORES_PUBLICOS: readonly ProvedorBuscaPublica[] = [
     timeoutMs: TIMEOUT_PADRAO_MS,
     aplicaFiltros: false,
     buscar: (termo) => buscarPrecosPainelPrecos(termo),
+  },
+  {
+    // Painel de Preços de MATERIAIS (`1_consultarMaterial`, por família PDM).
+    // O `painel_precos` acima só cobre serviços. Aplica UF e esfera na origem
+    // (parâmetros `estado`/`esfera`, conferidos contra a API real em
+    // 2026-11-09). A "situação" não se aplica: a fonte só tem preço
+    // homologado, que é o que a pesquisa de preço quer de qualquer forma.
+    chave: "painel_precos_materiais",
+    habilitado: true,
+    timeoutMs: TIMEOUT_PADRAO_MS,
+    aplicaFiltros: true,
+    buscar: (termo, filtros) => buscarCandidatosPainelMateriais(termo, filtros),
   },
   {
     // Compras.gov — `modulo-contratacoes` (M16, docs/ApiPlan.md §4.1). Fecha a

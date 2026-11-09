@@ -881,7 +881,7 @@ describe("registry de ferramentas do assistente", () => {
       expect(mocks.buscarCandidatosPublicos).not.toHaveBeenCalled();
     });
 
-    it("avisa que o recorte valeu só para o PNCP", async () => {
+    it("avisa que o recorte valeu só para as fontes que o aplicam", async () => {
       mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({})]);
       const registry = montarRegistry(CTX_PROCESSO);
 
@@ -889,7 +889,7 @@ describe("registry de ferramentas do assistente", () => {
 
       // Prometer "só SP" e devolver resultado nacional por três das quatro
       // fontes, sem dizer, é o modo de falha da §9.40.
-      expect(resposta.observacao).toMatch(/apenas ao PNCP/i);
+      expect(resposta.observacao).toMatch(/apenas às fontes que têm/i);
       expect(resposta.observacao).toMatch(/UF SP/);
     });
 
@@ -899,7 +899,7 @@ describe("registry de ferramentas do assistente", () => {
 
       const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
 
-      expect(resposta.observacao).not.toMatch(/apenas ao PNCP/i);
+      expect(resposta.observacao).not.toMatch(/apenas às fontes que têm/i);
     });
 
     it("sugere remover o recorte quando ele zera o resultado", async () => {

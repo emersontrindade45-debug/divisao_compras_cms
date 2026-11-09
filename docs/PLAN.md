@@ -2816,3 +2816,45 @@ mortos (`75f192d`). Working tree limpo, tudo enviado a `main`.
 **P6 (ingestao do PNCP): nao fazer agora**, com tres medicoes registradas na parte 3 desta sessao e
 no artefato. Reabrir so depois de medir P1-P4 em uso real; se cobertura ainda for o gargalo, o
 lever mais barato e `MAX_RESULTADOS_POR_BUSCA` / teto de tempo (configuracao), nao arquitetura.
+
+## Sessão 2026-11-09 — Painel de Preços de MATERIAIS na busca do assistente
+
+**Motivação (medido em produção, 75 dias):** 219 candidatos e só 7 aproveitados (3%); do Painel de
+Preços, 80 de 81 descartados. Os itens pesquisados são quase todos material de TI (MFP, scanner,
+tablet, impressora de cartão), e o provedor `painel_precos` só consultava SERVIÇOS
+(`3_consultarServico`). Material ficava sem essa fonte.
+
+**Entregue:** provedor `painel_precos_materiais` no registry
+(`src/lib/similaridade/provedorPainelMateriais.ts` + cliente
+`src/lib/integracoes/comprasGovMateriais.ts`). Termo → códigos CATMAT (catálogo local, ancorado no
+termo inteiro e na 1ª palavra) → família PDM (nome compatível com o termo, depois voto) →
+`1_consultarMaterial?tipo=codigoPdm` com UF/esfera do analista → ranqueamento lexical + teto de 3
+por descrição → prova de homologação no PNCP (`existeResultado` + valor > 0) com link do edital →
+exclusão do próprio órgão pela URL. Prazo absoluto de 9s (abaixo dos 12s por provedor do
+assistente). Aplica o recorte UF/esfera na origem (`aplicaFiltros: true`).
+
+**Medido contra a API real (catálogo de produção, só leitura):** MFP colorida A4 (SP) 20 candidatos
+em 4,2s; scanner (SP) 18 em 3,1s; tablet 18 em 2,5s; impressora de cartão 20 em 2,5s; toner HP
+(SP, municipal) 20 em 2,2s. Todos com link `pncp.gov.br/app/editais/...`.
+
+**Defeitos achados SÓ na execução real** (suíte verde em todos): `idCompra` de 17 dígitos corrompido
+pelo `JSON.parse` (367/500); `codigoPdm` como string derrubando todas as linhas; "scanner alta
+produção" caindo em equipamento de cozinha; "HP" descartado pelo tokenizador e família XEROX
+vencendo; 429 tratado como "sem preço". Lições em [CLAUDE.md §9.122–§9.125](../CLAUDE.md).
+
+**Verificação:** 1.456 testes (134 arquivos), typecheck, ESLint, `next build` compilado. 13
+mutações nas regras novas, todas detectadas.
+
+**Pendências:**
+1. **`resolverUrlPublicaPorIdCompra` (`comprasGov.ts`, caminho de SERVIÇOS) trata 429/falha na
+   consulta de homologação como "compra fora do PNCP"** e cai no link de acompanhamento sem a
+   checagem de `existeResultado` (§9.76). Sob limite de requisições, preço não homologado pode
+   passar; e em `actions/assistente.ts` a mesma resposta apaga `fonteUrl` como "link morto". Não
+   corrigido aqui: muda o comportamento de duas telas e merece tarefa própria (§9.125).
+2. **Limite de requisições do Compras.gov.** Seis buscas seguidas (~190 requisições em ~25s)
+   tomaram 429; uma busca isolada não. Em produção o turno faz 1–3 buscas, mas os provedores de
+   serviços e de `modulo-contratacoes` batem no mesmo host. Observar em produção.
+3. **ARP do Compras.gov** (`modulo-arp/2_consultarARPItem`): dados ricos, mas 40–46s por família —
+   só serve como ingestão em segundo plano. Não iniciado.
+4. **Busca textual do PNCP (`/api/search`)** resetou toda conexão a partir do WSL durante a sessão;
+   a fatia de dispensas no índice de editais não foi medida.

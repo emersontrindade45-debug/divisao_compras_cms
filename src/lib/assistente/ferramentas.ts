@@ -833,7 +833,8 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     const ignoram = fontesQueIgnoramFiltros();
     if (ignoram.length === 0) return "";
     return (
-      ` ATENÇÃO: o recorte (${pedidos.join(", ")}) foi aplicado apenas ao PNCP. ` +
+      ` ATENÇÃO: o recorte (${pedidos.join(", ")}) foi aplicado apenas às fontes que têm ` +
+      "esse filtro na origem (PNCP e Painel de Preços de materiais). " +
       `As demais fontes (${ignoram.join(", ")}) não têm esse filtro na origem e ` +
       "podem ter devolvido resultado de fora do recorte — diga isso ao usuário " +
       "em vez de afirmar que todos os candidatos respeitam o filtro."

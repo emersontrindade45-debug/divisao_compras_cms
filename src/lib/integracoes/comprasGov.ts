@@ -385,7 +385,7 @@ interface OrigemPublicaHomologada {
 
 const cacheOrigemPublica = new Map<string, Promise<OrigemPublicaHomologada>>();
 
-interface ContratacaoPncpPorId {
+export interface ContratacaoPncpPorId {
   orgaoEntidadeCnpj?: string | null;
   anoCompraPncp?: number | string | null;
   sequencialCompraPncp?: number | string | null;
@@ -394,12 +394,13 @@ interface ContratacaoPncpPorId {
   contratacaoExcluida?: boolean | null;
 }
 
-type StatusPncpPorId =
+export type StatusPncpPorId =
   | { kind: "ausente" }
   | { kind: "nao_homologada" }
   | { kind: "homologada"; url: string | null };
 
-function statusHomologacaoPncp(item: ContratacaoPncpPorId): StatusPncpPorId {
+/** Exportada para o Painel de materiais (`comprasGovMateriais.ts`), que aplica a mesma regra. */
+export function statusHomologacaoPncp(item: ContratacaoPncpPorId): StatusPncpPorId {
   if (item.contratacaoExcluida === true) return { kind: "nao_homologada" };
   if (item.existeResultado !== true) return { kind: "nao_homologada" };
   const valor = Number(item.valorTotalHomologado);

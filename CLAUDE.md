@@ -1645,3 +1645,44 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      escrever o teste e ligar na tela existe um passo obrigatório — **rodar a função de verdade
      contra o serviço**, com um caso cujo resultado esperado se conhece de antemão. Aqui custou
      quatro execuções de ~10s e evitou entregar uma funcionalidade que não funcionaria.
+
+122. **Identificador numérico de 17+ dígitos em JSON é corrompido pelo `JSON.parse` — e o mesmo
+     campo pode vir como string num endpoint e como número no vizinho.** No Compras.gov,
+     `3_consultarServico` devolve `"idCompra":"38911506000112026"` (string) e
+     `1_consultarMaterial` devolve `"idCompra":46272305900232025` (número). Acima de
+     `Number.MAX_SAFE_INTEGER` o parse arredonda em silêncio: medido em 2026-11-09, **367 de 500**
+     ids saíram trocados (`…232025` → `…232024`), e a checagem de homologação consultaria OUTRA
+     compra — preço com evidência de terceiro, sem erro em lugar nenhum. A correção é citar o
+     número no texto bruto antes do parse (`citarIdsGrandes` em `comprasGovMateriais.ts`). Ao
+     integrar endpoint novo, olhar o **texto cru** da resposta (`grep -o '"idCompra": *[0-9"]*'`),
+     não o objeto já parseado — `python json` preserva inteiros grandes e esconde o problema que o
+     Node tem. O teste que protege isso afirma a pré-condição (o parse sem a correção muda o id),
+     senão ele passa mesmo se a API passar a mandar string.
+123. **Tipo de campo se confere por endpoint, na resposta real — e só o campo que PROVA o preço
+     pode reprovar a linha.** No mesmo Painel, `codigoPdm` é número no catálogo/ARP e **string**
+     (`"226"`) em `1_consultarMaterial`. O schema Zod exigia `z.number()` e descartava **todas** as
+     linhas; a suíte estava verde porque o fixture repetia a minha suposição em vez do dado
+     (§9.63, §9.77 de novo). Duas regras: (a) montar o fixture a partir de uma resposta gravada,
+     com os tipos dela; (b) campo de exibição usa `.nullish().catch(null)` — tipo inesperado num
+     campo acessório não pode jogar fora um preço homologado válido. Os campos de prova (id,
+     valor, data do resultado, órgão) continuam estritos.
+124. **Âncora lexical "palavra mais longa" erra o núcleo do objeto; e tokenizador que descarta
+     palavras curtas apaga siglas que decidem a escolha.** `encontrarCodigosCatalogoLocal` ancora
+     no token mais longo: "scanner alta produção" ancorou em "produção" e devolveu 19 preços de
+     EQUIPAMENTO PARA COZINHAR. E `tokenizar` exige >2 letras: "cartucho toner HP" perdeu o "HP",
+     empatou HP com XEROX e a família errada venceu por votos. Nenhum dos dois aparece em teste com
+     mock; os dois apareceram na primeira execução real. Ao escolher categoria/família por
+     sobreposição de texto: exigir que o NOME da categoria compartilhe palavra com o termo (melhor
+     vazio que objeto de outra natureza), usar também a 1ª palavra como âncora (em português é o
+     núcleo: "scanner", "tablet") e manter siglas de 2 letras ("HP", "A4") fora da lista de
+     preposições.
+125. **Falha na consulta que PROVA homologação nunca pode cair num caminho que aprova.**
+     `resolverUrlPublicaPorIdCompra` (`comprasGov.ts`) faz `fetchJSON`, que devolve `null` em 429,
+     e `null` vira "compra fora do PNCP" → link de acompanhamento **sem** checar `existeResultado`
+     (§9.76). Ou seja: sob limite de requisições, a guarda de conformidade é pulada. É a §9.45
+     (fail-open) aplicada a uma regra da IN 65/2021. O provedor de materiais não reusa essa função
+     por isso: `urlEditalHomologadoPncp` lança na falha e o candidato é descartado. Regra: em toda
+     checagem cujo "não" bloqueia e cujo "sim" aprova, enumerar o que acontece em 429/timeout/5xx —
+     a resposta tem de ser "bloqueia". O caminho de serviços segue com o defeito (pendência no
+     `docs/PLAN.md`, 2026-11-09).
+

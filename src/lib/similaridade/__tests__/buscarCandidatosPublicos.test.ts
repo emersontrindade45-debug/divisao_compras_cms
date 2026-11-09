@@ -210,6 +210,14 @@ describe("REGISTRY_PROVEDORES_PUBLICOS", () => {
     expect(provedor?.timeoutMs).toBeGreaterThan(0);
   });
 
+  it("inclui o Painel de Preços de materiais, habilitado e aplicando o recorte do analista", () => {
+    const provedor = REGISTRY_PROVEDORES_PUBLICOS.find((p) => p.chave === "painel_precos_materiais");
+
+    expect(provedor).toBeDefined();
+    expect(provedor?.habilitado).toBe(true);
+    expect(provedor?.aplicaFiltros).toBe(true);
+  });
+
   it("inclui o provedor do SINAPI, habilitado (M17)", () => {
     const provedor = REGISTRY_PROVEDORES_PUBLICOS.find((p) => p.chave === "sinapi");
 
