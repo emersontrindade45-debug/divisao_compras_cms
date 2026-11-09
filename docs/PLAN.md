@@ -2845,12 +2845,12 @@ vencendo; 429 tratado como "sem preço". Lições em [CLAUDE.md §9.122–§9.12
 **Verificação:** 1.456 testes (134 arquivos), typecheck, ESLint, `next build` compilado. 13
 mutações nas regras novas, todas detectadas.
 
-**Pendências:**
-1. **`resolverUrlPublicaPorIdCompra` (`comprasGov.ts`, caminho de SERVIÇOS) trata 429/falha na
+**Pendências:** (item 1 resolvido na parte 2 abaixo)
+1. ~~**`resolverUrlPublicaPorIdCompra` (`comprasGov.ts`, caminho de SERVIÇOS) trata 429/falha na
    consulta de homologação como "compra fora do PNCP"** e cai no link de acompanhamento sem a
    checagem de `existeResultado` (§9.76). Sob limite de requisições, preço não homologado pode
    passar; e em `actions/assistente.ts` a mesma resposta apaga `fonteUrl` como "link morto". Não
-   corrigido aqui: muda o comportamento de duas telas e merece tarefa própria (§9.125).
+   corrigido aqui: muda o comportamento de duas telas e merece tarefa própria (§9.125).~~
 2. **Limite de requisições do Compras.gov.** Seis buscas seguidas (~190 requisições em ~25s)
    tomaram 429; uma busca isolada não. Em produção o turno faz 1–3 buscas, mas os provedores de
    serviços e de `modulo-contratacoes` batem no mesmo host. Observar em produção.
@@ -2858,3 +2858,36 @@ mutações nas regras novas, todas detectadas.
    só serve como ingestão em segundo plano. Não iniciado.
 4. **Busca textual do PNCP (`/api/search`)** resetou toda conexão a partir do WSL durante a sessão;
    a fatia de dispensas no índice de editais não foi medida.
+
+## Sessão 2026-11-09 (parte 2) — Análise da busca de nobreak e três correções
+
+**O que a auditoria da busca real mostrou** (processo 95/2026, `buscar_pncp` de 47,5s, turno de
+55s): os preços citados eram do PNCP, com link e data — regular quanto à IN 65/2021. Mas (a) o
+Painel de SERVIÇOS devolveu 244 linhas e validou cada uma; todas tomaram 429 e passaram sem
+prova de homologação (R$ 39 a R$ 106.170 para a mesma descrição); (b) isso esgotou a cota e a
+fonte de materiais falhou; (c) a fonte de materiais rodava para item de LOCAÇÃO; (d) a
+Perplexity está sem crédito desde 06/11 (`buscar_web` → 401 insufficient_quota).
+
+**Corrigido:**
+1. Painel de serviços: falha na prova de homologação EXCLUI o candidato (`fetchJSONEstrito`);
+   no máximo 20 validações por busca, as mais aderentes ao termo; `AbortSignal.timeout` em toda
+   requisição. `completarLinksOrigemCandidatos` não apaga mais link salvo quando a consulta falha.
+2. Painel de materiais não roda para serviço/locação (natureza, início da descrição do item ou
+   termo com locação). O orquestrador passa a repassar `contexto` do item às fontes.
+3. `buscar_pncp` grava `metricas` por etapa e por fonte em `ferramentasUsadas`.
+
+**Medido contra a API real depois:** locação de nobreak → materiais não rodou (2ms), serviços 20
+candidatos em 4s (eram 244); MFP → materiais 20 em 6s.
+
+**Verificação:** 1.472 testes, typecheck, ESLint, `next build`. 10 mutações nas regras novas, todas
+detectadas — uma só depois de acrescentar o teste no orquestrador (§9.99).
+
+**Pendências novas:**
+1. **Ler `metricas` das próximas buscas em produção** para atribuir os 47,5s (hipótese: IA).
+2. **`compras_gov_contratacoes` gastou os 12s inteiros e trouxe 0** nas duas buscas medidas
+   (nobreak e MFP). Medir em produção pelas `metricas`; se confirmado, é candidato a desligar ou
+   reduzir.
+3. **Painel de serviços para MFP** trouxe R$ 0,07 a R$ 2.072.470 — o matching CATSER casa
+   "impressora" com outsourcing. O corte por IA filtra, mas ocupa vaga.
+4. **Perplexity sem crédito** — ação do usuário.
+

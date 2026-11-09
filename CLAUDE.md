@@ -1683,6 +1683,26 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      (fail-open) aplicada a uma regra da IN 65/2021. O provedor de materiais não reusa essa função
      por isso: `urlEditalHomologadoPncp` lança na falha e o candidato é descartado. Regra: em toda
      checagem cujo "não" bloqueia e cujo "sim" aprova, enumerar o que acontece em 429/timeout/5xx —
-     a resposta tem de ser "bloqueia". O caminho de serviços segue com o defeito (pendência no
-     `docs/PLAN.md`, 2026-11-09).
-
+     a resposta tem de ser "bloqueia". **Corrigido no mesmo dia no caminho de serviços**
+     (`fetchJSONEstrito`), depois de visto em produção: numa busca de nobreak TODAS as consultas
+     de homologação tomaram 429 e 244 candidatos passaram sem prova. O mesmo `null` também
+     servia de "link morto" para `completarLinksOrigemCandidatos`, que apagava o link salvo;
+     agora falha é `undefined` ("não sei") e preserva o que está gravado.
+126. **Fontes que dividem um host com limite de requisições dividem a cota — uma sem teto derruba
+     as outras.** O Painel de serviços validava homologação de CADA linha devolvida (244 numa
+     busca de nobreak, uma consulta por linha); tomou 429 em todas e esgotou a cota do
+     Compras.gov para o Painel de materiais, que então falhou honestamente — o sintoma apareceu
+     na fonte NOVA, a causa estava na antiga. Ao acrescentar provedor num host já usado, somar as
+     requisições por busca de TODOS os provedores desse host, e pôr teto antes de qualquer etapa
+     "uma requisição por candidato" (aqui: 20 mais aderentes ao termo). Corolário: provedor de
+     preço de COMPRA não deve rodar para item de LOCAÇÃO/serviço — além de trazer preço de outra
+     natureza, gasta cota à toa; com `natureza` em branco em 80 de 84 itens, o sinal confiável é
+     o início da descrição do item ("Locação de…", "Serviço de…").
+127. **Duração total de ferramenta não diagnostica nada — grave o tempo por etapa.** Uma
+     `buscar_pncp` de 47,5s em produção (turno de 55s, a 5s do `maxDuration`) não pôde ser
+     atribuída a fontes, demoção ou IA, porque só existia `duracaoMs` do passo inteiro; a
+     reprodução local mostrou fontes ≤ 9s e deixou a IA como hipótese, não fato. Desde
+     2026-11-09 a busca grava `metricas` (`itemMs`, `fontesMs`, `democaoMs`, `iaMs`, tempo e volume
+     por fonte) em `ferramentasUsadas`. Ao investigar lentidão, ler esse campo antes de propor
+     correção (§9.67). E nos testes: `vi.spyOn(global, "fetch")` sem `restoreAllMocks` acumula
+     chamadas entre blocos do mesmo arquivo — o teste novo "via" chamadas que eram do anterior.

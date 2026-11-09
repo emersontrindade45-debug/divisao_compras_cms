@@ -33,7 +33,23 @@ export interface ProvedorBuscaPublica {
    * tela indicando (CLAUDE.md §9.40).
    */
   aplicaFiltros: boolean;
-  buscar: (termo: string, filtros?: FiltrosBuscaPNCP) => Promise<CandidatoSimilaridade[]>;
+  buscar: (
+    termo: string,
+    filtros?: FiltrosBuscaPNCP,
+    contexto?: ContextoBuscaItem,
+  ) => Promise<CandidatoSimilaridade[]>;
+}
+
+/**
+ * O que se sabe do item para o qual a busca é feita. Opcional: a busca em lote
+ * da Server Action não o informa. Existe para que uma fonte possa recusar um
+ * objeto de outra natureza — preço de COMPRA de nobreak não é referência para
+ * LOCAÇÃO de nobreak (medido em produção em 2026-11-09).
+ */
+export interface ContextoBuscaItem {
+  naturezaObjeto?: "bem_consumo" | "servico_continuo" | null;
+  /** Descrição do item no processo (não o termo, que o modelo reescreve). */
+  descricaoItem?: string | null;
 }
 
 // Os dois provedores atuais já respondiam via Promise.all antes do M15; o
@@ -73,7 +89,7 @@ export const REGISTRY_PROVEDORES_PUBLICOS: readonly ProvedorBuscaPublica[] = [
     habilitado: true,
     timeoutMs: TIMEOUT_PADRAO_MS,
     aplicaFiltros: true,
-    buscar: (termo, filtros) => buscarCandidatosPainelMateriais(termo, filtros),
+    buscar: (termo, filtros, contexto) => buscarCandidatosPainelMateriais(termo, filtros, contexto),
   },
   {
     // Compras.gov — `modulo-contratacoes` (M16, docs/ApiPlan.md §4.1). Fecha a

@@ -28,7 +28,12 @@ import {
 } from "@/lib/integracoes/perplexity";
 import type { CandidatoSimilaridade, ItemExtraidoTR } from "@/lib/ia/types";
 import { filtrarResultadosWeb, resumirDescartes } from "./guardas";
-import type { ChamadaFerramenta, ExecutorFerramenta, ResultadoFerramenta } from "./laco";
+import type {
+  ChamadaFerramenta,
+  ExecutorFerramenta,
+  MetricasBusca,
+  ResultadoFerramenta,
+} from "./laco";
 import {
   MAX_SUGESTOES_POR_BUSCA,
   paraSugestao,
@@ -856,12 +861,34 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
 
     const temFiltroValor = valorMinimoEfetivo !== undefined || valorMaximoEfetivo !== undefined;
     const temRecorte = Boolean(filtros?.uf || filtros?.esfera || filtros?.status);
+    // Tempo por etapa, gravado com o passo (`metricas`). Sem isto só existia a
+    // duração total: uma busca de 47,5s em produção (2026-11-09) não tinha como
+    // ser atribuída às fontes, à demoção ou à IA.
+    const relogio = Date.now();
+    const marcar = (() => {
+      let ultimo = relogio;
+      return () => {
+        const agora = Date.now();
+        const ms = agora - ultimo;
+        ultimo = agora;
+        return ms;
+      };
+    })();
     const item = await itemDaBusca(itemIdSugerido);
-    const { candidatos: buscados, provedoresQueFalharam } =
-      await buscarCandidatosPublicosComDiagnostico(termo, {
-        timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
-        ...(filtros ? { filtros } : {}),
-      });
+    const itemMs = marcar();
+    const {
+      candidatos: buscados,
+      provedoresQueFalharam,
+      porProvedor,
+    } = await buscarCandidatosPublicosComDiagnostico(termo, {
+      timeoutMsPorProvedor: TIMEOUT_BUSCA_ASSISTENTE_MS,
+      ...(filtros ? { filtros } : {}),
+      contexto: {
+        naturezaObjeto: item?.natureza ?? null,
+        descricaoItem: item?.itemTR.descricao ?? null,
+      },
+    });
+    const fontesMs = marcar();
     const filtrados = filtrarPorValor(buscados, {
       valorMinimo: valorMinimoEfetivo,
       valorMaximo: valorMaximoEfetivo,
@@ -883,6 +910,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     // Demovendo antes, cada descarte empurra um candidato inédito para dentro do
     // corte, que é o comportamento que o descarte promete.
     const priorizados = await demoverJaDescartados(ctx.processoId, ordenados);
+    const democaoMs = marcar();
 
     // Depois da demoção, para que o representante de cada descrição seja o
     // candidato ainda não julgado, e não um que o analista já descartou.
@@ -892,6 +920,16 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     const encontrados = aderenciaLigada
       ? await filtrarPorRelevanciaIA(candidatosParaAvaliar, item?.itemTR ?? null, item?.natureza ?? null)
       : candidatosParaAvaliar;
+    const iaMs = marcar();
+    const metricas: MetricasBusca = {
+      itemMs,
+      fontesMs,
+      democaoMs,
+      iaMs,
+      totalMs: Date.now() - relogio,
+      candidatosAvaliadosIA: aderenciaLigada ? candidatosParaAvaliar.length : 0,
+      porProvedor,
+    };
 
     // Nenhum candidato é excluído por já ter sido descartado numa busca
     // anterior — o card continua podendo aparecer, e o analista pode mudar de
@@ -965,6 +1003,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           observacao: observacao + avisoRecorteParcial(filtros),
         },
         sugestoes: [] as CandidatoSugerido[],
+        metricas,
       };
     }
 
@@ -995,6 +1034,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           termoBuscaUsado: termo,
         }),
       ),
+      metricas,
     };
   }
 
@@ -1465,7 +1505,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
         }
         case "buscar_pncp": {
           const args = parseArgumentos(buscarPncpSchema, chamada.argumentos);
-          const { resposta, sugestoes } = await buscarPncp(
+          const { resposta, sugestoes, metricas } = await buscarPncp(
             args.termo,
             args.itemId ?? null,
             args.valorMinimo,
@@ -1474,7 +1514,7 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           );
           // As sugestões viajam FORA do conteúdo devolvido ao modelo: elas são
           // para a tela e para a aprovação por clique, não para o prompt.
-          return { conteudo: JSON.stringify(resposta), sugestoes };
+          return { conteudo: JSON.stringify(resposta), sugestoes, metricas };
         }
         case "buscar_web": {
           const args = parseArgumentos(buscarWebSchema, chamada.argumentos);

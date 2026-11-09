@@ -255,6 +255,8 @@ export async function POST(request: Request) {
               // de devolver o candidato, e um cliente forjado poderia injetar
               // valor, órgão ou data numa fonte de estimativa pública.
               ...(p.sugestoes?.length ? { sugestoes: p.sugestoes } : {}),
+              // Tempo por etapa da busca — só leitura de auditoria (ver `MetricasBusca`).
+              ...(p.metricas ? { metricas: p.metricas } : {}),
             })),
             citacoes: modelo.citacoes.map((c) => ({ url: c.url, titulo: c.titulo })),
             modelo: modeloAssistente(),

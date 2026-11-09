@@ -84,10 +84,7 @@ describe("executarTurno", () => {
       executar: executarOk,
     });
 
-    expect(res.passos.map((p) => p.ferramenta)).toEqual([
-      "buscar_pncp",
-      "buscar_web_perplexity",
-    ]);
+    expect(res.passos.map((p) => p.ferramenta)).toEqual(["buscar_pncp", "buscar_web_perplexity"]);
     expect(res.orcamentoEsgotado).toBe(false);
   });
 
@@ -228,6 +225,30 @@ describe("executarTurno", () => {
     });
 
     expect(eventos.map((e) => e.tipo)).toEqual(["passo_inicio", "passo_fim", "texto"]);
+  });
+
+  it("copia para o passo as métricas que a ferramenta devolveu", async () => {
+    const metricas = {
+      itemMs: 1,
+      fontesMs: 2,
+      democaoMs: 3,
+      iaMs: 4,
+      totalMs: 10,
+      candidatosAvaliadosIA: 0,
+      porProvedor: {},
+    };
+    const modelo = modeloRoteirizado([
+      { texto: "", chamadas: [chamada("buscar_pncp")] },
+      { texto: "ok", chamadas: [] },
+    ]);
+
+    const res = await executarTurno({
+      historico: [{ papel: "user", conteudo: "x" }],
+      modelo,
+      executar: async () => ({ conteudo: "{}", metricas }),
+    });
+
+    expect(res.passos[0]!.metricas).toEqual(metricas);
   });
 
   it("mede a duração de cada passo", async () => {

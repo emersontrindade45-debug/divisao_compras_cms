@@ -20,6 +20,7 @@ vi.mock("@/lib/integracoes/comprasGovMateriais", () => ({
 
 import {
   buscarCandidatosPainelMateriais,
+  ehObjetoDeServico,
   escolherFamilias,
   selecionarParaValidacao,
   TEMPO_MAX_PAINEL_MATERIAIS_MS,
@@ -64,10 +65,21 @@ describe("buscarCandidatosPainelMateriais", () => {
     vi.useRealTimers();
   });
 
+  it("não consulta NADA quando o item é locação — nem catálogo, nem Compras.gov", async () => {
+    const candidatos = await buscarCandidatosPainelMateriais("nobreak 5 kVA", undefined, {
+      descricaoItem: "Locação de nobreak, com os respectivos bancos externos de baterias",
+    });
+
+    expect(candidatos).toEqual([]);
+    expect(mocks.encontrarCodigos).not.toHaveBeenCalled();
+    expect(mocks.consultarPdm).not.toHaveBeenCalled();
+    expect(mocks.buscarPrecos).not.toHaveBeenCalled();
+  });
+
   it("devolve [] sem consultar preço quando o termo não casa com nenhum código CATMAT", async () => {
     mocks.encontrarCodigos.mockResolvedValue([]);
 
-    expect(await buscarCandidatosPainelMateriais("xyz", undefined, AGORA)).toEqual([]);
+    expect(await buscarCandidatosPainelMateriais("xyz", undefined, undefined, AGORA)).toEqual([]);
     expect(mocks.buscarPrecos).not.toHaveBeenCalled();
   });
 
@@ -81,7 +93,7 @@ describe("buscarCandidatosPainelMateriais", () => {
     };
     mocks.consultarPdm.mockImplementation(async (c: number) => familias[c]);
 
-    await buscarCandidatosPainelMateriais("impressora multifuncional", undefined, AGORA);
+    await buscarCandidatosPainelMateriais("impressora multifuncional", undefined, undefined, AGORA);
 
     const consultadas = mocks.buscarPrecos.mock.calls.map((c) => c[0].codigoPdm);
     expect(consultadas).toEqual([226, 99]);
@@ -94,6 +106,7 @@ describe("buscarCandidatosPainelMateriais", () => {
     const candidatos = await buscarCandidatosPainelMateriais(
       "scanner alta produção",
       undefined,
+      undefined,
       AGORA,
     );
 
@@ -102,7 +115,7 @@ describe("buscarCandidatosPainelMateriais", () => {
   });
 
   it("também ancora o matching na primeira palavra do termo (o núcleo do objeto)", async () => {
-    await buscarCandidatosPainelMateriais("scanner alta produção", undefined, AGORA);
+    await buscarCandidatosPainelMateriais("scanner alta produção", undefined, undefined, AGORA);
 
     const termosConsultados = mocks.encontrarCodigos.mock.calls.map((c) => c[0]);
     expect(termosConsultados).toEqual(["scanner alta produção", "scanner"]);
@@ -111,9 +124,9 @@ describe("buscarCandidatosPainelMateriais", () => {
   it("LANÇA quando nenhuma família pôde ser consultada por falha da fonte (ex.: 429)", async () => {
     mocks.consultarPdm.mockRejectedValue(new Error("HTTP 429"));
 
-    await expect(buscarCandidatosPainelMateriais("impressora", undefined, AGORA)).rejects.toThrow(
-      /não respondeu/,
-    );
+    await expect(
+      buscarCandidatosPainelMateriais("impressora", undefined, undefined, AGORA),
+    ).rejects.toThrow(/não respondeu/);
     expect(mocks.buscarPrecos).not.toHaveBeenCalled();
   });
 
@@ -121,6 +134,7 @@ describe("buscarCandidatosPainelMateriais", () => {
     await buscarCandidatosPainelMateriais(
       "impressora",
       { uf: "SP", esfera: "M", status: "encerradas" },
+      undefined,
       AGORA,
     );
 
@@ -131,7 +145,12 @@ describe("buscarCandidatosPainelMateriais", () => {
   });
 
   it("mapeia o candidato com o link verificado como evidência", async () => {
-    const [candidato] = await buscarCandidatosPainelMateriais("impressora", undefined, AGORA);
+    const [candidato] = await buscarCandidatosPainelMateriais(
+      "impressora",
+      undefined,
+      undefined,
+      AGORA,
+    );
 
     expect(candidato).toEqual({
       tipoCandidato: "painel_precos",
@@ -155,7 +174,12 @@ describe("buscarCandidatosPainelMateriais", () => {
       id === "1000000000000001" ? null : urlDe(id),
     );
 
-    const candidatos = await buscarCandidatosPainelMateriais("impressora", undefined, AGORA);
+    const candidatos = await buscarCandidatosPainelMateriais(
+      "impressora",
+      undefined,
+      undefined,
+      AGORA,
+    );
 
     expect(candidatos.map((c) => c.fonteUrl)).toEqual([urlDe("2000000000000002")]);
   });
@@ -170,7 +194,12 @@ describe("buscarCandidatosPainelMateriais", () => {
       return urlDe(id);
     });
 
-    const candidatos = await buscarCandidatosPainelMateriais("impressora", undefined, AGORA);
+    const candidatos = await buscarCandidatosPainelMateriais(
+      "impressora",
+      undefined,
+      undefined,
+      AGORA,
+    );
 
     expect(candidatos.map((c) => c.fonteUrl)).toEqual([urlDe("2000000000000002")]);
   });
@@ -184,7 +213,12 @@ describe("buscarCandidatosPainelMateriais", () => {
       id === "1000000000000001" ? urlDe(id, CNPJ_PROPRIO) : urlDe(id),
     );
 
-    const candidatos = await buscarCandidatosPainelMateriais("impressora", undefined, AGORA);
+    const candidatos = await buscarCandidatosPainelMateriais(
+      "impressora",
+      undefined,
+      undefined,
+      AGORA,
+    );
 
     expect(candidatos).toHaveLength(1);
     expect(candidatos[0]!.fonteUrl).not.toContain(CNPJ_PROPRIO);
@@ -193,9 +227,9 @@ describe("buscarCandidatosPainelMateriais", () => {
   it("LANÇA quando todas as famílias falham — vira provedor com falha, não 'sem preço'", async () => {
     mocks.buscarPrecos.mockRejectedValue(new Error("ECONNRESET"));
 
-    await expect(buscarCandidatosPainelMateriais("impressora", undefined, AGORA)).rejects.toThrow(
-      /não respondeu/,
-    );
+    await expect(
+      buscarCandidatosPainelMateriais("impressora", undefined, undefined, AGORA),
+    ).rejects.toThrow(/não respondeu/);
   });
 
   it("entrega o que a família que respondeu trouxe quando a outra falha", async () => {
@@ -210,7 +244,12 @@ describe("buscarCandidatosPainelMateriais", () => {
       return [preco()];
     });
 
-    const candidatos = await buscarCandidatosPainelMateriais("impressora", undefined, AGORA);
+    const candidatos = await buscarCandidatosPainelMateriais(
+      "impressora",
+      undefined,
+      undefined,
+      AGORA,
+    );
 
     expect(candidatos).toHaveLength(1);
   });
@@ -225,7 +264,7 @@ describe("buscarCandidatosPainelMateriais", () => {
       id === "1000000000000001" ? new Promise(() => {}) : Promise.resolve(urlDe(id)),
     );
 
-    const promessa = buscarCandidatosPainelMateriais("impressora", undefined, AGORA);
+    const promessa = buscarCandidatosPainelMateriais("impressora", undefined, undefined, AGORA);
     await vi.advanceTimersByTimeAsync(TEMPO_MAX_PAINEL_MATERIAIS_MS);
     const candidatos = await promessa;
 
@@ -246,7 +285,12 @@ describe("buscarCandidatosPainelMateriais", () => {
     );
 
     let terminou = false;
-    const promessa = buscarCandidatosPainelMateriais("impressora", undefined, AGORA).then((c) => {
+    const promessa = buscarCandidatosPainelMateriais(
+      "impressora",
+      undefined,
+      undefined,
+      AGORA,
+    ).then((c) => {
       terminou = true;
       return c;
     });
@@ -256,6 +300,45 @@ describe("buscarCandidatosPainelMateriais", () => {
     const candidatos = await promessa;
     // Ondas de 3s cabem 3 vezes em 9s: 15 validadas, 5 cortadas pelo prazo.
     expect(candidatos).toHaveLength(15);
+  });
+});
+
+describe("ehObjetoDeServico — preço de compra não serve para locação/serviço", () => {
+  it("recusa item de locação pela descrição, mesmo com natureza em branco (caso medido)", () => {
+    expect(
+      ehObjetoDeServico("nobreak 5 kVA", {
+        naturezaObjeto: null,
+        descricaoItem: "Locação de nobreaks, com os respectivos bancos externos de baterias",
+      }),
+    ).toBe(true);
+  });
+
+  it("recusa pela natureza do item e pelo termo com locação", () => {
+    expect(ehObjetoDeServico("impressora", { naturezaObjeto: "servico_continuo" })).toBe(true);
+    expect(ehObjetoDeServico("locação nobreak 5 kVA")).toBe(true);
+    expect(ehObjetoDeServico("aluguel de impressora")).toBe(true);
+  });
+
+  it("recusa descrição que começa com serviço, manutenção ou contratação de empresa", () => {
+    for (const d of [
+      "Serviços de manutenção corretiva e preventiva",
+      "Manutenção preventiva de elevadores",
+      "Contratação de empresa para outsourcing de impressão",
+      "Hospedagem de Sistema (software) e Licença de Uso",
+    ]) {
+      expect(ehObjetoDeServico("x", { descricaoItem: d })).toBe(true);
+    }
+  });
+
+  it("aceita material, mesmo quando a descrição cita instalação ou assistência no meio", () => {
+    expect(
+      ehObjetoDeServico("tablet octa core", {
+        naturezaObjeto: null,
+        descricaoItem:
+          "Tablet com processador octa core; garantia com assistência técnica e instalação",
+      }),
+    ).toBe(false);
+    expect(ehObjetoDeServico("cartucho toner HP")).toBe(false);
   });
 });
 

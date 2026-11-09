@@ -408,7 +408,8 @@ export async function completarLinksOrigemCandidatos(
       : [];
 
   const resolvidasPorId = await Promise.all(
-    pendentesPorId.map((p) => resolverUrlPublicaPorIdCompra(p.idCompra)),
+    // Falha na consulta = `undefined` ("não sei"), que preserva o link salvo.
+    pendentesPorId.map((p) => resolverUrlPublicaPorIdCompra(p.idCompra).catch(() => undefined)),
   );
 
   let mudou = false;
@@ -428,6 +429,10 @@ export async function completarLinksOrigemCandidatos(
       }
       return;
     }
+    // A consulta falhou (429, rede): não dá para afirmar nada, mantém como está.
+    // Antes, falha e "não existe" eram o mesmo `null`, e um 429 apagava um link
+    // válido como se fosse morto.
+    if (href === undefined) return;
     // Compra não existe no acompanhamento nem no PNCP: tira o link morto.
     if (sugestao.fonteUrl) {
       sugestao.fonteUrl = null;

@@ -142,7 +142,26 @@ export interface ResultadoFerramenta {
    * que o servidor relê o preço na hora da aprovação, nunca do navegador.
    */
   sugestoes?: CandidatoSugerido[];
+  /** Tempo por etapa da ferramenta, para auditoria de desempenho. Não vai ao modelo. */
+  metricas?: MetricasBusca;
 }
+
+/**
+ * Tempo de cada etapa da `buscar_pncp` e de cada fonte. Gravado com o passo
+ * para que uma busca lenta em produção possa ser atribuída a uma etapa medida,
+ * e não a um palpite (CLAUDE.md §9.67).
+ */
+// `type` e não `interface`: interface não tem assinatura de índice e o Prisma
+// recusa como `InputJsonValue` ao gravar em `ferramentasUsadas`.
+export type MetricasBusca = {
+  itemMs: number;
+  fontesMs: number;
+  democaoMs: number;
+  iaMs: number;
+  totalMs: number;
+  candidatosAvaliadosIA: number;
+  porProvedor: Record<string, { ms: number; candidatos: number; falhou: boolean }>;
+};
 
 /** Registro de um passo, exibido na UI e persistido em `ferramentasUsadas`. */
 export interface PassoRegistrado {
@@ -152,6 +171,7 @@ export interface PassoRegistrado {
   duracaoMs: number;
   erro?: string;
   sugestoes?: CandidatoSugerido[];
+  metricas?: MetricasBusca;
 }
 
 export interface TurnoMensagem {
@@ -168,10 +188,7 @@ export interface ModeloConversacional {
    * @param permitirFerramentas quando false, o modelo deve responder só com
    * texto — é assim que se obtém o fechamento no fim do orçamento.
    */
-  responder(
-    historico: TurnoMensagem[],
-    permitirFerramentas: boolean,
-  ): Promise<RespostaModelo>;
+  responder(historico: TurnoMensagem[], permitirFerramentas: boolean): Promise<RespostaModelo>;
 }
 
 export type ExecutorFerramenta = (chamada: ChamadaFerramenta) => Promise<ResultadoFerramenta>;
@@ -206,9 +223,7 @@ export interface ResultadoTurno {
 }
 
 function resumir(texto: string): string {
-  return texto.length > TAMANHO_RESUMO_PASSO
-    ? `${texto.slice(0, TAMANHO_RESUMO_PASSO)}…`
-    : texto;
+  return texto.length > TAMANHO_RESUMO_PASSO ? `${texto.slice(0, TAMANHO_RESUMO_PASSO)}…` : texto;
 }
 
 /**
@@ -256,8 +271,7 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
     // por não caber no prazo (`cabeNoPrazo`) não esgota o relógio, e sem esta
     // condição o modelo pediria a MESMA ferramenta na rodada seguinte, seria
     // barrado de novo, e o turno queimaria os 8 passos repetindo o bloqueio.
-    const podeUsarFerramentas =
-      passos.length < maxPassos && !tempoEsgotado() && !orcamentoEsgotado;
+    const podeUsarFerramentas = passos.length < maxPassos && !tempoEsgotado() && !orcamentoEsgotado;
     const resposta = await modelo.responder(historico, podeUsarFerramentas);
 
     if (resposta.texto) {
@@ -333,6 +347,7 @@ export async function executarTurno(opcoes: OpcoesTurno): Promise<ResultadoTurno
         duracaoMs: agora() - inicio,
         ...(resultado.erro ? { erro: resultado.erro } : {}),
         ...(resultado.sugestoes?.length ? { sugestoes: resultado.sugestoes } : {}),
+        ...(resultado.metricas ? { metricas: resultado.metricas } : {}),
       };
       passos.push(passo);
       onEvento?.({ tipo: "passo_fim", passo });

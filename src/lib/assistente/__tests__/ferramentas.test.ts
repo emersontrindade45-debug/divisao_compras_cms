@@ -37,6 +37,7 @@ vi.mock("@/lib/similaridade/buscarCandidatosPublicos", () => ({
   buscarCandidatosPublicosComDiagnostico: async (termo: string, opcoes: unknown) => ({
     candidatos: await mocks.buscarCandidatosPublicos(termo, opcoes),
     provedoresQueFalharam: mocks.provedoresQueFalharam,
+    porProvedor: { pncp: { ms: 1200, candidatos: 1, falhou: false } },
   }),
   // Fontes reais que não sabem aplicar o recorte do analista — é o que o aviso
   // de recorte parcial enumera. Sem isto no mock, a chamada estoura dentro do
@@ -778,8 +779,44 @@ describe("registry de ferramentas do assistente", () => {
 
       expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("cadeira", {
         timeoutMsPorProvedor: expect.any(Number),
+        contexto: expect.any(Object),
       });
       expect(resposta.total).toBe(1);
+    });
+
+    it("repassa às fontes a descrição e a natureza do item (para recusar objeto de outra natureza)", async () => {
+      mocks.db.item.findUnique.mockResolvedValue({ ...ITEM, natureza: null });
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      await chamar(registry, "buscar_pncp", { termo: "cadeira", itemId: "item-1" });
+
+      expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith(
+        "cadeira",
+        expect.objectContaining({
+          contexto: { naturezaObjeto: null, descricaoItem: "Cadeira giratória" },
+        }),
+      );
+    });
+
+    it("devolve o tempo de cada etapa e de cada fonte para gravar com o passo", async () => {
+      const registry = montarRegistry(CTX_PROCESSO);
+
+      const resultado = await registry.executar({
+        id: "call-1",
+        nome: "buscar_pncp",
+        argumentos: JSON.stringify({ termo: "cadeira" }),
+      });
+
+      expect(resultado.metricas).toMatchObject({
+        itemMs: expect.any(Number),
+        fontesMs: expect.any(Number),
+        democaoMs: expect.any(Number),
+        iaMs: expect.any(Number),
+        totalMs: expect.any(Number),
+        porProvedor: { pncp: { ms: 1200, candidatos: 1, falhou: false } },
+      });
+      // As métricas não vão ao modelo: o conteúdo devolvido a ele não as contém.
+      expect(resultado.conteudo).not.toContain("porProvedor");
     });
 
     it("rejeita valorMinimo maior que valorMaximo", async () => {
@@ -829,6 +866,7 @@ describe("registry de ferramentas do assistente", () => {
       expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("cadeira", {
         timeoutMsPorProvedor: expect.any(Number),
         filtros: { uf: "SP", esfera: "M" },
+        contexto: expect.any(Object),
       });
     });
 
@@ -840,6 +878,7 @@ describe("registry de ferramentas do assistente", () => {
 
       expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("cadeira", {
         timeoutMsPorProvedor: expect.any(Number),
+        contexto: expect.any(Object),
       });
     });
 

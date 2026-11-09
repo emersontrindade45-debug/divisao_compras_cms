@@ -1,7 +1,7 @@
 import "server-only";
 import type { CandidatoSimilaridade } from "@/lib/ia/types";
 import type { FiltrosBuscaPNCP } from "@/lib/integracoes/pncp";
-import { REGISTRY_PROVEDORES_PUBLICOS } from "./registryProvedores";
+import { REGISTRY_PROVEDORES_PUBLICOS, type ContextoBuscaItem } from "./registryProvedores";
 import { comTimeout } from "./comTimeout";
 import { deduplicarCandidatos } from "./deduplicarCandidatos";
 
@@ -41,6 +41,8 @@ export interface OpcoesBuscarCandidatosPublicos {
    * de deixar a diferença silenciosa.
    */
   filtros?: FiltrosBuscaPNCP;
+  /** Repassado a todos os provedores — ver `ContextoBuscaItem`. */
+  contexto?: ContextoBuscaItem;
 }
 
 /**
@@ -69,6 +71,12 @@ export interface ResultadoBuscaPublica {
   candidatos: CandidatoSimilaridade[];
   /** Chaves do registry (`pncp`, `painel_precos`, …) que falharam ou expiraram. */
   provedoresQueFalharam: string[];
+  /**
+   * Tempo e volume de cada fonte. Sem isto só existia a duração TOTAL da
+   * ferramenta, e uma busca de 47s em produção (2026-11-09) não tinha como ser
+   * atribuída a nenhuma etapa.
+   */
+  porProvedor: Record<string, { ms: number; candidatos: number; falhou: boolean }>;
 }
 
 export async function buscarCandidatosPublicosComDiagnostico(
@@ -77,24 +85,35 @@ export async function buscarCandidatosPublicosComDiagnostico(
 ): Promise<ResultadoBuscaPublica> {
   const provedoresHabilitados = REGISTRY_PROVEDORES_PUBLICOS.filter((provedor) => provedor.habilitado);
 
+  const duracoes: number[] = new Array(provedoresHabilitados.length).fill(0);
   const resultados = await Promise.allSettled(
-    provedoresHabilitados.map((provedor) =>
-      comTimeout(
-        provedor.buscar(termo, opcoes.filtros),
+    provedoresHabilitados.map((provedor, indice) => {
+      const inicio = Date.now();
+      return comTimeout(
+        provedor.buscar(termo, opcoes.filtros, opcoes.contexto),
         opcoes.timeoutMsPorProvedor ?? provedor.timeoutMs,
         provedor.chave,
-      ),
-    ),
+      ).finally(() => {
+        duracoes[indice] = Date.now() - inicio;
+      });
+    }),
   );
 
   const candidatos: CandidatoSimilaridade[] = [];
   const provedoresQueFalharam: string[] = [];
+  const porProvedor: ResultadoBuscaPublica["porProvedor"] = {};
   resultados.forEach((resultado, indice) => {
+    const provedor = provedoresHabilitados[indice];
     if (resultado.status === "fulfilled") {
       candidatos.push(...resultado.value);
+      porProvedor[provedor.chave] = {
+        ms: duracoes[indice],
+        candidatos: resultado.value.length,
+        falhou: false,
+      };
       return;
     }
-    const provedor = provedoresHabilitados[indice];
+    porProvedor[provedor.chave] = { ms: duracoes[indice], candidatos: 0, falhou: true };
     provedoresQueFalharam.push(provedor.chave);
     console.error(
       `[buscarCandidatosPublicos] Provedor "${provedor.chave}" falhou/expirou para "${termo}":`,
@@ -102,7 +121,7 @@ export async function buscarCandidatosPublicosComDiagnostico(
     );
   });
 
-  return { candidatos: deduplicarCandidatos(candidatos), provedoresQueFalharam };
+  return { candidatos: deduplicarCandidatos(candidatos), provedoresQueFalharam, porProvedor };
 }
 
 /**

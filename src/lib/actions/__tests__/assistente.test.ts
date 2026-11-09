@@ -14,7 +14,12 @@ const mocks = vi.hoisted(() => ({
     mensagemAssistente: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
     conversaAssistente: { findFirst: vi.fn(), findMany: vi.fn() },
     item: { findUnique: vi.fn(), findMany: vi.fn() },
-    resultadoSimilaridade: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+    resultadoSimilaridade: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+    },
     // Presentes de propósito: os testes provam que NUNCA são chamados.
     fonte: { create: vi.fn() },
     evidencia: { create: vi.fn() },
@@ -86,7 +91,13 @@ const SUGESTAO = {
 const MENSAGEM = {
   id: "msg-1",
   ferramentasUsadas: [
-    { ferramenta: "buscar_pncp", argumentos: "{}", resumo: "…", duracaoMs: 10, sugestoes: [SUGESTAO] },
+    {
+      ferramenta: "buscar_pncp",
+      argumentos: "{}",
+      resumo: "…",
+      duracaoMs: 10,
+      sugestoes: [SUGESTAO],
+    },
   ],
   conversa: { id: "conv-1", userId: "user-1", processoId: "proc-1" },
 };
@@ -219,12 +230,14 @@ describe("adicionarCandidatoSugerido", () => {
   it("rejeita quando o score ficou abaixo de 40 mesmo para adição manual", async () => {
     // Score muito baixo: scoreDescricao 20, scoreEspecificacao 10, scoreUnidadeQuantidade 5
     // calcularScoreFinal = 20*0.4 + 10*0.35 + 5*0.25 = 8 + 3.5 + 1.25 = 12.75 < 40
-    mocks.rankearSimilaridade.mockResolvedValue([{
-      ...AVALIACAO,
-      scoreDescricao: 20,
-      scoreEspecificacao: 10,
-      scoreUnidadeQuantidade: 5,
-    }]);
+    mocks.rankearSimilaridade.mockResolvedValue([
+      {
+        ...AVALIACAO,
+        scoreDescricao: 20,
+        scoreEspecificacao: 10,
+        scoreUnidadeQuantidade: 5,
+      },
+    ]);
 
     const r = await adicionarCandidatoSugerido(PEDIDO);
 
@@ -336,7 +349,9 @@ describe("adicionarCandidatoSugerido", () => {
 
     const violacoes: string[] = [];
     for (const [model, metodos] of proibidos) {
-      for (const [metodo, fn] of Object.entries(metodos as Record<string, { mock?: { calls: unknown[] } }>)) {
+      for (const [metodo, fn] of Object.entries(
+        metodos as Record<string, { mock?: { calls: unknown[] } }>,
+      )) {
         if (escritas.includes(metodo) && (fn.mock?.calls.length ?? 0) > 0) {
           violacoes.push(`${model}.${metodo}`);
         }
@@ -404,7 +419,11 @@ describe("listarOutrosItensDaContratacao", () => {
     mocks.listarItensDaCompraPNCP.mockResolvedValue({
       candidatos: [
         // O próprio item do card volta na listagem crua — precisa ser filtrado.
-        { ...CANDIDATO_IRMAO, identidadeContratacao: IDENTIDADE, fonteDescricao: "Cadeira giratória ergonômica" },
+        {
+          ...CANDIDATO_IRMAO,
+          identidadeContratacao: IDENTIDADE,
+          fonteDescricao: "Cadeira giratória ergonômica",
+        },
         CANDIDATO_IRMAO,
       ],
       completo: true,
@@ -495,7 +514,10 @@ describe("adicionarItemDaContratacao", () => {
       { ...AVALIACAO, candidato: { ...AVALIACAO.candidato, valorUnitario: 700 } },
     ]);
     mocks.getProvedorIA.mockReturnValue({ rankearSimilaridade: mocks.rankearSimilaridade });
-    mocks.listarItensDaCompraPNCP.mockResolvedValue({ candidatos: [CANDIDATO_IRMAO], completo: true });
+    mocks.listarItensDaCompraPNCP.mockResolvedValue({
+      candidatos: [CANDIDATO_IRMAO],
+      completo: true,
+    });
   });
 
   // A garantia central deste caminho: `numeroItem` é só uma chave de busca — o
@@ -505,7 +527,9 @@ describe("adicionarItemDaContratacao", () => {
     await adicionarItemDaContratacao(PEDIDO_IRMAO);
 
     expect(mocks.listarItensDaCompraPNCP).toHaveBeenCalledWith(IDENTIDADE, "Prefeitura de Exemplo");
-    const candidatosEnviados = mocks.rankearSimilaridade.mock.calls[0]![1] as Array<{ valorUnitario: number }>;
+    const candidatosEnviados = mocks.rankearSimilaridade.mock.calls[0]![1] as Array<{
+      valorUnitario: number;
+    }>;
     expect(candidatosEnviados[0]!.valorUnitario).toBe(700);
   });
 
@@ -640,17 +664,26 @@ describe("obterConversaAtiva", () => {
       id: "conv-1",
       // Como vêm do banco: mais nova primeiro.
       mensagens: [
-        { id: "m2", papel: "assistant", conteudo: "achei 5", ferramentasUsadas: null, citacoes: null },
-        { id: "m1", papel: "user", conteudo: "procure brises", ferramentasUsadas: null, citacoes: null },
+        {
+          id: "m2",
+          papel: "assistant",
+          conteudo: "achei 5",
+          ferramentasUsadas: null,
+          citacoes: null,
+        },
+        {
+          id: "m1",
+          papel: "user",
+          conteudo: "procure brises",
+          ferramentasUsadas: null,
+          citacoes: null,
+        },
       ],
     });
 
     const conversa = await obterConversaAtiva("proc-1");
 
-    expect(conversa!.mensagens.map((m) => m.conteudo)).toEqual([
-      "procure brises",
-      "achei 5",
-    ]);
+    expect(conversa!.mensagens.map((m) => m.conteudo)).toEqual(["procure brises", "achei 5"]);
   });
 
   it("devolve as sugestões gravadas, para uma busca antiga continuar aprovável", async () => {
@@ -743,7 +776,9 @@ describe("completarLinksOrigemCandidatos", () => {
       }),
     ]);
     const gravado = mocks.db.mensagemAssistente.update.mock.calls[0]![0].data
-      .ferramentasUsadas as Array<{ sugestoes: Array<{ fonteUrl: string; tipoCandidato: string }> }>;
+      .ferramentasUsadas as Array<{
+      sugestoes: Array<{ fonteUrl: string; tipoCandidato: string }>;
+    }>;
     expect(gravado[0]!.sugestoes[0]!.fonteUrl).toBe(URL_COMPRA);
     expect(gravado[0]!.sugestoes[0]!.tipoCandidato).toBe("painel_precos");
     expect(JSON.stringify(gravado)).not.toContain("pesquisaprecos.compras.gov.br");
@@ -752,9 +787,7 @@ describe("completarLinksOrigemCandidatos", () => {
   it("não consulta a API quando o card já tem a URL da contratação", async () => {
     mocks.db.mensagemAssistente.findUnique.mockResolvedValue({
       id: "msg-1",
-      ferramentasUsadas: [
-        { ferramenta: "buscar_pncp", argumentos: "{}", sugestoes: [SUGESTAO] },
-      ],
+      ferramentasUsadas: [{ ferramenta: "buscar_pncp", argumentos: "{}", sugestoes: [SUGESTAO] }],
       conversa: { id: "conv-1", userId: "user-1", processoId: "proc-1" },
     });
 
@@ -790,6 +823,37 @@ describe("completarLinksOrigemCandidatos", () => {
     const gravado = mocks.db.mensagemAssistente.update.mock.calls[0]![0].data
       .ferramentasUsadas as Array<{ sugestoes: Array<{ fonteUrl: string }> }>;
     expect(gravado[0]!.sugestoes[0]!.fonteUrl).toBe(urlPncp);
+  });
+
+  it("MANTÉM o link salvo quando a consulta falha (429) — falha não é 'link morto'", async () => {
+    const urlSalva =
+      "https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/compras/acompanhamento-compra?compra=92715206000082025";
+    mocks.db.mensagemAssistente.findUnique.mockResolvedValue({
+      id: "msg-1",
+      ferramentasUsadas: [
+        {
+          ferramenta: "buscar_pncp",
+          argumentos: "{}",
+          sugestoes: [{ ...SUGESTAO_PAINEL, id: "c3", fonteUrl: urlSalva }],
+        },
+      ],
+      conversa: { id: "conv-1", userId: "user-1", processoId: "proc-1" },
+    });
+    mocks.resolverUrlPublicaPorIdCompra.mockRejectedValue(new Error("HTTP 429"));
+
+    const resultado = await completarLinksOrigemCandidatos({ mensagemId: "msg-1" });
+
+    expect(resultado.ok).toBe(true);
+    // Nada foi regravado: o link continua o que estava.
+    expect(mocks.db.mensagemAssistente.update).not.toHaveBeenCalled();
+  });
+
+  it("MANTÉM o card quando a reconstrução por campos não sabe responder (undefined)", async () => {
+    mocks.resolverUrlsAcompanhamentoPainel.mockResolvedValue([undefined]);
+
+    await completarLinksOrigemCandidatos({ mensagemId: "msg-1" });
+
+    expect(mocks.db.mensagemAssistente.update).not.toHaveBeenCalled();
   });
 });
 
@@ -939,7 +1003,13 @@ describe("obterConversa", () => {
     mocks.db.conversaAssistente.findFirst.mockResolvedValue({
       id: "conv-1",
       mensagens: [
-        { id: "m3", papel: "assistant", conteudo: "terceira", ferramentasUsadas: null, citacoes: null },
+        {
+          id: "m3",
+          papel: "assistant",
+          conteudo: "terceira",
+          ferramentasUsadas: null,
+          citacoes: null,
+        },
         { id: "m2", papel: "user", conteudo: "segunda", ferramentasUsadas: null, citacoes: null },
         { id: "m1", papel: "user", conteudo: "primeira", ferramentasUsadas: null, citacoes: null },
       ],

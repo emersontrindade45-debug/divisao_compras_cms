@@ -61,6 +61,17 @@ const DATA_REFERENCIA_MAXIMA = new Date("2100-01-01T00:00:00Z");
 
 const MAX_TENTATIVAS = 3;
 const BACKOFF_BASE_MS = 800;
+const BACKOFF_LIMITE_MS = 1_500;
+const TIMEOUT_REQUISICAO_MS = 8_000;
+
+/**
+ * Teto de candidatos que passam pela prova de homologação (uma consulta por
+ * compra). Antes não havia: uma busca de nobreak devolveu 244 linhas e disparou
+ * uma consulta por linha, todas em 429 — e esgotou a cota que o Painel de
+ * materiais divide com esta fonte (medido em 2026-11-09). Os mais aderentes ao
+ * termo vão primeiro; a tela do assistente mostra no máximo 25 de qualquer modo.
+ */
+const MAX_VALIDACOES_HOMOLOGACAO = 20;
 
 // ── Tipos da API ─────────────────────────────────────────────────────────────
 
@@ -113,7 +124,11 @@ async function fetchJSON<T>(url: string): Promise<T | null> {
   let ultimoErro: unknown;
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
     try {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        // Sem teto o `fetch` do Node herda 300s do undici (CLAUDE.md §9.64).
+        signal: AbortSignal.timeout(TIMEOUT_REQUISICAO_MS),
+      });
       if (res.ok) return res.json() as Promise<T>;
       if (res.status < 500) {
         console.warn(`[ComprasGov] HTTP ${res.status}: ${url}`);
@@ -129,6 +144,46 @@ async function fetchJSON<T>(url: string): Promise<T | null> {
     await esperar(BACKOFF_BASE_MS * 2 ** (tentativa - 1));
   }
   return null;
+}
+
+/**
+ * Como `fetchJSON`, mas para a consulta que PROVA homologação: 429, 5xx e falha
+ * de rede LANÇAM depois das tentativas, em vez de virar `null`.
+ *
+ * Com `fetchJSON`, um 429 virava `null`, `null` virava "compra fora do PNCP" e o
+ * candidato seguia pelo link de acompanhamento sem a checagem de
+ * `existeResultado` — ou seja, sob limite de requisições a guarda de
+ * homologação era pulada (CLAUDE.md §9.125). Medido em 2026-11-09: numa única
+ * busca de nobreak, TODAS as consultas de homologação tomaram 429, e 244
+ * candidatos (de R$ 39 a R$ 106.170 para a mesma descrição) passaram sem prova.
+ * Só "não encontrado"/4xx comum continua sendo resposta (`null`).
+ */
+async function fetchJSONEstrito<T>(url: string): Promise<T | null> {
+  let ultimoErro: unknown = null;
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+    let limitado = false;
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(TIMEOUT_REQUISICAO_MS),
+      });
+      if (res.ok) return (await res.json()) as T;
+      if (res.status === 429) {
+        limitado = true;
+        ultimoErro = new Error("HTTP 429 (limite de requisições do Compras.gov)");
+      } else if (res.status < 500) {
+        return null;
+      } else {
+        ultimoErro = new Error(`HTTP ${res.status}`);
+      }
+    } catch (err) {
+      ultimoErro = err;
+    }
+    if (tentativa < MAX_TENTATIVAS) {
+      await esperar((limitado ? BACKOFF_LIMITE_MS : BACKOFF_BASE_MS) * 2 ** (tentativa - 1));
+    }
+  }
+  throw ultimoErro instanceof Error ? ultimoErro : new Error(String(ultimoErro));
 }
 
 // ── Catálogo de serviços ──────────────────────────────────────────────────────
@@ -421,7 +476,7 @@ async function consultarStatusPncpPorIdCompra(idCompra: string): Promise<StatusP
   const url =
     `${BASE_URL}/modulo-contratacoes/1.1_consultarContratacoes_PNCP_14133_Id` +
     `?tipo=idCompra&codigo=${encodeURIComponent(idCompra)}`;
-  const data = await fetchJSON<RespostaPaginada<ContratacaoPncpPorId>>(url);
+  const data = await fetchJSONEstrito<RespostaPaginada<ContratacaoPncpPorId>>(url);
   const item = data?.resultado?.[0];
   if (!item) return { kind: "ausente" };
   return statusHomologacaoPncp(item);
@@ -457,6 +512,8 @@ async function resolverOrigemHomologada(idCompra: string): Promise<OrigemPublica
     }
     return { incluir: true, url: await consultarLinkFaseExterna(id) };
   })();
+  // Falha não fica em cache: a consulta seguinte tenta de novo.
+  pendente.catch(() => cacheOrigemPublica.delete(id));
   cacheOrigemPublica.set(id, pendente);
   return pendente;
 }
@@ -467,6 +524,10 @@ async function resolverOrigemHomologada(idCompra: string): Promise<OrigemPublica
  * homologado > 0). Compra no PNCP sem homologação não recebe href. Sem
  * registro no PNCP, usa o `/link` da fase externa se ele confirmar que a
  * página existe.
+ *
+ * **Lança** quando a consulta de homologação falha (429, 5xx, rede): `null`
+ * aqui é afirmação ("não há link válido"), e quem chama apaga o link salvo
+ * diante dela — não pode ser a resposta para "não consegui perguntar".
  */
 export async function resolverUrlPublicaPorIdCompra(idCompra: string): Promise<string | null> {
   const origem = await resolverOrigemHomologada(idCompra);
@@ -489,7 +550,7 @@ export interface CandidatoPainelParaUrl {
  */
 export async function resolverUrlsAcompanhamentoPainel(
   candidatos: CandidatoPainelParaUrl[],
-): Promise<(string | null)[]> {
+): Promise<(string | null | undefined)[]> {
   if (candidatos.length === 0) return [];
 
   const catalogo = await carregarCatalogoServicos();
@@ -538,9 +599,47 @@ export async function resolverUrlsAcompanhamentoPainel(
         precos.push(...(precosPorCodigo.get(codigo) ?? []));
       }
       const idCompra = escolherIdCompra(precos, c);
-      return idCompra ? resolverUrlPublicaPorIdCompra(idCompra) : Promise.resolve(null);
+      // Falha na consulta = "não sei" (`undefined`), não "não há link" (`null`):
+      // quem chama apaga o link salvo diante de `null`.
+      return idCompra
+        ? resolverUrlPublicaPorIdCompra(idCompra).catch(() => undefined)
+        : Promise.resolve(null);
     }),
   );
+}
+
+/**
+ * Os `MAX_VALIDACOES_HOMOLOGACAO` candidatos mais aderentes ao termo (fração das
+ * palavras do termo presentes na descrição; empate: resultado mais recente),
+ * cada um com o seu `idCompra`. Exportada para teste.
+ */
+export function selecionarParaHomologacao(
+  termo: string,
+  candidatos: CandidatoSimilaridade[],
+  idsCompra: (string | null)[],
+  limite: number = MAX_VALIDACOES_HOMOLOGACAO,
+): { candidato: CandidatoSimilaridade; idCompra: string | null }[] {
+  const tokensTermo = new Set(tokenizar(termo).map(raizPlural));
+  const aderencia = (descricao: string) => {
+    if (tokensTermo.size === 0) return 0;
+    const tokens = new Set(tokenizar(descricao).map(raizPlural));
+    let casados = 0;
+    for (const t of tokensTermo) if (tokens.has(t)) casados++;
+    return casados / tokensTermo.size;
+  };
+  return candidatos
+    .map((candidato, i) => ({
+      candidato,
+      idCompra: idsCompra[i] ?? null,
+      score: aderencia(candidato.fonteDescricao),
+    }))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.candidato.dataReferencia.getTime() - a.candidato.dataReferencia.getTime(),
+    )
+    .slice(0, limite)
+    .map(({ candidato, idCompra }) => ({ candidato, idCompra }));
 }
 
 // ── Ponto de entrada público ──────────────────────────────────────────────────
@@ -597,16 +696,22 @@ export async function buscarContratosComprasGov(termo: string): Promise<Candidat
       }
     }
 
-    const origens = await emParalelo(idsCompra, 3, (id) =>
-      id ? resolverOrigemHomologada(id) : Promise.resolve({ incluir: true, url: null }),
+    const selecionados = selecionarParaHomologacao(termo, candidatos, idsCompra);
+    const origens = await emParalelo(selecionados, 3, ({ idCompra }) =>
+      idCompra
+        ? // Falha ao provar homologação EXCLUI o candidato — nunca o aprova (§9.125).
+          resolverOrigemHomologada(idCompra).catch(
+            (): OrigemPublicaHomologada => ({ incluir: false, url: null }),
+          )
+        : Promise.resolve({ incluir: true, url: null }),
     );
     const homologados: CandidatoSimilaridade[] = [];
-    for (let i = 0; i < candidatos.length; i++) {
+    selecionados.forEach(({ candidato }, i) => {
       const origem = origens[i]!;
-      if (!origem.incluir) continue;
-      if (origem.url) candidatos[i]!.fonteUrl = origem.url;
-      homologados.push(candidatos[i]!);
-    }
+      if (!origem.incluir) return;
+      if (origem.url) candidato.fonteUrl = origem.url;
+      homologados.push(candidato);
+    });
 
     return homologados;
   } catch (err) {

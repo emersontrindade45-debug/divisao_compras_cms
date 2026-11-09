@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const db = { itemCatalogoReferencia: { findMany: vi.fn() } };
@@ -91,6 +91,8 @@ function fetchPorRota(opts: {
     contratacaoExcluida?: boolean;
   } | null;
   faseExterna: "ok" | "404";
+  /** Status HTTP da consulta de homologação (1.1) — para simular 429. */
+  statusHomologacao?: number;
 }) {
   return vi.spyOn(global, "fetch").mockImplementation(async (input) => {
     const url = String(input);
@@ -111,6 +113,14 @@ function fetchPorRota(opts: {
       } as Response;
     }
     if (url.includes("1.1_consultarContratacoes_PNCP_14133_Id")) {
+      if (opts.statusHomologacao && opts.statusHomologacao !== 200) {
+        return {
+          ok: false,
+          status: opts.statusHomologacao,
+          json: async () => ({}),
+          text: async () => "",
+        } as Response;
+      }
       const item = opts.pncp
         ? {
             ...opts.pncp,
@@ -354,5 +364,85 @@ describe("buscarContratosComprasGov — só compras homologadas", () => {
     const url = await resolverUrlPublicaPorIdCompra("92715206000082025");
 
     expect(url).toBeNull();
+  });
+});
+
+describe("prova de homologação sob limite de requisições (§9.125)", () => {
+  beforeEach(() => {
+    // O espião de `fetch` dos blocos anteriores não é restaurado lá; sem isto as
+    // chamadas deles se somam às deste teste.
+    vi.restoreAllMocks();
+    vi.resetModules();
+    vi.useFakeTimers();
+    mocks.db.itemCatalogoReferencia.findMany.mockReset();
+    mocks.db.itemCatalogoReferencia.findMany.mockResolvedValue([
+      { codigo: 7250, descricao: "ENDOSCOPIA DIGESTIVA" },
+    ]);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const PNCP = {
+    orgaoEntidadeCnpj: "11308894000106",
+    anoCompraPncp: 2025,
+    sequencialCompraPncp: 87,
+  };
+
+  it("EXCLUI o candidato quando a consulta de homologação toma 429 — não cai no acompanhamento", async () => {
+    const fetchSpy = fetchPorRota({
+      precos: [PRECO_MACAE],
+      pncp: PNCP,
+      faseExterna: "ok",
+      statusHomologacao: 429,
+    });
+    const { buscarContratosComprasGov } = await import("../comprasGov");
+
+    const promessa = buscarContratosComprasGov("endoscopia digestiva");
+    await vi.runAllTimersAsync();
+    const candidatos = await promessa;
+
+    expect(candidatos).toEqual([]);
+    const consultouFaseExterna = fetchSpy.mock.calls.some(([u]) =>
+      String(u).includes("comprasnet-fase-externa"),
+    );
+    expect(consultouFaseExterna).toBe(false);
+  });
+
+  it("resolverUrlPublicaPorIdCompra LANÇA no 429 em vez de devolver null", async () => {
+    fetchPorRota({ precos: [], pncp: PNCP, faseExterna: "ok", statusHomologacao: 429 });
+    const { resolverUrlPublicaPorIdCompra } = await import("../comprasGov");
+
+    const rejeicao = expect(resolverUrlPublicaPorIdCompra("92715206000082025")).rejects.toThrow(
+      /429/,
+    );
+    await vi.runAllTimersAsync();
+    await rejeicao;
+  });
+
+  it("valida no máximo 20 compras por busca, as mais aderentes ao termo", async () => {
+    const precos = Array.from({ length: 30 }, (_, i) => ({
+      ...PRECO_MACAE,
+      idCompra: `9000000000000${String(i).padStart(4, "0")}`,
+      precoUnitario: 1000 + i,
+      descricaoItem: i < 5 ? "ENDOSCOPIA DIGESTIVA CIRURGICA" : `OUTRO PROCEDIMENTO ${i}`,
+    }));
+    const fetchSpy = fetchPorRota({ precos, pncp: PNCP, faseExterna: "ok" });
+    const { buscarContratosComprasGov } = await import("../comprasGov");
+
+    const promessa = buscarContratosComprasGov("endoscopia digestiva");
+    await vi.runAllTimersAsync();
+    const candidatos = await promessa;
+
+    const consultasHomologacao = fetchSpy.mock.calls.filter(([u]) =>
+      String(u).includes("1.1_consultarContratacoes_PNCP_14133_Id"),
+    ).length;
+    expect(consultasHomologacao).toBe(20);
+    expect(candidatos).toHaveLength(20);
+    // Os 5 que casam com o termo entram primeiro.
+    expect(candidatos.slice(0, 5).every((c) => c.fonteDescricao.startsWith("ENDOSCOPIA"))).toBe(
+      true,
+    );
   });
 });

@@ -128,7 +128,11 @@ describe("POST /api/assistente/chat", () => {
   // omitiam a chave, e por isso a suíte ficava verde com o chat 100% quebrado no
   // navegador (400 em toda mensagem). O corpo aqui é o que o fetch manda de fato.
   it("aceita a primeira mensagem com conversaId e processoId nulos", async () => {
-    const res = await postCompleto({ mensagem: "procure cadeiras", conversaId: null, processoId: null });
+    const res = await postCompleto({
+      mensagem: "procure cadeiras",
+      conversaId: null,
+      processoId: null,
+    });
 
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toMatch(/text\/event-stream/);
@@ -184,6 +188,29 @@ describe("POST /api/assistente/chat", () => {
       { ferramenta: "buscar_pncp", argumentos: "{}", resumo: "ok", duracaoMs: 12, erro: null },
     ]);
     expect(gravadoAssistente.modelo).toBe("modelo-de-teste");
+  });
+
+  it("grava o tempo por etapa da busca junto com o passo", async () => {
+    const metricas = {
+      itemMs: 5,
+      fontesMs: 9000,
+      democaoMs: 40,
+      iaMs: 30000,
+      totalMs: 39045,
+      candidatosAvaliadosIA: 25,
+      porProvedor: { pncp: { ms: 8800, candidatos: 52, falhou: false } },
+    };
+    mocks.executarTurno.mockResolvedValue({
+      texto: "ok",
+      passos: [
+        { ferramenta: "buscar_pncp", argumentos: "{}", resumo: "ok", duracaoMs: 39100, metricas },
+      ],
+    });
+
+    await postCompleto({ mensagem: "procure cadeiras", processoId: "proc-1" });
+
+    const gravadoAssistente = mocks.db.mensagemAssistente.create.mock.calls[1]![0].data;
+    expect(gravadoAssistente.ferramentasUsadas[0].metricas).toEqual(metricas);
   });
 
   it("não reenvia ao modelo as mensagens `tool` de turnos anteriores", async () => {

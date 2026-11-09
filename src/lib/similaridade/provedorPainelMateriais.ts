@@ -13,6 +13,8 @@ import { encontrarCodigosCatalogoLocal } from "./matchingCatalogoLocal";
 import { processarComConcorrencia } from "./processarComConcorrencia";
 import { chaveDescricao } from "./chaveDescricao";
 import { normalizar, raizPlural, tokenizar } from "./texto";
+// Só tipo: o registry importa este módulo, e um import de valor fecharia o ciclo.
+import type { ContextoBuscaItem } from "./registryProvedores";
 
 /**
  * Provedor de busca pública sobre o Painel de Preços de MATERIAIS
@@ -224,9 +226,39 @@ function mapearParaCandidato(preco: PrecoMaterialPainel, fonteUrl: string): Cand
 }
 
 /**
+ * Palavra que, no INÍCIO da descrição do item, marca contratação de serviço.
+ * Só o início: descrição de material costuma citar "instalação" ou "assistência
+ * técnica" no meio do texto (garantia), e isso não a torna serviço.
+ */
+const INICIO_DE_SERVICO =
+  /^(loca[cç][aã]o|aluguel|servi[cç]os?|presta[cç][aã]o|manuten[cç][aã]o|contrata[cç][aã]o de (empresa|servi\w*)|hospedagem|licen[cç]a|licenciamento|assinatura|suporte|outsourcing)\b/;
+/** No termo (curto, reescrito pelo modelo) basta a palavra aparecer. */
+const TERMO_DE_LOCACAO = /\b(loca[cç][aã]o|aluguel|locar|outsourcing)\b/;
+
+/**
+ * Esta fonte só tem preço de COMPRA de material. Para locação ou serviço ela
+ * traria preço de natureza diferente — a compra de um nobreak custa dezenas de
+ * vezes a mensalidade da locação — e ainda gastaria a cota de requisições do
+ * Compras.gov que as outras fontes dividem (medido em 2026-11-09, processo
+ * 95/2026). A natureza do item vem em branco em 80 de 84 itens de produção, por
+ * isso a descrição e o termo também contam. Exportada para teste.
+ */
+export function ehObjetoDeServico(termo: string, contexto?: ContextoBuscaItem): boolean {
+  if (contexto?.naturezaObjeto === "servico_continuo") return true;
+  const descricao = contexto?.descricaoItem ? normalizarSemAcento(contexto.descricaoItem) : "";
+  if (descricao && INICIO_DE_SERVICO.test(descricao)) return true;
+  return TERMO_DE_LOCACAO.test(normalizarSemAcento(termo));
+}
+
+function normalizarSemAcento(texto: string): string {
+  return normalizar(texto).trim();
+}
+
+/**
  * Busca candidatos de preço de material no Painel de Preços.
  *
  * Desfechos (§9.93, §9.103):
+ * - `[]` sem consultar nada quando o objeto é serviço/locação (`ehObjetoDeServico`);
  * - `[]` sem lançar quando não há código CATMAT/família para o termo ou a fonte
  *   respondeu sem preço aproveitável — resposta legítima;
  * - LANÇA quando todas as consultas de preço falharam por rede — o registry
@@ -235,9 +267,11 @@ function mapearParaCandidato(preco: PrecoMaterialPainel, fonteUrl: string): Cand
 export async function buscarCandidatosPainelMateriais(
   termo: string,
   filtros?: FiltrosBuscaPNCP,
+  contexto?: ContextoBuscaItem,
   agora: Date = new Date(),
 ): Promise<CandidatoSimilaridade[]> {
   if (!termo.trim()) return [];
+  if (ehObjetoDeServico(termo, contexto)) return [];
   const inicio = Date.now();
 
   const codigos = await codigosCandidatos(termo);

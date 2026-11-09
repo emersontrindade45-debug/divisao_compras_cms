@@ -190,12 +190,57 @@ describe("buscarCandidatosPublicos", () => {
     };
 
     vi.spyOn(pncp, "buscarContratosPNCP").mockResolvedValue([candidatoPncp]);
-    vi.spyOn(painelPrecos, "buscarPrecosPainelPrecos").mockResolvedValue([candidatoPainelDuplicado]);
+    vi.spyOn(painelPrecos, "buscarPrecosPainelPrecos").mockResolvedValue([
+      candidatoPainelDuplicado,
+    ]);
 
     const resultado = await buscarCandidatosPublicos("cadeira giratoria");
 
     expect(resultado).toHaveLength(1);
     expect(resultado[0]).toEqual(candidatoPncp);
+  });
+});
+
+describe("contexto do item e tempo por fonte", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("entrega o contexto do item a TODAS as fontes e devolve tempo e volume de cada uma", async () => {
+    const espioes = REGISTRY_PROVEDORES_PUBLICOS.filter((p) => p.habilitado).map((p) =>
+      vi.spyOn(p, "buscar").mockResolvedValue([]),
+    );
+    const contexto = { naturezaObjeto: null, descricaoItem: "Locação de nobreak" };
+
+    const resultado = await buscarCandidatosPublicosComDiagnostico("nobreak", {
+      filtros: { uf: "SP" },
+      contexto,
+    });
+
+    // Asserção na última camada observável (§9.99): o argumento que a FONTE recebe.
+    for (const espiao of espioes) {
+      expect(espiao).toHaveBeenCalledWith("nobreak", { uf: "SP" }, contexto);
+    }
+    for (const p of REGISTRY_PROVEDORES_PUBLICOS.filter((x) => x.habilitado)) {
+      expect(resultado.porProvedor[p.chave]).toEqual({
+        ms: expect.any(Number),
+        candidatos: 0,
+        falhou: false,
+      });
+    }
+  });
+
+  it("marca no tempo por fonte a que falhou", async () => {
+    for (const p of REGISTRY_PROVEDORES_PUBLICOS.filter((x) => x.habilitado)) {
+      vi.spyOn(p, "buscar").mockImplementation(async () => {
+        if (p.chave === "pncp") throw new Error("fora do ar");
+        return [];
+      });
+    }
+
+    const { porProvedor } = await buscarCandidatosPublicosComDiagnostico("nobreak");
+
+    expect(porProvedor.pncp).toMatchObject({ falhou: true, candidatos: 0 });
   });
 });
 
@@ -211,7 +256,9 @@ describe("REGISTRY_PROVEDORES_PUBLICOS", () => {
   });
 
   it("inclui o Painel de Preços de materiais, habilitado e aplicando o recorte do analista", () => {
-    const provedor = REGISTRY_PROVEDORES_PUBLICOS.find((p) => p.chave === "painel_precos_materiais");
+    const provedor = REGISTRY_PROVEDORES_PUBLICOS.find(
+      (p) => p.chave === "painel_precos_materiais",
+    );
 
     expect(provedor).toBeDefined();
     expect(provedor?.habilitado).toBe(true);
