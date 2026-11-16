@@ -30,6 +30,8 @@ export interface CamadaAcao {
   cotacoesPendentes: CotacaoPendente[];
   /** Sempre global (não respeita o escopo): é trabalho da chefia distribuir. */
   semResponsavel: ProcessoSemResponsavel[];
+  /** Pendências do e-mail de cotação (M30.d) — globais, como as dos processos sem dono. */
+  emails: { respostasAConfirmar: number; enviosSemProcesso: number };
 }
 
 const TRES_DIAS_MS = 3 * 24 * 60 * 60 * 1000;
@@ -165,7 +167,23 @@ export async function carregarCamadaAcao(
     .filter((p) => processoAtivo(p) && p.responsavelId === null)
     .map((p) => ({ id: p.id, numero: p.numero, objeto: p.objeto }));
 
-  return { resumo, fila, cotacoesPendentes, semResponsavel };
+  return { resumo, fila, cotacoesPendentes, semResponsavel, emails: await contarPendenciasDeEmail() };
+}
+
+/**
+ * Respostas aguardando o analista e envios cujo processo ainda não foi importado (Q51). Falha de
+ * leitura vira zero: o dashboard precisa abrir antes de a migration do M30.d existir (§9.19).
+ */
+async function contarPendenciasDeEmail(): Promise<CamadaAcao["emails"]> {
+  try {
+    const [respostasAConfirmar, enviosSemProcesso] = await Promise.all([
+      db.respostaEmailPendente.count({ where: { resolvidaEm: null } }),
+      db.envioCotacao.count({ where: { processoId: null } }),
+    ]);
+    return { respostasAConfirmar, enviosSemProcesso };
+  } catch {
+    return { respostasAConfirmar: 0, enviosSemProcesso: 0 };
+  }
 }
 
 /** Quantos processos ativos o usuário tem — decide o escopo padrão. */

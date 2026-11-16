@@ -14,6 +14,8 @@ function dados(over: Partial<CamadaDesempenho> = {}): CamadaDesempenho {
     tempoSerieMinima: par(),
     fontePublica: par(),
     taxaResposta: par(),
+    tempoResposta: par(),
+    emailsInvalidos: par(),
     propostasInvalidas: par(),
     fontesAteSuficiencia: par(),
     porCategoria: [],
@@ -25,7 +27,7 @@ function dados(over: Partial<CamadaDesempenho> = {}): CamadaDesempenho {
 describe("IndicadoresDesempenho", () => {
   it("sem base mostra travessão, nunca zero", () => {
     render(<IndicadoresDesempenho dados={dados()} />);
-    expect(screen.getAllByText("—")).toHaveLength(6);
+    expect(screen.getAllByText("—")).toHaveLength(8);
     expect(screen.queryByText("0%")).toBeNull();
   });
 

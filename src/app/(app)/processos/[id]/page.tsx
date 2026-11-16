@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProcessoHeader } from "@/components/processos/ProcessoHeader";
+import { VerificarRespostasButton } from "@/components/cotacoes/VerificarRespostasButton";
 import {
   ProcessoTabs,
   type CotacaoResumo,
@@ -193,6 +194,7 @@ export default async function ProcessoDetalhePage({ params }: { params: Promise<
               />
             )}
             <ExcluirProcessoDialog processoId={processo.id} numero={processo.numero} />
+            <VerificarRespostasButton processoId={processo.id} />
             <AssistenteToggle rotulo="Assistente" />
           </>
         }

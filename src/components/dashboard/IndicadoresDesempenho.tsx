@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, FileX, Landmark, Layers, Mail } from "lucide-react";
+import { CheckCircle2, Clock, FileX, Landmark, Layers, Mail, MailX, Timer } from "lucide-react";
 import { MetricCard } from "@/components/common/MetricCard";
 import {
   textoCobertura,
@@ -10,6 +10,7 @@ import type { CamadaDesempenho, ParIndicador } from "@/lib/indicadores/desempenh
 const PROCESSOS = { singular: "processo", plural: "processos" };
 const COTACOES = { singular: "cotação", plural: "cotações" };
 const PROPOSTAS = { singular: "proposta", plural: "propostas" };
+const RESPOSTAS = { singular: "resposta", plural: "respostas" };
 const ITENS = { singular: "item", plural: "itens" };
 
 function valor(ind: Indicador, sufixo: string): string {
@@ -29,7 +30,7 @@ function delta(par: ParIndicador, sentido: "menor_melhor" | "maior_melhor", sufi
 /** Os seis indicadores do PRD (M30.b), cada um com cobertura e comparação. */
 export function IndicadoresDesempenho({ dados }: { dados: CamadaDesempenho }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <MetricCard
         label="Tempo até a 1ª referência"
         value={valor(dados.tempoPrimeiraReferencia.atual, " dias")}
@@ -48,9 +49,23 @@ export function IndicadoresDesempenho({ dados }: { dados: CamadaDesempenho }) {
         label="Taxa de resposta"
         value={valor(dados.taxaResposta.atual, "%")}
         delta={delta(dados.taxaResposta, "maior_melhor", " p.p.")}
-        hint={textoCobertura(dados.taxaResposta.atual, COTACOES)}
+        hint={textoCobertura(dados.taxaResposta.atual, COTACOES, "e-mails devolvidos fora da conta")}
         icon={Mail}
         href="/cotacoes"
+      />
+      <MetricCard
+        label="Tempo de resposta do fornecedor"
+        value={valor(dados.tempoResposta.atual, " dias")}
+        delta={delta(dados.tempoResposta, "menor_melhor", "d")}
+        hint={`mediana · ${textoCobertura(dados.tempoResposta.atual, RESPOSTAS)}`}
+        icon={Timer}
+      />
+      <MetricCard
+        label="E-mails que voltaram"
+        value={valor(dados.emailsInvalidos.atual, "%")}
+        delta={delta(dados.emailsInvalidos, "menor_melhor", " p.p.")}
+        hint={textoCobertura(dados.emailsInvalidos.atual, COTACOES)}
+        icon={MailX}
       />
       <MetricCard
         label="Tempo até a série mínima"

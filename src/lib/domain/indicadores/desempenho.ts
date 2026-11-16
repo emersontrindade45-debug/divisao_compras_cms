@@ -263,6 +263,84 @@ export function variacao(
   return { diferenca, melhorou: sentido === "menor_melhor" ? diferenca < 0 : diferenca > 0 };
 }
 
+// ── Consultas por e-mail (M30.d) ───────────────────────────────────────────
+
+export type SituacaoConsultaInput =
+  | "sem_resposta"
+  | "a_confirmar"
+  | "orcamento"
+  | "recusa"
+  | "email_invalido";
+
+export interface ConsultaDesempenhoInput {
+  dataEnvio: Date;
+  dataResposta: Date | null;
+  situacao: SituacaoConsultaInput;
+  /** Descrição do CNAE da empresa (base da Receita); null = e-mail sem dono conhecido. */
+  categoria: string | null;
+}
+
+const STATUS_DA_SITUACAO: Record<
+  Exclude<SituacaoConsultaInput, "email_invalido">,
+  CotacaoDesempenhoInput["status"]
+> = {
+  sem_resposta: "silenciosa",
+  // Respondeu, mas ainda sem saber se é orçamento ou recusa: conta como RESPOSTA.
+  a_confirmar: "incompleta",
+  orcamento: "positiva",
+  recusa: "negativa",
+};
+
+/**
+ * Consultas como cotações, para reaproveitar as contas de taxa de resposta. E-mail que voltou
+ * NÃO entra: o fornecedor nunca recebeu a solicitação, então não é "silêncio" — contá-lo como
+ * sem resposta jogaria para baixo a taxa por culpa do cadastro, não do fornecedor.
+ */
+export function consultasComoCotacoes(consultas: ConsultaDesempenhoInput[]): CotacaoDesempenhoInput[] {
+  return consultas
+    .filter((c) => c.situacao !== "email_invalido")
+    .map((c) => ({
+      dataEnvio: c.dataEnvio,
+      status: STATUS_DA_SITUACAO[c.situacao as keyof typeof STATUS_DA_SITUACAO],
+      categorias: c.categoria ? [c.categoria] : [],
+    }));
+}
+
+export function taxaRespostaConsultas(consultas: ConsultaDesempenhoInput[], j: Janela): Indicador {
+  const ind = taxaResposta(consultasComoCotacoes(consultas), j);
+  return {
+    ...ind,
+    // Os que voltaram ficam FORA da conta, mas aparecem na cobertura.
+    excluidos: consultas.filter((c) => c.situacao === "email_invalido" && dentro(c.dataEnvio, j)).length,
+  };
+}
+
+/** Mediana, em dias, entre o envio e a resposta — pelos fornecedores que responderam NA janela. */
+export function tempoRespostaDias(consultas: ConsultaDesempenhoInput[], j: Janela): Indicador {
+  const respondidas = consultas.filter(
+    (c) => c.situacao !== "email_invalido" && c.situacao !== "sem_resposta" && dentro(c.dataResposta, j),
+  );
+  const dias = respondidas.map((c) =>
+    Math.max(0, (c.dataResposta!.getTime() - c.dataEnvio.getTime()) / DIA_MS),
+  );
+  const m = mediana(dias);
+  return {
+    valor: m === null ? null : Math.round(m * 10) / 10,
+    base: respondidas.length,
+    excluidos: 0,
+  };
+}
+
+/** % dos e-mails consultados na janela que voltaram — mede a higiene da lista de envio. */
+export function percentualEmailsInvalidos(consultas: ConsultaDesempenhoInput[], j: Janela): Indicador {
+  const enviadas = consultas.filter((c) => dentro(c.dataEnvio, j));
+  return {
+    valor: percentual(enviadas.filter((c) => c.situacao === "email_invalido").length, enviadas.length),
+    base: enviadas.length,
+    excluidos: 0,
+  };
+}
+
 // ── Texto ─────────────────────────────────────────────────────────────────
 
 /**

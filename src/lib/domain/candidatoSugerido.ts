@@ -46,6 +46,9 @@ export interface FiltrosBuscaCandidatos {
    *  medido (telecom/SP, 2026-08-28) só 3,4% das empresas com e-mail estão no SICAF, e 2,6% na
    *  Baixada — como filtro fixo, esconderia a grande maioria dos fornecedores aptos. */
   somenteSicaf?: boolean;
+  /** true = inclui e-mails que já voltaram numa cotação anterior (devolução do servidor). Por
+   *  padrão ficam de fora: enviar de novo para um endereço morto só gasta o envio (M30.d, Q54). */
+  mostrarInvalidos?: boolean;
 }
 
 /** Um CNAE proposto pela IA, com o volume de empresas por trás — o dado que permite ao analista
@@ -82,4 +85,6 @@ export interface ResultadoSugestaoCandidatos {
    * desligado (nada foi ocultado).
    */
   ocultadosPorSicaf: number | null;
+  /** Quantos e-mails ficaram de fora por já terem voltado (0 quando `mostrarInvalidos` está ligado). */
+  ocultadosPorEmailInvalido: number;
 }

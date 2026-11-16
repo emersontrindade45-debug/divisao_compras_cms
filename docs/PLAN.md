@@ -3064,13 +3064,22 @@ e nunca é gravado. Sem IA externa. Sem TI envolvida.
       NÃO usa o índice (Seq Scan, 10 s/2.000 e-mails — planejador estima 12 M de linhas); a forma
       `unnest + LATERAL LIMIT 2` leva 82–531 ms. E-mail de contador atende milhares de CNPJs:
       consulta sem CNPJ quando o e-mail tem mais de um dono.
-- [ ] **FALTA (M30.d2, UI):** botão "Verificar respostas" (página do processo e Cotações); painel
-      "Respostas a confirmar" com resolução em um clique; esconder e-mails inválidos na
-      "Nova cotação" (Q54); espelho na planilha de fornecedores ("Processos Cotação", e-mail
-      inválido, "Respondeu?"/"Enviou orçamento?"); dashboard lendo `ConsultaCotacao` (taxa de
-      resposta por CNAE). **Dependem de ação do usuário:** `APPS_SCRIPT_URL` e
-      `APPS_SCRIPT_SEGREDO` no `.env` e na Vercel; autorização para aplicar a migration do
-      M30.d em produção (§9.19) e para o push.
+- [x] **UI (M30.d2, 2026-11-17):** botão "Verificar respostas" (cabeçalho de Cotações e da
+      página do processo, com escopo); aba "Respostas a confirmar" (`?aba=confirmar`, contador no
+      gatilho) com resolução em um clique — orçamento / recusa / não é resposta — e link que abre
+      a mensagem NO Gmail (`authuser` fixo na conta da Divisão); "Nova cotação" esconde e-mails
+      que já voltaram, com caixa "Incluir e-mails que já voltaram" e aviso de quantos foram
+      ocultados (mesmo padrão do filtro SICAF); dashboard lê `ConsultaCotacao` (taxa de resposta
+      por CNAE, tempo de resposta mediano, % de e-mails que voltaram — devolução fica FORA da base
+      da taxa e aparece na cobertura) e avisa respostas a confirmar / envios sem processo.
+      Todo leitor das tabelas novas degrada para vazio se elas não existirem (janela
+      deploy→migration, §9.19). Verificação: 1.688 testes, tsc, ESLint, 6 mutações (3 na ação de
+      resolver, 3 nos indicadores) detectadas; Playwright contra banco local: aba, fail-closed
+      sem variáveis, caixa de inválidos, botão no processo.
+- [ ] **FALTA:** espelho na planilha de fornecedores ("Processos Cotação", e-mail inválido,
+      "Respondeu?"/"Enviou orçamento?") — só para quem já está na planilha (5% dos consultados).
+      **Dependem de ação do usuário:** `APPS_SCRIPT_URL` e `APPS_SCRIPT_SEGREDO` no `.env` e
+      na Vercel; autorização para aplicar a migration do M30.d em produção (§9.19) e para o push.
 - [ ] Gatilho só por botão "Verificar respostas" (página do processo e Cotações).
 - [ ] Espelho na planilha de fornecedores: "Respondeu?"/"Enviou orçamento?" = cotação mais
       recente; colunas novas "Processos Respondidos" e "Processos com Orçamento".

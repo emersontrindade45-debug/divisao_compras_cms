@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  db: { emailInvalido: { findMany: vi.fn() } },
   dbCandidatos: {
     empresaCandidataFornecedor: {
       groupBy: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   lerJaConsultados: vi.fn(),
 }));
 
+vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/dbCandidatos", () => ({ dbCandidatos: mocks.dbCandidatos }));
 vi.mock("@/lib/auth/rbac", () => ({ requireAuth: mocks.requireAuth }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
@@ -63,6 +65,7 @@ describe("sugerirCandidatosParaObjeto", () => {
     ]);
     mocks.dbCandidatos.empresaCandidataFornecedor.count.mockResolvedValue(0);
     mocks.lerJaConsultados.mockResolvedValue(new Set<string>());
+    mocks.db.emailInvalido.findMany.mockResolvedValue([]);
   });
 
   it("exige autenticação", async () => {
@@ -81,6 +84,7 @@ describe("sugerirCandidatosParaObjeto", () => {
       locais: 0,
       noSicaf: 0,
       ocultadosPorSicaf: null,
+      ocultadosPorEmailInvalido: 0,
     });
     expect(mocks.sugerirCnaesParaObjeto).not.toHaveBeenCalled();
   });
@@ -355,6 +359,55 @@ describe("sugerirCandidatosParaObjeto", () => {
       // `select` não o incluir, então a asserção decisiva é sobre o argumento (§9.46).
       const select = mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mock.calls[0]![0].select;
       expect(select.sicafHabilitado).toBe(true);
+    });
+  });
+
+  describe("e-mails que já voltaram (M30.d, Q54)", () => {
+    beforeEach(() => {
+      mocks.sugerirCnaesParaObjeto.mockResolvedValue(["4761003"]);
+      mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
+        candidato({ id: "1", email: "vivo@x.com" }),
+        candidato({ id: "2", email: "Morto@X.com" }),
+        candidato({ id: "3", email: "outro@x.com" }),
+      ]);
+      mocks.db.emailInvalido.findMany.mockResolvedValue([{ email: "morto@x.com" }]);
+    });
+
+    it("fica de fora por padrão, ignorando a caixa do endereço, e informa quantos", async () => {
+      const r = await sugerirCandidatosParaObjeto("caneta");
+
+      expect(r.candidatos.map((c) => c.email)).toEqual(["vivo@x.com", "outro@x.com"]);
+      expect(r.ocultadosPorEmailInvalido).toBe(1);
+    });
+
+    it("com 'mostrar inválidos' ligado, mantém todos e nem consulta a lista", async () => {
+      const r = await sugerirCandidatosParaObjeto("caneta", undefined, undefined, {
+        mostrarInvalidos: true,
+      });
+
+      expect(r.candidatos).toHaveLength(3);
+      expect(r.ocultadosPorEmailInvalido).toBe(0);
+      expect(mocks.db.emailInvalido.findMany).not.toHaveBeenCalled();
+    });
+
+    it("falha ao ler a lista não derruba a busca (migration ainda não aplicada)", async () => {
+      mocks.db.emailInvalido.findMany.mockRejectedValue(new Error('relation "emails_invalidos" does not exist'));
+
+      const r = await sugerirCandidatosParaObjeto("caneta");
+
+      expect(r.candidatos).toHaveLength(3);
+      expect(r.ocultadosPorEmailInvalido).toBe(0);
+    });
+
+    it("a contagem de e-mail compartilhado ignora os já descartados por inválidos", async () => {
+      mocks.dbCandidatos.empresaCandidataFornecedor.findMany.mockResolvedValue([
+        candidato({ id: "1", email: "contador@x.com" }),
+        candidato({ id: "2", email: "contador@x.com" }),
+        candidato({ id: "3", email: "morto@x.com" }),
+        candidato({ id: "4", email: "morto@x.com" }),
+      ]);
+      const r = await sugerirCandidatosParaObjeto("caneta");
+      expect(r.candidatos.map((c) => c.emailCompartilhado)).toEqual([true, true]);
     });
   });
 });

@@ -5,8 +5,12 @@ import {
   mediaFontesAteSuficiencia,
   percentualFontePublica,
   percentualPropostasInvalidas,
-  taxaResposta,
+  consultasComoCotacoes,
+  percentualEmailsInvalidos,
+  taxaRespostaConsultas,
   taxaRespostaPorCategoria,
+  tempoRespostaDias,
+  type ConsultaDesempenhoInput,
   temTempoConfiavel,
   tempoAteMarco,
   type Indicador,
@@ -25,6 +29,8 @@ export interface CamadaDesempenho {
   tempoSerieMinima: ParIndicador;
   fontePublica: ParIndicador;
   taxaResposta: ParIndicador;
+  tempoResposta: ParIndicador;
+  emailsInvalidos: ParIndicador;
   propostasInvalidas: ParIndicador;
   fontesAteSuficiencia: ParIndicador;
   porCategoria: TaxaCategoria[];
@@ -45,7 +51,7 @@ export async function carregarCamadaDesempenho(
   const { atual, anterior } = janelas(periodo, agora);
   const filtroResponsavel = escopo === "meus" ? { responsavelId: usuarioId } : {};
 
-  const [processos, cotacoes, propostas] = await Promise.all([
+  const [processos, consultas, propostas] = await Promise.all([
     db.processo.findMany({
       where: filtroResponsavel,
       select: {
@@ -64,14 +70,7 @@ export async function carregarCamadaDesempenho(
         },
       },
     }),
-    db.cotacao.findMany({
-      where: { dataEnvio: { gte: anterior.inicio }, processo: filtroResponsavel },
-      select: {
-        dataEnvio: true,
-        status: true,
-        fornecedor: { select: { categoria: true } },
-      },
-    }),
+    carregarConsultas(anterior.inicio, escopo === "meus" ? { responsavelId: usuarioId } : null),
     db.proposta.findMany({
       where: { createdAt: { gte: anterior.inicio }, cotacao: { processo: filtroResponsavel } },
       select: { createdAt: true, statusGeral: true },
@@ -99,12 +98,6 @@ export async function carregarCamadaDesempenho(
     }),
   );
 
-  const cots = cotacoes.map((c) => ({
-    dataEnvio: c.dataEnvio,
-    status: c.status,
-    categorias: c.fornecedor.categoria,
-  }));
-
   const par = <T>(f: (dados: T, j: typeof atual) => Indicador, dados: T): ParIndicador => ({
     atual: f(dados, atual),
     anterior: f(dados, anterior),
@@ -116,10 +109,46 @@ export async function carregarCamadaDesempenho(
     tempoPrimeiraReferencia: par((d, j) => tempoAteMarco(d, "primeiraReferenciaEm", j), processos),
     tempoSerieMinima: par((d, j) => tempoAteMarco(d, "serieMinimaEm", j), processos),
     fontePublica: par(percentualFontePublica, fontes),
-    taxaResposta: par(taxaResposta, cots),
+    taxaResposta: par(taxaRespostaConsultas, consultas),
+    tempoResposta: par(tempoRespostaDias, consultas),
+    emailsInvalidos: par(percentualEmailsInvalidos, consultas),
     propostasInvalidas: par(percentualPropostasInvalidas, propostas),
     fontesAteSuficiencia: par(mediaFontesAteSuficiencia, itens),
-    porCategoria: taxaRespostaPorCategoria(cots, atual),
+    porCategoria: taxaRespostaPorCategoria(consultasComoCotacoes(consultas), atual),
     dadosTempoDesde: confiaveis.length > 0 ? new Date(Math.min(...confiaveis)) : null,
   };
+}
+
+/**
+ * As consultas por e-mail (M30.d) são a base da taxa de resposta: uma por fornecedor consultado
+ * em cada envio. Substitui a leitura da tabela `Cotacao`, que é o registro manual e hoje está vazio.
+ *
+ * Falha de leitura devolve lista vazia: o dashboard precisa abrir no intervalo entre o deploy do
+ * código e a migration que cria a tabela (CLAUDE.md §9.19/§9.46).
+ */
+async function carregarConsultas(
+  desde: Date,
+  filtroProcesso: { responsavelId: string } | null,
+): Promise<ConsultaDesempenhoInput[]> {
+  try {
+    const linhas = await db.consultaCotacao.findMany({
+      where: {
+        envio: { dataEnvio: { gte: desde }, ...(filtroProcesso ? { processo: filtroProcesso } : {}) },
+      },
+      select: {
+        situacao: true,
+        dataResposta: true,
+        cnaeDescricao: true,
+        envio: { select: { dataEnvio: true } },
+      },
+    });
+    return linhas.map((l) => ({
+      dataEnvio: l.envio.dataEnvio,
+      dataResposta: l.dataResposta,
+      situacao: l.situacao,
+      categoria: l.cnaeDescricao,
+    }));
+  } catch {
+    return [];
+  }
 }

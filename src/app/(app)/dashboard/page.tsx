@@ -120,6 +120,23 @@ export default async function DashboardPage({
           />
         </div>
 
+        {(acao.emails.respostasAConfirmar > 0 || acao.emails.enviosSemProcesso > 0) && (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+            {acao.emails.respostasAConfirmar > 0 && (
+              <Link href="/cotacoes?aba=confirmar" className="font-medium hover:underline">
+                {acao.emails.respostasAConfirmar.toLocaleString("pt-BR")} resposta(s) de fornecedor aguardando
+                confirmação →
+              </Link>
+            )}
+            {acao.emails.enviosSemProcesso > 0 && (
+              <span>
+                {acao.emails.enviosSemProcesso.toLocaleString("pt-BR")} envio(s) de cotação sem processo
+                importado — importe a planilha para ligá-los.
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="min-w-0 lg:col-span-2">
             <WorkQueueCard

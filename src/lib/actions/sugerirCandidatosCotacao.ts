@@ -1,5 +1,6 @@
 "use server";
 
+import { db } from "@/lib/db";
 import { dbCandidatos } from "@/lib/dbCandidatos";
 import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
@@ -84,6 +85,7 @@ export async function sugerirCandidatosParaObjeto(
     locais: 0,
     noSicaf: 0,
     ocultadosPorSicaf: null,
+    ocultadosPorEmailInvalido: 0,
   };
   if (!objeto.trim()) return vazio;
 
@@ -139,9 +141,14 @@ export async function sugerirCandidatosParaObjeto(
     ? await lerCnpjsJaConsultadosNoProcesso(numeroProcesso).catch(() => new Set<string>())
     : new Set<string>();
 
-  const comEmail = encontrados
+  const comEmailBruto = encontrados
     .filter((c): c is typeof c & { email: string } => Boolean(c.email))
     .filter((c) => !jaConsultados.has(mascararCnpj(c.cnpj)));
+
+  // E-mails que já voltaram (M30.d, Q54): fora por padrão, para não gastar envio em endereço morto.
+  const invalidos = filtros?.mostrarInvalidos ? new Set<string>() : await carregarEmailsInvalidos();
+  const comEmail = comEmailBruto.filter((c) => !invalidos.has(c.email.toLowerCase()));
+  const ocultadosPorEmailInvalido = comEmailBruto.length - comEmail.length;
 
   // Total real, não o tamanho da janela lida acima: `encontrados` está limitado por `take`, então
   // usar o comprimento dele faria a tela anunciar "10.000 empresas" sempre que houvesse mais que
@@ -210,5 +217,20 @@ export async function sugerirCandidatosParaObjeto(
     ocultadosPorSicaf: filtros?.somenteSicaf
       ? Math.max(0, totalSemFiltroSicaf - totalEncontrado)
       : null,
+    ocultadosPorEmailInvalido,
   };
+}
+
+/**
+ * Melhor esforço: o filtro de e-mails inválidos é conveniência, nunca pode derrubar a busca. Se a
+ * tabela ainda não existe (código no ar antes da migration — CLAUDE.md §9.19) ou o banco falha, a
+ * lista sai sem o filtro, como era antes do M30.d.
+ */
+async function carregarEmailsInvalidos(): Promise<Set<string>> {
+  try {
+    const linhas = await db.emailInvalido.findMany({ select: { email: true } });
+    return new Set(linhas.map((l) => l.email.toLowerCase()));
+  } catch {
+    return new Set();
+  }
 }

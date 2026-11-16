@@ -46,6 +46,9 @@ export function SelecaoFornecedoresForm({ processos }: SelecaoFornecedoresFormPr
   const [totalCandidatos, setTotalCandidatos] = useState(0);
   const [locaisCandidatos, setLocaisCandidatos] = useState(0);
   const [ocultadosPorSicaf, setOcultadosPorSicaf] = useState<number | null>(null);
+  // E-mails que já voltaram numa cotação anterior ficam de fora; o analista pode reincluí-los.
+  const [mostrarInvalidos, setMostrarInvalidos] = useState(false);
+  const [ocultadosInvalidos, setOcultadosInvalidos] = useState(0);
   // Filtros do recorte da busca. Vazio = todas as regiões (comportamento anterior à expansão do
   // Sudeste); `somenteSicaf` é opt-in porque só ~3% das empresas com e-mail estão no SICAF.
   const [regioesSelecionadas, setRegioesSelecionadas] = useState<Set<RegiaoBuscaCandidatos>>(
@@ -83,12 +86,13 @@ export function SelecaoFornecedoresForm({ processos }: SelecaoFornecedoresFormPr
         processo.objeto,
         processo.numero,
         cnaesAprovados,
-        { regioes: [...regioesSelecionadas], somenteSicaf },
+        { regioes: [...regioesSelecionadas], somenteSicaf, mostrarInvalidos },
       );
       setCandidatos(r.candidatos);
       setTotalCandidatos(r.totalEncontrado);
       setLocaisCandidatos(r.locais);
       setOcultadosPorSicaf(r.ocultadosPorSicaf);
+      setOcultadosInvalidos(r.ocultadosPorEmailInvalido);
       // Nada vem pré-selecionado: a lista chega com até 500 empresas e marcar todas faria o
       // analista enviar cotação em massa sem revisar (§9.40 — a UI não pode prometer o que a
       // conferência da IN 65/2021 exige que seja conferido).
@@ -238,6 +242,19 @@ export function SelecaoFornecedoresForm({ processos }: SelecaoFornecedoresFormPr
                 (já licitam com o governo federal — bem menos empresas)
               </span>
             </label>
+
+            <label className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={mostrarInvalidos}
+                onChange={(e) => setMostrarInvalidos(e.target.checked)}
+              />
+              Incluir e-mails que já voltaram
+              <span className="text-xs text-muted-foreground">
+                (endereço inexistente numa cotação anterior — enviar de novo costuma voltar de novo)
+              </span>
+            </label>
           </CardContent>
         </Card>
       )}
@@ -311,6 +328,13 @@ export function SelecaoFornecedoresForm({ processos }: SelecaoFornecedoresFormPr
                   </>
                 )}
                 . Desmarque o filtro acima para vê-las.
+              </p>
+            )}
+            {ocultadosInvalidos > 0 && (
+              <p className="mb-3 rounded-md border border-warning/40 bg-warning/10 p-2 text-sm">
+                <strong>{ocultadosInvalidos.toLocaleString("pt-BR")}</strong> e-mail(s) ocultado(s) por
+                já terem voltado em cotações anteriores. Marque &quot;Incluir e-mails que já
+                voltaram&quot; acima para vê-los.
               </p>
             )}
             <p className="mb-3 text-xs text-muted-foreground">

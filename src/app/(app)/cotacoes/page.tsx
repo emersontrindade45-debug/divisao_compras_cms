@@ -1,7 +1,10 @@
-import { Mail, Send, ClipboardCheck } from "lucide-react";
+import { Mail, Send, ClipboardCheck, MailQuestion } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CotacoesTableReal } from "@/components/cotacoes/CotacoesTableReal";
 import { SelecaoFornecedoresForm } from "@/components/cotacoes/SelecaoFornecedoresForm";
+import { VerificarRespostasButton } from "@/components/cotacoes/VerificarRespostasButton";
+import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cotacoes/RespostasAConfirmar";
+import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
 import { ChecklistProposta } from "@/components/cotacoes/ChecklistProposta";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
 import { listarCotacoes } from "@/lib/actions/cotacoes";
@@ -17,10 +20,15 @@ import { PageHeader } from "@/components/common/PageHeader";
  */
 export const maxDuration = 60;
 
-export default async function CotacoesPage() {
+export default async function CotacoesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ aba?: string }>;
+}) {
   await requireAuth();
+  const { aba } = await searchParams;
 
-  const [cotacoesRaw, alertas, processosDb, propostas] = await Promise.all([
+  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes] = await Promise.all([
     listarCotacoes(),
     buscarAlertas(),
     db.processo.findMany({
@@ -51,6 +59,7 @@ export default async function CotacoesPage() {
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
+    carregarRespostasPendentes(),
   ]);
 
   const cotacoes = cotacoesRaw.map((c) => ({
@@ -92,11 +101,12 @@ export default async function CotacoesPage() {
       <PageHeader
         title="Cotações"
         description="Registro de consultas a fornecedores, controle de SLA e checklist de propostas."
+        actions={<VerificarRespostasButton />}
       />
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
 
-      <Tabs defaultValue="painel" className="space-y-4">
+      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : "painel"} className="space-y-4">
         <TabsList>
           <TabsTrigger value="painel" className="gap-2">
             <Mail className="size-3.5" />
@@ -105,6 +115,15 @@ export default async function CotacoesPage() {
           <TabsTrigger value="nova" className="gap-2">
             <Send className="size-3.5" />
             Nova cotação
+          </TabsTrigger>
+          <TabsTrigger value="confirmar" className="gap-2">
+            <MailQuestion className="size-3.5" />
+            Respostas a confirmar
+            {respostasPendentes.length > 0 && (
+              <span className="rounded-full bg-warning/20 px-1.5 text-xs tabular-nums">
+                {respostasPendentes.length}
+              </span>
+            )}
           </TabsTrigger>
           <TabsTrigger value="propostas" className="gap-2">
             <ClipboardCheck className="size-3.5" />
@@ -118,6 +137,10 @@ export default async function CotacoesPage() {
 
         <TabsContent value="nova">
           <SelecaoFornecedoresForm processos={processosDb} />
+        </TabsContent>
+
+        <TabsContent value="confirmar">
+          <RespostasAConfirmar itens={respostasPendentes} />
         </TabsContent>
 
         <TabsContent value="propostas" className="space-y-4">
@@ -134,4 +157,59 @@ export default async function CotacoesPage() {
       </Tabs>
     </div>
   );
+}
+
+/**
+ * Fila "a confirmar" (M30.d). `catch` devolve lista vazia: a página precisa abrir também no
+ * intervalo entre o deploy do código e a migration que cria a tabela (CLAUDE.md §9.19/§9.46).
+ */
+async function carregarRespostasPendentes(): Promise<RespostaPendenteItem[]> {
+  try {
+    const pendentes = await db.respostaEmailPendente.findMany({
+      where: { resolvidaEm: null },
+      orderBy: { dataResposta: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        gmailMensagemId: true,
+        dataResposta: true,
+        remetenteDominio: true,
+        motivo: true,
+        temAnexoOrcamento: true,
+        contemRecusa: true,
+        contemValor: true,
+        sugestaoConsultaId: true,
+        envio: {
+          select: { numeroProcessoAssunto: true, processo: { select: { numero: true } } },
+        },
+      },
+    });
+    const ids = pendentes.map((p) => p.sugestaoConsultaId).filter((x): x is string => x !== null);
+    const sugestoes = ids.length
+      ? await db.consultaCotacao.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, email: true, razaoSocial: true },
+        })
+      : [];
+    const porId = new Map(sugestoes.map((s) => [s.id, s]));
+
+    return pendentes.map((p) => {
+      const s = p.sugestaoConsultaId ? porId.get(p.sugestaoConsultaId) : undefined;
+      return {
+        id: p.id,
+        dataResposta: p.dataResposta.toISOString(),
+        motivo: p.motivo,
+        remetenteDominio: p.remetenteDominio,
+        temAnexoOrcamento: p.temAnexoOrcamento,
+        contemRecusa: p.contemRecusa,
+        contemValor: p.contemValor,
+        processoNumero: p.envio.processo?.numero ?? null,
+        numeroNoAssunto: p.envio.numeroProcessoAssunto,
+        sugestao: s ? { email: s.email, razaoSocial: s.razaoSocial } : null,
+        linkGmail: linkDoGmail(p.gmailMensagemId),
+      };
+    });
+  } catch {
+    return [];
+  }
 }

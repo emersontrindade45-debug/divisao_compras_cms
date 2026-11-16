@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  consultasComoCotacoes,
+  percentualEmailsInvalidos,
+  taxaRespostaConsultas,
+  tempoRespostaDias,
+  type ConsultaDesempenhoInput,
   janelas,
   lerPeriodo,
   mediaFontesAteSuficiencia,
@@ -212,5 +217,79 @@ describe("textoCobertura", () => {
   });
   it("sem caso nenhum", () => {
     expect(textoCobertura({ valor: null, base: 0, excluidos: 0 }, p)).toBe("nenhum caso no período");
+  });
+});
+
+function cons(over: Partial<ConsultaDesempenhoInput> = {}): ConsultaDesempenhoInput {
+  return { dataEnvio: d("2026-11-01"), dataResposta: null, situacao: "sem_resposta", categoria: null, ...over };
+}
+
+describe("indicadores das consultas por e-mail (M30.d)", () => {
+  it("e-mail que voltou não conta como silêncio: sai da base e aparece na cobertura", () => {
+    const r = taxaRespostaConsultas(
+      [
+        cons({ situacao: "orcamento", dataResposta: d("2026-11-03") }),
+        cons({ situacao: "sem_resposta" }),
+        cons({ situacao: "email_invalido" }),
+        cons({ situacao: "email_invalido" }),
+      ],
+      J,
+    );
+    // Contando as devoluções como "sem resposta", seria 1 de 4 = 25%; o certo é 1 de 2.
+    expect(r).toEqual({ valor: 50, base: 2, excluidos: 2 });
+  });
+
+  it("'a confirmar' já é uma resposta (só não se sabe de que tipo)", () => {
+    const r = taxaRespostaConsultas(
+      [cons({ situacao: "a_confirmar", dataResposta: d("2026-11-03") }), cons({ situacao: "sem_resposta" })],
+      J,
+    );
+    expect(r.valor).toBe(50);
+  });
+
+  it("consultasComoCotacoes leva o CNAE como categoria e deixa o sem dono sem categoria", () => {
+    const out = consultasComoCotacoes([
+      cons({ situacao: "recusa", categoria: "Papelaria" }),
+      cons({ situacao: "orcamento", categoria: null }),
+    ]);
+    expect(out.map((c) => [c.status, c.categorias])).toEqual([
+      ["negativa", ["Papelaria"]],
+      ["positiva", []],
+    ]);
+  });
+
+  it("tempo de resposta: mediana em dias, só de quem respondeu na janela", () => {
+    const r = tempoRespostaDias(
+      [
+        cons({ situacao: "orcamento", dataResposta: d("2026-11-03") }), // 2 dias
+        cons({ situacao: "recusa", dataResposta: d("2026-11-05") }), // 4 dias
+        cons({ situacao: "orcamento", dataResposta: d("2026-11-11") }), // 10 dias
+        cons({ situacao: "sem_resposta" }),
+        cons({ situacao: "email_invalido", dataResposta: d("2026-11-02") }), // devolução não é resposta
+        cons({ situacao: "orcamento", dataResposta: d("2026-09-01"), dataEnvio: d("2026-08-30") }), // fora da janela
+      ],
+      J,
+    );
+    // Média seria 5,3 — a mediana é 4.
+    expect(r).toEqual({ valor: 4, base: 3, excluidos: 0 });
+  });
+
+  it("tempo de resposta nunca é negativo", () => {
+    const r = tempoRespostaDias([cons({ situacao: "orcamento", dataEnvio: d("2026-11-10"), dataResposta: d("2026-11-09") })], J);
+    expect(r.valor).toBe(0);
+  });
+
+  it("% de e-mails que voltaram, sobre o que foi enviado na janela", () => {
+    const r = percentualEmailsInvalidos(
+      [
+        cons({ situacao: "email_invalido" }),
+        cons({ situacao: "sem_resposta" }),
+        cons({ situacao: "orcamento" }),
+        cons({ situacao: "orcamento" }),
+        cons({ situacao: "email_invalido", dataEnvio: d("2026-01-01") }), // fora da janela
+      ],
+      J,
+    );
+    expect(r).toEqual({ valor: 25, base: 4, excluidos: 0 });
   });
 });
