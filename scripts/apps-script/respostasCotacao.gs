@@ -66,9 +66,11 @@ function enderecos_(campo) {
  * Solicitações de orçamento ENVIADAS pela caixa nos últimos `dias` dias. Cada
  * envio pode ter vários fornecedores (Para, Cc e Cco); cada um vira uma cotação.
  */
+// getEffectiveUser, NÃO getActiveUser: chamado como app da web por anônimo, o
+// usuário ativo é vazio e todo envio seria descartado (medido em 2026-11-16).
 function buscarEnvios_(dias) {
   var threads = GmailApp.search('in:sent subject:("Solicitação de Orçamento") newer_than:' + dias + "d", 0, 200);
-  var eu = Session.getActiveUser().getEmail().toLowerCase();
+  var eu = Session.getEffectiveUser().getEmail().toLowerCase();
   var saida = [];
   threads.forEach(function (t) {
     t.getMessages().forEach(function (m) {
@@ -136,7 +138,7 @@ function metadadosDaMensagem_(msg, envio) {
  * processo no assunto (medido em 2026-11-16).
  */
 function buscarRespostas_(envios) {
-  var eu = Session.getActiveUser().getEmail().toLowerCase();
+  var eu = Session.getEffectiveUser().getEmail().toLowerCase();
   var envioPorFio = {};
   envios.forEach(function (e) { if (!envioPorFio[e.fio]) envioPorFio[e.fio] = e; });
   var saida = [];
