@@ -3022,6 +3022,22 @@ e nunca é gravado. Sem IA externa. Sem TI envolvida.
       mensagem + fornecedor (constraint única — §9.14). Destinatário fora do cadastro, processo sem
       casamento ou assunto sem prazo → fila "a confirmar". Respostas/encaminhamentos (RE:/ENC:) não
       contam como envio. Atende também a regra de ≥3 fornecedores consultados (IN 65/2021).
+- [ ] **Medição do spike (2026-11-16, 30 dias, conta divisaocompras@):** 23 envios (20 com
+      processo no assunto); 2.330 destinatários (2.118 distintos, ~101/envio); 549 mensagens no
+      fio: **425 devoluções** (335 com `X-Failed-Recipients` → 323 e-mails inválidos distintos),
+      5 automáticas, 119 humanas (35 anexo, 26 recusa, 1 R$, 58 sem sinal; 74 do próprio
+      destinatário). Ligação pelo FIO, não pelo assunto (só 245/647 respostas tinham o processo
+      no assunto). Lição: o 1º teste rodou em outra conta Google e deu tudo zero — conferir a
+      conta ativa antes de interpretar um zero.
+- [ ] **Prazo (Q46):** rótulo explícito no assunto e no texto (proposta: "Resposta até:
+      dd/mm/aaaa" / "Prazo para resposta: dd/mm/aaaa"); ausente → envio + 5 dias úteis (sem
+      sáb./dom.; feriados não considerados — editável na tela). PENDENTE confirmar se o
+      "Entrega:" atual é prazo de resposta ou entrega do objeto.
+- [ ] **Devoluções (Q47, aprovado):** fornecedor marcado "e-mail inválido" + data; coluna nova na
+      planilha de fornecedores; devolução não conta como resposta.
+- [ ] **Resposta de outro endereço (Q48, aprovado):** liga pelo domínio quando um único
+      destinatário do envio tem aquele domínio; domínio genérico (gmail, hotmail, outlook, yahoo,
+      uol, bol) ou ambíguo → fila.
 - [ ] Gatilho só por botão "Verificar respostas" (página do processo e Cotações).
 - [ ] Espelho na planilha de fornecedores: "Respondeu?"/"Enviou orçamento?" = cotação mais
       recente; colunas novas "Processos Respondidos" e "Processos com Orçamento".
