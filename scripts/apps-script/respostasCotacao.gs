@@ -201,8 +201,16 @@ function doPost(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
   var dias = Math.min(Math.max(Number(corpo.dias) || 30, 1), 180);
-  return ContentService.createTextOutput(
-    JSON.stringify((function () { var env = buscarEnvios_(dias); return { envios: env, respostas: buscarRespostas_(env) }; })()),
-  )
-    .setMimeType(ContentService.MimeType.JSON);
+  var env = buscarEnvios_(dias);
+  return ContentService.createTextOutput(JSON.stringify({
+    // Diagnóstico sem conteúdo: só a conta que executa e contagens.
+    diagnostico: {
+      versao: "efetivo-1",
+      contaEfetiva: Session.getEffectiveUser().getEmail(),
+      contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
+      fiosEncontrados: GmailApp.search('in:sent subject:("Solicitação de Orçamento") newer_than:' + dias + "d", 0, 200).length,
+    },
+    envios: env,
+    respostas: buscarRespostas_(env),
+  })).setMimeType(ContentService.MimeType.JSON);
 }
