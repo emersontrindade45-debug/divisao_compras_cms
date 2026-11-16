@@ -1,6 +1,10 @@
 /**
  * M30.d — Leitura das respostas de cotação na caixa divisaocompras@ (SPIKE).
  *
+ * Duas leituras: os ENVIOS ("Solicitação de Orçamento Proc. N … / Entrega:
+ * dd/mm/aaaa", na pasta Enviados) viram cotações no sistema; as RESPOSTAS
+ * recebidas são ligadas a essas cotações e classificadas.
+ *
  * REGRA DE SIGILO (inegociável — CLAUDE.md / docs/PLAN.md M30.d):
  *   - Este script roda DENTRO do Google, na própria conta. O conteúdo dos
  *     e-mails (assunto, corpo, anexos) NUNCA é devolvido nem enviado para fora.
@@ -29,6 +33,47 @@ var EXTENSOES_ORCAMENTO = /\.(pdf|xlsx?|docx?|ods|odt)$/i;
 function numeroProcessoDoAssunto_(assunto) {
   var m = /\bproc(?:esso)?\.?\s*(?:n[ºo°.]?\s*)?(\d{1,6})/i.exec(assunto || "");
   return m ? String(Number(m[1])) : null; // Number() tira zeros à esquerda
+}
+
+/** "Entrega: 16/10/2026" no assunto → "2026-10-16" (ou null). */
+function prazoDoAssunto_(assunto) {
+  var m = /entrega\s*:?\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i.exec(assunto || "");
+  if (!m) return null;
+  var dia = ("0" + m[1]).slice(-2), mes = ("0" + m[2]).slice(-2);
+  return m[3] + "-" + mes + "-" + dia;
+}
+
+/** Lista de endereços ("Nome <a@b>, c@d") → só os e-mails, minúsculos. */
+function enderecos_(campo) {
+  return (campo || "")
+    .split(",")
+    .map(function (x) { return ((/<([^>]+)>/.exec(x) || [null, x])[1] || "").trim().toLowerCase(); })
+    .filter(function (x) { return x.indexOf("@") !== -1; });
+}
+
+/**
+ * Solicitações de orçamento ENVIADAS pela caixa nos últimos `dias` dias. Cada
+ * envio pode ter vários fornecedores (Para, Cc e Cco); cada um vira uma cotação.
+ */
+function buscarEnvios_(dias) {
+  var threads = GmailApp.search('in:sent subject:("Solicitação de Orçamento") newer_than:' + dias + "d", 0, 200);
+  var eu = Session.getActiveUser().getEmail().toLowerCase();
+  var saida = [];
+  threads.forEach(function (t) {
+    t.getMessages().forEach(function (m) {
+      if (enderecos_(m.getFrom())[0] !== eu) return; // só o que a própria caixa enviou
+      var assunto = m.getSubject();
+      if (/^\s*(re|res|enc|fwd?)\s*:/i.test(assunto)) return; // resposta/encaminhamento não é solicitação
+      saida.push({
+        id: m.getId(),
+        data: m.getDate().toISOString(),
+        destinatarios: enderecos_([m.getTo(), m.getCc(), m.getBcc()].join(",")),
+        processo: numeroProcessoDoAssunto_(assunto),
+        prazo: prazoDoAssunto_(assunto),
+      });
+    });
+  });
+  return saida;
 }
 
 function metadadosDaMensagem_(msg) {
@@ -64,6 +109,13 @@ function buscarRespostas_(dias) {
 
 /** Passo 1 do spike: rode no editor. Loga SÓ contagens. */
 function testeLeitura() {
+  var envios = buscarEnvios_(30);
+  Logger.log("envios: " + envios.length);
+  Logger.log("envios com número de processo: " + envios.filter(function (x) { return x.processo; }).length);
+  Logger.log("envios com prazo (Entrega:): " + envios.filter(function (x) { return x.prazo; }).length);
+  Logger.log("fornecedores consultados (destinatários): " +
+    envios.reduce(function (a, x) { return a + x.destinatarios.length; }, 0));
+
   var r = buscarRespostas_(30);
   Logger.log("respostas: " + r.length);
   Logger.log("com número de processo no assunto: " + r.filter(function (x) { return x.processo; }).length);
@@ -86,6 +138,8 @@ function doPost(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
   var dias = Math.min(Math.max(Number(corpo.dias) || 30, 1), 180);
-  return ContentService.createTextOutput(JSON.stringify({ respostas: buscarRespostas_(dias) }))
+  return ContentService.createTextOutput(
+    JSON.stringify({ envios: buscarEnvios_(dias), respostas: buscarRespostas_(dias) }),
+  )
     .setMimeType(ContentService.MimeType.JSON);
 }

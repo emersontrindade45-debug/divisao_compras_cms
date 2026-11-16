@@ -2996,8 +2996,8 @@ Sem verificação no navegador nesta etapa (ver pendência de UI no fim do M30.b
 ### M30.d — Classificação automática das respostas de e-mail
 
 > **Achado de 2026-11-16:** produção tem **zero** `Cotacao`. A classificação liga cada resposta a
-> uma cotação registrada; sem cotação, não há o que classificar. Decisão pendente com o usuário:
-> criar as cotações a partir dos e-mails ENVIADOS ("Solicitação de Orçamento Proc. N … / Entrega:
+> uma cotação registrada; sem cotação, não há o que classificar. **Decidido com o usuário
+> (2026-11-16): criar as cotações a partir dos e-mails ENVIADOS** ("Solicitação de Orçamento Proc. N … / Entrega:
 > dd/mm/aaaa" — destinatário, data de envio e prazo estão no próprio e-mail). Script do spike:
 > `scripts/apps-script/respostasCotacao.gs`.
 **Regra de sigilo (inegociável, decidida com o usuário):** conteúdo de e-mail nunca sai do Google
@@ -3016,6 +3016,12 @@ e nunca é gravado. Sem IA externa. Sem TI envolvida.
       "Proc. 382" (tolerando RE:/ENC:/Fwd:, "Proc"/"Processo"), compara com `Processo.numero`
       ignorando zeros à esquerda e ano, confirma por remetente = `Fornecedor.email` e data ≥
       envio. Empate ou remetente fora do cadastro → fila.
+- [ ] **Cotações a partir dos Enviados:** cada destinatário (Para/Cc/Cco) de uma "Solicitação de
+      Orçamento" vira `Cotacao` — fornecedor pelo e-mail cadastrado, `dataEnvio` = data do e-mail,
+      `dataLimite` = "Entrega: dd/mm/aaaa" do assunto, processo pelo número. Idempotente pelo id da
+      mensagem + fornecedor (constraint única — §9.14). Destinatário fora do cadastro, processo sem
+      casamento ou assunto sem prazo → fila "a confirmar". Respostas/encaminhamentos (RE:/ENC:) não
+      contam como envio. Atende também a regra de ≥3 fornecedores consultados (IN 65/2021).
 - [ ] Gatilho só por botão "Verificar respostas" (página do processo e Cotações).
 - [ ] Espelho na planilha de fornecedores: "Respondeu?"/"Enviou orçamento?" = cotação mais
       recente; colunas novas "Processos Respondidos" e "Processos com Orçamento".
