@@ -43,6 +43,17 @@ function prazoDoAssunto_(assunto) {
   return m[3] + "-" + mes + "-" + dia;
 }
 
+/**
+ * Prazo no TEXTO do e-mail enviado pela própria Divisão (21 de 23 envios não
+ * têm "Entrega:" no assunto — medido em 2026-11-16). Primeira data que vem
+ * logo depois de "prazo", "até", "entrega" ou "validade". Só a data sai.
+ */
+function prazoDoCorpo_(corpo) {
+  var m = /(prazo|at[eé]|entrega|validade)[^\d]{0,60}(\d{1,2})\/(\d{1,2})\/(\d{4})/i.exec(corpo || "");
+  if (!m) return null;
+  return m[4] + "-" + ("0" + m[3]).slice(-2) + "-" + ("0" + m[2]).slice(-2);
+}
+
 /** Lista de endereços ("Nome <a@b>, c@d") → só os e-mails, minúsculos. */
 function enderecos_(campo) {
   return (campo || "")
@@ -64,44 +75,73 @@ function buscarEnvios_(dias) {
       if (enderecos_(m.getFrom())[0] !== eu) return; // só o que a própria caixa enviou
       var assunto = m.getSubject();
       if (/^\s*(re|res|enc|fwd?)\s*:/i.test(assunto)) return; // resposta/encaminhamento não é solicitação
+      var prazoAssunto = prazoDoAssunto_(assunto);
       saida.push({
         id: m.getId(),
+        fio: t.getId(),
         data: m.getDate().toISOString(),
         destinatarios: enderecos_([m.getTo(), m.getCc(), m.getBcc()].join(",")),
         processo: numeroProcessoDoAssunto_(assunto),
-        prazo: prazoDoAssunto_(assunto),
+        prazo: prazoAssunto || prazoDoCorpo_(m.getPlainBody()),
+        prazoOrigem: prazoAssunto ? "assunto" : null,
       });
+      var ultimo = saida[saida.length - 1];
+      if (!ultimo.prazoOrigem && ultimo.prazo) ultimo.prazoOrigem = "corpo";
     });
   });
   return saida;
 }
 
-function metadadosDaMensagem_(msg) {
+var ASSUNTO_AUTOMATICO = /^\s*(resposta autom[aá]tica|automatic reply|auto[- ]?reply|ausente|out of office|fora do escrit[oó]rio|recebemos sua mensagem)/i;
+var REMETENTE_DEVOLUCAO = /^(mailer-daemon|postmaster|mail-daemon|no-?reply-?bounce)@/i;
+
+/** Resposta automática, pelos cabeçalhos técnicos (RFC 3834) e pelo assunto. */
+function ehAutomatica_(msg) {
+  var auto = (msg.getHeader("Auto-Submitted") || "").toLowerCase();
+  var prec = (msg.getHeader("Precedence") || "").toLowerCase();
+  return (auto !== "" && auto !== "no") ||
+    msg.getHeader("X-Autoreply") !== "" || msg.getHeader("X-Autorespond") !== "" ||
+    prec === "auto_reply" || ASSUNTO_AUTOMATICO.test(msg.getSubject() || "");
+}
+
+function metadadosDaMensagem_(msg, envio) {
   var assunto = msg.getSubject();
   var corpo = (msg.getPlainBody() || "").toLowerCase();
   var anexos = msg.getAttachments({ includeInlineImages: false });
+  var remetente = (/<([^>]+)>/.exec(msg.getFrom()) || [null, msg.getFrom()])[1].trim().toLowerCase();
   return {
     id: msg.getId(),
+    fio: msg.getThread().getId(),
+    envioId: envio ? envio.id : null,
     data: msg.getDate().toISOString(),
-    remetente: (/<([^>]+)>/.exec(msg.getFrom()) || [null, msg.getFrom()])[1].trim().toLowerCase(),
-    processo: numeroProcessoDoAssunto_(assunto),
+    remetente: remetente,
+    // O número do processo vem do ENVIO do mesmo fio; o assunto da resposta é só reserva.
+    processo: (envio && envio.processo) || numeroProcessoDoAssunto_(assunto),
+    remetenteEraDestinatario: envio ? envio.destinatarios.indexOf(remetente) !== -1 : false,
+    devolucao: REMETENTE_DEVOLUCAO.test(remetente),
+    automatica: ehAutomatica_(msg),
     temAnexoOrcamento: anexos.some(function (a) { return EXTENSOES_ORCAMENTO.test(a.getName()); }),
     contemRecusa: FRASES_RECUSA.some(function (f) { return corpo.indexOf(f) !== -1; }),
+    contemValor: /r\$\s*\d/.test(corpo),
   };
 }
 
 /**
- * Respostas recebidas (não enviadas pela própria caixa) a e-mails de
- * "Solicitação de Orçamento", nos últimos `dias` dias.
+ * Respostas recebidas nos MESMOS FIOS das solicitações enviadas. Ligar pelo
+ * fio, e não pelo assunto: só 245 de 647 respostas traziam o número do
+ * processo no assunto (medido em 2026-11-16).
  */
-function buscarRespostas_(dias) {
+function buscarRespostas_(envios) {
   var eu = Session.getActiveUser().getEmail().toLowerCase();
-  var threads = GmailApp.search('subject:("Solicitação de Orçamento") newer_than:' + dias + "d -in:sent", 0, 200);
+  var envioPorFio = {};
+  envios.forEach(function (e) { if (!envioPorFio[e.fio]) envioPorFio[e.fio] = e; });
   var saida = [];
-  threads.forEach(function (t) {
-    t.getMessages().forEach(function (m) {
-      var meta = metadadosDaMensagem_(m);
-      if (meta.remetente !== eu) saida.push(meta);
+  Object.keys(envioPorFio).forEach(function (fio) {
+    var envio = envioPorFio[fio];
+    GmailApp.getThreadById(fio).getMessages().forEach(function (m) {
+      if (enderecos_(m.getFrom())[0] === eu) return;
+      if (m.getDate() < new Date(envio.data)) return;
+      saida.push(metadadosDaMensagem_(m, envio));
     });
   });
   return saida;
@@ -110,17 +150,29 @@ function buscarRespostas_(dias) {
 /** Passo 1 do spike: rode no editor. Loga SÓ contagens. */
 function testeLeitura() {
   var envios = buscarEnvios_(30);
-  Logger.log("envios: " + envios.length);
-  Logger.log("envios com número de processo: " + envios.filter(function (x) { return x.processo; }).length);
-  Logger.log("envios com prazo (Entrega:): " + envios.filter(function (x) { return x.prazo; }).length);
-  Logger.log("fornecedores consultados (destinatários): " +
-    envios.reduce(function (a, x) { return a + x.destinatarios.length; }, 0));
+  var conta = function (lista, f) { return lista.filter(f).length; };
+  var distintos = {};
+  envios.forEach(function (e) { e.destinatarios.forEach(function (d) { distintos[d] = 1; }); });
+  Logger.log("ENVIOS: " + envios.length +
+    " | com processo: " + conta(envios, function (x) { return x.processo; }) +
+    " | prazo no assunto: " + conta(envios, function (x) { return x.prazoOrigem === "assunto"; }) +
+    " | prazo no texto: " + conta(envios, function (x) { return x.prazoOrigem === "corpo"; }) +
+    " | sem prazo: " + conta(envios, function (x) { return !x.prazo; }));
+  Logger.log("DESTINATÁRIOS: " + envios.reduce(function (a, x) { return a + x.destinatarios.length; }, 0) +
+    " | distintos: " + Object.keys(distintos).length +
+    " | média por envio: " + Math.round(envios.reduce(function (a, x) { return a + x.destinatarios.length; }, 0) / Math.max(envios.length, 1)));
 
-  var r = buscarRespostas_(30);
-  Logger.log("respostas: " + r.length);
-  Logger.log("com número de processo no assunto: " + r.filter(function (x) { return x.processo; }).length);
-  Logger.log("com anexo de orçamento: " + r.filter(function (x) { return x.temAnexoOrcamento; }).length);
-  Logger.log("com frase de recusa: " + r.filter(function (x) { return x.contemRecusa; }).length);
+  var r = buscarRespostas_(envios);
+  var humanas = r.filter(function (x) { return !x.automatica && !x.devolucao; });
+  Logger.log("RESPOSTAS no fio: " + r.length +
+    " | devoluções: " + conta(r, function (x) { return x.devolucao; }) +
+    " | automáticas: " + conta(r, function (x) { return x.automatica && !x.devolucao; }) +
+    " | humanas: " + humanas.length);
+  Logger.log("HUMANAS: com anexo: " + conta(humanas, function (x) { return x.temAnexoOrcamento; }) +
+    " | com recusa: " + conta(humanas, function (x) { return x.contemRecusa; }) +
+    " | com R$ no texto: " + conta(humanas, function (x) { return x.contemValor; }) +
+    " | remetente era destinatário: " + conta(humanas, function (x) { return x.remetenteEraDestinatario; }) +
+    " | sem nenhum sinal: " + conta(humanas, function (x) { return !x.temAnexoOrcamento && !x.contemRecusa && !x.contemValor; }));
 }
 
 /**
@@ -139,7 +191,7 @@ function doPost(e) {
   }
   var dias = Math.min(Math.max(Number(corpo.dias) || 30, 1), 180);
   return ContentService.createTextOutput(
-    JSON.stringify({ envios: buscarEnvios_(dias), respostas: buscarRespostas_(dias) }),
+    JSON.stringify((function () { var env = buscarEnvios_(dias); return { envios: env, respostas: buscarRespostas_(env) }; })()),
   )
     .setMimeType(ContentService.MimeType.JSON);
 }
