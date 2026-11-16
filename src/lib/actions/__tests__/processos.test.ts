@@ -84,9 +84,65 @@ describe("atualizarFaseAndamentoProcesso", () => {
   it("retorna erro quando o processo não existe", async () => {
     mocks.db.processo.findUnique.mockResolvedValue(null);
 
-    const res = await atualizarFaseAndamentoProcesso(PROCESSO_ID, "em_correcao");
+    const res = await atualizarFaseAndamentoProcesso(PROCESSO_ID, "concluido");
 
     expect(res.error).toBe("Processo não encontrado");
     expect(mocks.db.processo.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("atualizarFaseAndamentoProcesso — motivo do retrabalho (M30.0)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireRole.mockResolvedValue({ id: "user-1", role: "pesquisa", email: "u@e.com", name: "U" });
+    mocks.db.processo.findUnique.mockResolvedValue(processoBase({ faseAndamento: "concluido" }));
+    mocks.db.processo.update.mockResolvedValue({});
+  });
+
+  it("recusa ir para em_correcao sem motivo, sem gravar nada", async () => {
+    const res = await atualizarFaseAndamentoProcesso(PROCESSO_ID, "em_correcao");
+
+    expect(res.error).toMatch(/motivo/i);
+    expect(mocks.db.processo.update).not.toHaveBeenCalled();
+    expect(mocks.registrarAuditoria).not.toHaveBeenCalled();
+  });
+
+  it("grava o motivo e se ele é falha documental na auditoria", async () => {
+    const res = await atualizarFaseAndamentoProcesso(PROCESSO_ID, "em_correcao", {
+      codigo: "evidencia_ausente",
+    });
+
+    expect(res.error).toBeUndefined();
+    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acao: "atualizar_fase_andamento_processo",
+        detalhes: expect.objectContaining({
+          de: "concluido",
+          para: "em_correcao",
+          motivo: "evidencia_ausente",
+          falhaDocumental: true,
+        }),
+      }),
+    );
+  });
+
+  it("motivo que não é falha documental fica marcado como tal", async () => {
+    await atualizarFaseAndamentoProcesso(PROCESSO_ID, "em_correcao", { codigo: "mudanca_requisitante" });
+
+    const detalhes = mocks.registrarAuditoria.mock.calls[0]![0].detalhes as Record<string, unknown>;
+    expect(detalhes.falhaDocumental).toBe(false);
+  });
+
+  it("'outro' exige descrição", async () => {
+    const res = await atualizarFaseAndamentoProcesso(PROCESSO_ID, "em_correcao", { codigo: "outro" });
+
+    expect(res.error).toMatch(/descreva/i);
+    expect(mocks.db.processo.update).not.toHaveBeenCalled();
+  });
+
+  it("outras fases não exigem motivo", async () => {
+    const res = await atualizarFaseAndamentoProcesso(PROCESSO_ID, "em_andamento");
+
+    expect(res.error).toBeUndefined();
   });
 });

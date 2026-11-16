@@ -9,6 +9,7 @@ import {
   createPropostaSchema,
 } from "@/lib/validations/cotacao";
 import { validarProposta } from "@/lib/domain/proposalValidator";
+import { registrarRespostaCotacao } from "@/lib/indicadores/marcos";
 import type { ActionResult } from "./processos";
 
 export async function criarCotacao(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -42,7 +43,13 @@ export async function atualizarCotacao(
   const cotacao = await db.cotacao.findUnique({ where: { id: cotacaoId } });
   if (!cotacao) return { error: "Cotação não encontrada" };
 
-  await db.cotacao.update({ where: { id: cotacaoId }, data: parsed.data });
+  await db.$transaction(async (tx) => {
+    await tx.cotacao.update({ where: { id: cotacaoId }, data: parsed.data });
+    // M30.0: primeira saída de `silenciosa` é a resposta do fornecedor.
+    if (parsed.data.status && parsed.data.status !== "silenciosa") {
+      await registrarRespostaCotacao(tx, cotacaoId);
+    }
+  });
 
   await registrarAuditoria({
     userId: user.id,
@@ -92,8 +99,13 @@ export async function registrarProposta(input: unknown): Promise<ActionResult<{ 
   // fornecedor no momento em que a proposta é registrada. Não dispara nova
   // consulta aqui — qualificação e registro de proposta são ações distintas
   // (a consulta pode ter sido feita antes, no cadastro do fornecedor).
-  const proposta = await db.proposta.create({
-    data: { ...parsed.data, statusQualificacaoFornecedor: cotacao.fornecedor.statusQualificacao },
+  const proposta = await db.$transaction(async (tx) => {
+    const criada = await tx.proposta.create({
+      data: { ...parsed.data, statusQualificacaoFornecedor: cotacao.fornecedor.statusQualificacao },
+    });
+    // M30.0: proposta registrada implica resposta do fornecedor.
+    await registrarRespostaCotacao(tx, parsed.data.cotacaoId);
+    return criada;
   });
 
   await registrarAuditoria({

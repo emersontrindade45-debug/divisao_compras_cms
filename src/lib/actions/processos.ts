@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { FASES_ANDAMENTO } from "@/lib/domain/faseAndamento";
+import { MOTIVOS_CORRECAO, ehFalhaDocumental } from "@/lib/domain/motivosCorrecao";
 import { z } from "zod";
 
 const atualizarStatusSchema = z.object({
@@ -55,10 +56,28 @@ export async function atualizarStatusProcesso(
   return {};
 }
 
-const atualizarFaseAndamentoSchema = z.object({
-  processoId: z.string().cuid(),
-  faseAndamento: z.enum(FASES_ANDAMENTO as [string, ...string[]]),
-});
+const motivoCorrecaoSchema = z
+  .object({
+    codigo: z.enum(MOTIVOS_CORRECAO),
+    texto: z.string().trim().max(500).optional(),
+  })
+  .refine((m) => m.codigo !== "outro" || (m.texto?.length ?? 0) >= 5, {
+    message: "Descreva o motivo da correção (mín. 5 caracteres)",
+  });
+
+const atualizarFaseAndamentoSchema = z
+  .object({
+    processoId: z.string().cuid(),
+    faseAndamento: z.enum(FASES_ANDAMENTO as [string, ...string[]]),
+    motivo: motivoCorrecaoSchema.optional(),
+  })
+  // M30.0: ir para "em correção" é retrabalho, e o indicador do PRD precisa
+  // separar falha documental das demais causas — sem motivo, não há como.
+  .refine((d) => d.faseAndamento !== "em_correcao" || d.motivo !== undefined, {
+    message: "Informe o motivo da correção",
+  });
+
+export type MotivoCorrecaoInput = z.infer<typeof motivoCorrecaoSchema>;
 
 // Fase de andamento é tag operacional, não decisão de conformidade — por
 // isso não exige a justificativa nem o papel "revisao" que
@@ -66,10 +85,11 @@ const atualizarFaseAndamentoSchema = z.object({
 export async function atualizarFaseAndamentoProcesso(
   processoId: string,
   faseAndamento: string,
+  motivo?: MotivoCorrecaoInput,
 ): Promise<ActionResult<{ processoId: string }>> {
   const user = await requireRole("pesquisa");
 
-  const parsed = atualizarFaseAndamentoSchema.safeParse({ processoId, faseAndamento });
+  const parsed = atualizarFaseAndamentoSchema.safeParse({ processoId, faseAndamento, motivo });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
   }
@@ -89,7 +109,18 @@ export async function atualizarFaseAndamentoProcesso(
     userId: user.id,
     acao: "atualizar_fase_andamento_processo",
     processoId: processo.id,
-    detalhes: { de: processo.faseAndamento, para: parsed.data.faseAndamento },
+    detalhes: {
+      de: processo.faseAndamento,
+      para: parsed.data.faseAndamento,
+      // Só na ida para "em correção" (o schema exige o motivo ali).
+      ...(parsed.data.faseAndamento === "em_correcao" && parsed.data.motivo
+        ? {
+            motivo: parsed.data.motivo.codigo,
+            motivoTexto: parsed.data.motivo.texto ?? null,
+            falhaDocumental: ehFalhaDocumental(parsed.data.motivo.codigo),
+          }
+        : {}),
+    },
   });
 
   revalidatePath("/processos");

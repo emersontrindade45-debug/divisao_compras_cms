@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
+import { registrarMarcosProcesso } from "@/lib/indicadores/marcos";
+import { validarDataAberturaInformada } from "@/lib/domain/indicadores/dataAbertura";
 import { carregarPlanilha, extrairObjetoDoTitulo } from "@/lib/sheets/googleSheets";
 import {
   parsePlanilha,
@@ -31,13 +33,28 @@ function normalizarDescricao(s: string): string {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+/**
+ * @param dataAberturaInformada data de abertura confirmada pelo analista
+ *   (`AAAA-MM-DD`). Só vale na PRIMEIRA importação do processo; ausente, o
+ *   processo nasce com a hora da importação e `dataAberturaOrigem = importacao`,
+ *   ficando fora das métricas de tempo do dashboard (M30.0).
+ */
 export async function sincronizarPlanilha(
   url: string,
+  dataAberturaInformada?: string,
 ): Promise<ActionResult<SincronizacaoResultado>> {
   const user = await requireAuth();
 
   if (!url || !url.trim()) {
     return { error: "Informe o link da planilha do Google Sheets." };
+  }
+
+  const agora = new Date();
+  let dataAbertura: Date | null = null;
+  if (dataAberturaInformada) {
+    const validada = validarDataAberturaInformada(dataAberturaInformada, agora);
+    if (!validada.ok) return { error: validada.erro };
+    dataAbertura = validada.data;
   }
 
   let carregada;
@@ -84,9 +101,15 @@ export async function sincronizarPlanilha(
         caracteristicasTecnicas: `Importado da planilha: ${carregada.titulo ?? numero}`,
         palavrasChave: [],
         classificacao: "comum",
-        responsavel: "Importado da planilha",
+        // Responsável padrão = quem importou (M30.0); editável depois.
+        responsavel: user.name,
+        responsavelId: user.id,
         status: "pendente",
-        dataAbertura: new Date(),
+        dataAbertura: dataAbertura ?? agora,
+        dataAberturaOrigem: dataAbertura ? "informada" : "importacao",
+        // Planilha que já chega com preço: a pesquisa aconteceu antes e fora do
+        // sistema, então não há como saber QUANDO a primeira referência veio.
+        marcosIncertos: itens.some((it) => it.precos.length > 0),
         planilhaOrigemUrl: url.trim(),
       },
     });
@@ -183,6 +206,11 @@ export async function sincronizarPlanilha(
 
       precosImportados += item.precos.length;
     }
+
+    // Marcos de tempo (M30.0). A sync não roda numa transação única (são N
+    // escritas por item), então o marco é gravado ao fim: o instante é o da
+    // sincronização que trouxe o preço para o sistema.
+    await registrarMarcosProcesso(db, processo.id, agora);
 
     await registrarAuditoria({
       userId: user.id,

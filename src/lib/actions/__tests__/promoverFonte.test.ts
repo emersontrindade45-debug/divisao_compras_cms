@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     revalidatePath: vi.fn(),
     extrairSpreadsheetId: vi.fn(),
     preencherPrecosPublicos: vi.fn(),
+    registrarMarcosProcesso: vi.fn(),
   };
 });
 
@@ -30,6 +31,9 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/rbac", () => ({ requireRole: mocks.requireRole }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("@/lib/indicadores/marcos", () => ({
+  registrarMarcosProcesso: mocks.registrarMarcosProcesso,
+}));
 vi.mock("@/lib/sheets/googleSheets", () => ({
   extrairSpreadsheetId: mocks.extrairSpreadsheetId,
 }));
@@ -86,6 +90,21 @@ describe("promoverResultadoSimilaridade", () => {
       processo: { planilhaOrigemUrl: null },
       resultadosSimilaridade: [],
     });
+  });
+
+  it("grava os marcos do processo dentro da transação da promoção (M30.0)", async () => {
+    await promoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(mocks.registrarMarcosProcesso).toHaveBeenCalledWith(mocks.tx, "proc-1");
+  });
+
+  it("não grava marco quando a promoção concorrente aborta na guarda atômica", async () => {
+    mocks.tx.resultadoSimilaridade.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await promoverResultadoSimilaridade(RESULTADO_ID);
+
+    expect(res.error).toMatch(/já foi promovido/);
+    expect(mocks.registrarMarcosProcesso).not.toHaveBeenCalled();
   });
 
   it("cria Fonte e Evidencia atomicamente na mesma transação", async () => {

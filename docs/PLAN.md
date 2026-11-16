@@ -2891,3 +2891,107 @@ detectadas — uma só depois de acrescentar o teste no orquestrador (§9.99).
    "impressora" com outsourcing. O corte por IA filtra, mas ocupa vaga.
 4. **Perplexity sem crédito** — ação do usuário.
 
+
+## M30 — Dashboard em duas camadas sobre dado confiável (planejado 2026-11-16)
+
+Plano fechado com o usuário em sessão de grilling (2026-11-16). Objetivo: dashboard com **camada de
+ação** (o que fazer agora) no topo e **camada de desempenho** (métricas de sucesso do PRD) abaixo,
+alimentado por dado gravado de forma confiável e preenchido **num lugar só — o sistema**, que
+espelha nas planilhas. Ordem: **M30.0 → M30.a → M30.b → M30.d → M30.c**.
+
+**Achados que motivaram o M30.0 (auditoria dos caminhos de escrita):**
+- F1 — `sincronizarPlanilha` cria o processo com `dataAbertura = new Date()` (hora da importação).
+- F2 — a sync faz `deleteMany` + `create` da `SeriePreco`: `createdAt` é o da última sync.
+- F3 — preço da planilha entra direto em `PrecoConsolidado`, não vira `Fonte`.
+- F4 — `atualizarCotacao` não grava quando o fornecedor respondeu.
+- F5 — processo importado tem `responsavel = "Importado da planilha"`; `responsavel` é texto livre.
+- F6 — `Fornecedor.categoria` é texto livre (grafia não medida em produção).
+- G1 — retrabalho já é derivável: troca de `faseAndamento` grava `{de, para}` no `AuditLog`.
+- G2 — a planilha de fornecedores tem "Respondeu?"/"Enviou orçamento?", hoje ignoradas.
+
+### M30.0 — Dados de origem confiáveis
+- [x] Marcos gravados **uma vez, atômicos** (`updateMany … where marco IS NULL`, §9.14), na
+      transação da ação que os causa: `Processo.primeiraReferenciaEm`, `Processo.serieMinimaEm`
+      (primeiro item com ≥3 preços incluídos), `Cotacao.dataResposta` (primeira saída de
+      `silenciosa`). Sobrevivem ao delete/recreate da sync.
+- [x] Indicadores de preço leem `PrecoConsolidado.fonte` (cobre planilha, promoção e manual).
+- [x] `Processo.dataAberturaOrigem` (`informada | importacao`); a sync pede confirmação da data
+      (padrão hoje). Processos `importacao` ficam fora das métricas de tempo.
+- [x] `Processo.responsavelId` → `User`; padrão = quem cria/sincroniza; backfill por nome; sem
+      casamento → "sem responsável" + contador no dashboard para atribuir.
+- [x] Motivo obrigatório ao mudar fase para `em_correcao`, lista fechada em `lib/domain`:
+      1 evidência ausente/ilegível/sem data de acesso · 2 fonte inadmissível · 3 série <3 sem
+      justificativa · 4 dispersão sem análise crítica · 5 mudança pelo requisitante ·
+      6 apontamento do controle interno/jurídico · 7 outro (texto obrigatório). 1–4 = "falha
+      documental".
+- [x] Sem backfill inventado: só o que o `AuditLog` prova; a tela diz "dados desde dd/mm/aaaa".
+- [ ] **PENDENTE (exige autorização):** migration aplicada em produção via `/api/admin/migrate` + `migrate status` (§9.19).
+
+**Implementado em 2026-11-16** (commit local, sem push). Decisões de implementação:
+- Todo processo nasce pela sincronização da planilha (não existe criação manual) — a data
+  confirmada e o responsável padrão moram só nesse caminho. O campo de data aparece sempre no
+  formulário e o servidor só o usa no `create` do upsert.
+- `marcosIncertos` (coluna nova, não prevista no grilling): planilha que já chega com preço não
+  diz QUANDO a pesquisa aconteceu. A migration marca todos os processos existentes como
+  `importacao` + `marcosIncertos` — ficam fora das métricas de tempo, sem tempo inventado.
+- Marcos gravados por `registrarMarcosProcesso` (`src/lib/indicadores/marcos.ts`) nos 4 caminhos que
+  incluem preço: `criarFonteManual`, `adicionarPreco`, `promoverResultadoSimilaridade` (depois da
+  guarda atômica) e `sincronizarPlanilha` (ao fim; não é transação única).
+- `dataResposta`: `atualizarCotacao` (status ≠ silenciosa) e `registrarProposta`.
+- Backfills da migration: responsável só por nome exato e único; `dataResposta` só pelo `AuditLog`.
+- Sem teste próprio: `criarFonteManual` e `adicionarPreco` (não tinham suíte); o helper é testado.
+- **Ordem de deploy:** a migration é aditiva e precisa ser aplicada ANTES do código (§9.46).
+- Verificação: 1517 testes, tsc, ESLint; 4 mutações (guarda atômica, motivo obrigatório, marco na
+  promoção, marcos incertos) — todas detectadas.
+
+### M30.a — Reorganização (sem migration)
+- [ ] Sai a lista "Processos com gargalo" (duplica a fila).
+- [ ] Card "gargalo" conta processos **sem fonte pública** (hoje conta `nao_aderente`).
+- [ ] Fila com 10 itens, responsável e etapa por linha, link "ver todos".
+- [ ] "Cotações pendentes" fica, com link filtrado; taxa de resposta desce para desempenho.
+
+### M30.b — Indicadores do PRD com dado existente
+- [ ] Tempo até 1ª referência · tempo até série mínima · % processos com fonte pública ·
+      taxa de resposta por categoria (normalizada: acento/caixa/espaço) · % propostas
+      invalidadas · média de fontes por item até suficiência.
+- [ ] `?periodo=30d|90d|12m` (padrão 90d) com comparação ao período anterior; a camada de ação
+      não usa período.
+- [ ] **Cobertura visível** por indicador ("sobre N de M processos; K sem data confiável").
+- [ ] Gráficos em SVG/CSS próprios com tokens (sem dependência nova). Sem metas fixas na v1.
+- [ ] Filtro "Meus/Todos" (padrão Meus para analista, Todos para chefia); todos os perfis veem
+      as duas camadas.
+- [ ] Antes de ir ao ar: ler volumes e grafias de categoria em produção (pendente: driver travou
+      no WSL nesta sessão).
+
+### M30.d — Classificação automática das respostas de e-mail
+**Regra de sigilo (inegociável, decidida com o usuário):** conteúdo de e-mail nunca sai do Google
+e nunca é gravado. Sem IA externa. Sem TI envolvida.
+- [ ] **Spike primeiro, com o usuário** (~30min): Google Apps Script na conta compartilhada
+      `divisaocompras@camarasantos.sp.gov.br` — (1) consegue ler o Gmail, (2) o sistema consegue
+      acioná-lo, (3) devolve só metadados. Bloqueado → plano B: classificação por um clique por
+      fornecedor na página do processo.
+- [ ] Script (versionado no repo) devolve só: ID da mensagem, data do cabeçalho, remetente e
+      marcadores booleanos (tem anexo PDF/XLS/DOC, contém frase de recusa). Nunca baixa anexo.
+- [ ] Banco grava só: status, `dataResposta`, regra aplicada, ID da mensagem no Gmail.
+- [ ] Classificação por regras determinísticas em `lib/domain` (testadas); segura → aplica;
+      ambígua → fila "a confirmar" (mostra fornecedor/processo/data/link Gmail, nunca corpo).
+      Valor do orçamento nunca entra sozinho na série — proposta segue pelo checklist.
+- [ ] Ligação: assunto `Solicitação de Orçamento Proc. 382 - … / Entrega: dd/mm/aaaa`; extrai
+      "Proc. 382" (tolerando RE:/ENC:/Fwd:, "Proc"/"Processo"), compara com `Processo.numero`
+      ignorando zeros à esquerda e ano, confirma por remetente = `Fornecedor.email` e data ≥
+      envio. Empate ou remetente fora do cadastro → fila.
+- [ ] Gatilho só por botão "Verificar respostas" (página do processo e Cotações).
+- [ ] Espelho na planilha de fornecedores: "Respondeu?"/"Enviou orçamento?" = cotação mais
+      recente; colunas novas "Processos Respondidos" e "Processos com Orçamento".
+- [ ] Não-vazamento: nada em console/log da Vercel/Sentry (`beforeSend` descarta o módulo); teste
+      de superfície com texto-marcador falha se aparecer em banco, log, Sentry ou HTML (mutação:
+      gravar o assunto deve derrubá-lo).
+
+### M30.c — Indicadores com dado novo
+- [ ] % retrabalho por falha documental (motivos do M30.0).
+- [ ] Tempo de resposta por fornecedor (`dataResposta` do M30.d).
+- Fora: % reaproveitamento (depende do Módulo 8).
+
+**Verificação de todos:** indicador = função pura em `src/lib/domain/indicadores/` com teste e
+mutação; testes de marco olham o argumento passado ao Prisma; script read-only contra produção
+antes do deploy, com 3 processos conferidos à mão.

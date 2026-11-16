@@ -6,6 +6,7 @@ import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { z } from "zod";
 import { storageAdapter } from "@/lib/storage";
+import { registrarMarcosProcesso } from "@/lib/indicadores/marcos";
 import type { ActionResult } from "./processos";
 
 const createFonteSchema = z.object({
@@ -193,6 +194,8 @@ export async function criarFonteManual(
         valorUnitario: parsed.data.valorUnitario,
       },
     });
+
+    await registrarMarcosProcesso(tx, item.processoId);
 
     return fonte.id;
   });

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { requireAuth, requireRole } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { createPrecoConsolidadoSchema } from "@/lib/validations/preco";
+import { registrarMarcosProcesso } from "@/lib/indicadores/marcos";
 import {
   calcularEstatisticas,
   excluirDiscrepantes,
@@ -66,7 +67,11 @@ export async function adicionarPreco(input: unknown): Promise<ActionResult<{ id:
   });
   if (!serie) return { error: "Série de preços não encontrada" };
 
-  const preco = await db.precoConsolidado.create({ data: parsed.data });
+  const preco = await db.$transaction(async (tx) => {
+    const criado = await tx.precoConsolidado.create({ data: parsed.data });
+    await registrarMarcosProcesso(tx, serie.item.processoId);
+    return criado;
+  });
 
   await registrarAuditoria({
     userId: user.id,

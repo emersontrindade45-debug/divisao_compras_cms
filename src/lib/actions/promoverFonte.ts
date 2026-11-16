@@ -11,6 +11,7 @@ import {
   podePromoverCandidato,
 } from "@/lib/domain/tipoFonteSimilaridade";
 import { valorUnitarioEfetivo } from "@/lib/domain/roteiroCalculo";
+import { registrarMarcosProcesso } from "@/lib/indicadores/marcos";
 import { sincronizarItemComPlanilha } from "./preencherCotacao";
 import type { ActionResult } from "./processos";
 
@@ -185,6 +186,10 @@ export async function promoverResultadoSimilaridade(
       if (marcado.count === 0) {
         throw new ResultadoJaPromovidoError();
       }
+
+      // 6. Marcos de tempo do processo (M30.0) — depois da guarda, para uma
+      //    promoção concorrente abortada não gravar marco.
+      await registrarMarcosProcesso(tx, resultado.item.processoId);
 
       return fonte.id;
     });

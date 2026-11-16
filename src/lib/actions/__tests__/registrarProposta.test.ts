@@ -4,14 +4,20 @@ const mocks = vi.hoisted(() => ({
   db: {
     cotacao: { findUnique: vi.fn() },
     proposta: { create: vi.fn() },
+    $transaction: vi.fn(),
   },
   requireRole: vi.fn(),
   registrarAuditoria: vi.fn(),
+  registrarRespostaCotacao: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/auth/rbac", () => ({ requireRole: mocks.requireRole, requireAuth: vi.fn() }));
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
+vi.mock("@/lib/indicadores/marcos", () => ({
+  registrarRespostaCotacao: mocks.registrarRespostaCotacao,
+  registrarMarcosProcesso: vi.fn(),
+}));
 
 import { registrarProposta } from "../cotacoes";
 
@@ -43,6 +49,23 @@ describe("registrarProposta — alerta de qualificação (M19)", () => {
       name: "Usuário",
     });
     mocks.db.proposta.create.mockResolvedValue({ id: "prop-1" });
+    mocks.db.$transaction.mockImplementation(async (fn: (tx: typeof mocks.db) => unknown) =>
+      fn(mocks.db),
+    );
+  });
+
+  it("registra a data de resposta da cotação na mesma transação da proposta (M30.0)", async () => {
+    mocks.db.cotacao.findUnique.mockResolvedValue({
+      processoId: "proc-1",
+      fornecedor: { statusQualificacao: "regular" },
+    });
+
+    await registrarProposta(propostaInput());
+
+    expect(mocks.registrarRespostaCotacao).toHaveBeenCalledWith(
+      mocks.db,
+      "ckqut11d0000abcdefghijklm",
+    );
   });
 
   it("espelha o status de qualificação já consultado do fornecedor na proposta", async () => {
