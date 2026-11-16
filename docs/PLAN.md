@@ -2945,10 +2945,23 @@ espelha nas planilhas. Ordem: **M30.0 → M30.a → M30.b → M30.d → M30.c**.
   promoção, marcos incertos) — todas detectadas.
 
 ### M30.a — Reorganização (sem migration)
-- [ ] Sai a lista "Processos com gargalo" (duplica a fila).
-- [ ] Card "gargalo" conta processos **sem fonte pública** (hoje conta `nao_aderente`).
-- [ ] Fila com 10 itens, responsável e etapa por linha, link "ver todos".
-- [ ] "Cotações pendentes" fica, com link filtrado; taxa de resposta desce para desempenho.
+- [x] Sai a lista "Processos com gargalo" (duplica a fila).
+- [x] Card "gargalo" conta processos **sem fonte pública** (hoje conta `nao_aderente`).
+- [x] Fila com 10 itens, responsável e etapa por linha, link "ver todos".
+- [x] "Cotações pendentes" fica, com link filtrado; taxa de resposta desce para desempenho.
+
+- [x] Filtro "Meus/Todos" adiantado do M30.b (o `responsavelId` já existia): analista com
+      processo atribuído abre em "Meus"; sem nenhum, abre em "Todos" (senão a tela nasce vazia
+      enquanto os processos antigos não têm dono). "Sem responsável" é sempre global.
+- [x] Card "Processos sem responsável" com seletor para atribuir (`atribuirResponsavel`, auditado).
+- [x] Taxa de resposta passa a contar qualquer resposta (positiva, negativa, incompleta) — antes
+      contava só `positiva`. Recusa é resposta; o card diz isso.
+
+**Implementado em 2026-11-16.** "Cotações perto do prazo" linka para o processo (etapa
+validação): `/cotacoes` não aceita filtro por URL hoje. Mutação que voltava "sem fonte pública"
+para `status = nao_aderente` passou verde na 1ª versão do teste (contagens coincidiam, §9.89) —
+caso reescrito para as duas definições darem números diferentes; agora é detectada.
+Sem verificação no navegador nesta etapa (ver pendência de UI no fim do M30.b).
 
 ### M30.b — Indicadores do PRD com dado existente
 - [ ] Tempo até 1ª referência · tempo até série mínima · % processos com fonte pública ·

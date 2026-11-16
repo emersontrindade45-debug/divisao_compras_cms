@@ -185,3 +185,55 @@ export async function listarAuditLogs(processoId: string) {
     include: { user: { select: { name: true, role: true } } },
   });
 }
+
+const atribuirResponsavelSchema = z.object({
+  processoId: z.string().cuid(),
+  responsavelId: z.string().cuid(),
+});
+
+/**
+ * Atribui o responsável do processo (M30.a). Qualquer analista pode assumir ou
+ * repassar um processo — é organização do trabalho, não decisão de
+ * conformidade. O texto legado `responsavel` acompanha, para as telas que
+ * ainda o exibem.
+ */
+export async function atribuirResponsavel(
+  processoId: string,
+  responsavelId: string,
+): Promise<ActionResult> {
+  const user = await requireRole("pesquisa");
+
+  const parsed = atribuirResponsavelSchema.safeParse({ processoId, responsavelId });
+  if (!parsed.success) return { error: "Dados inválidos" };
+
+  const [processo, responsavel] = await Promise.all([
+    db.processo.findUnique({
+      where: { id: parsed.data.processoId },
+      select: { id: true, responsavelId: true },
+    }),
+    db.user.findUnique({
+      where: { id: parsed.data.responsavelId },
+      select: { id: true, name: true },
+    }),
+  ]);
+  if (!processo) return { error: "Processo não encontrado" };
+  if (!responsavel) return { error: "Usuário não encontrado" };
+
+  await db.processo.update({
+    where: { id: processo.id },
+    data: { responsavelId: responsavel.id, responsavel: responsavel.name },
+  });
+
+  await registrarAuditoria({
+    userId: user.id,
+    acao: "atribuir_responsavel_processo",
+    processoId: processo.id,
+    detalhes: { de: processo.responsavelId, para: responsavel.id },
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/processos");
+  revalidatePath(`/processos/${processo.id}`);
+
+  return {};
+}

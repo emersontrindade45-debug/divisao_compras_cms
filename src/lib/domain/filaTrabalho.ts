@@ -15,7 +15,18 @@ export interface FilaInput {
   precosIncluidos: number;
   coeficienteVariacao: number | null;
   temPesquisaIniciada: boolean;
+  /** Nome do responsável (M30.a); ausente/nulo = sem responsável. */
+  responsavel?: string | null;
 }
+
+export type EtapaFila = "estrategia" | "pesquisa" | "validacao" | "consolidacao";
+
+export const ETAPA_FILA_LABEL: Record<EtapaFila, string> = {
+  estrategia: "Estratégia",
+  pesquisa: "Pesquisa",
+  validacao: "Validação",
+  consolidacao: "Consolidação",
+};
 
 export interface FilaItem {
   processoId: string;
@@ -24,6 +35,8 @@ export interface FilaItem {
   /** Menor = mais urgente (1..5). */
   urgencia: number;
   proximaAcao: string;
+  etapa: EtapaFila;
+  responsavel: string | null;
   href: string;
 }
 
@@ -31,7 +44,7 @@ interface Regra {
   urgencia: number;
   aplica: (p: FilaInput) => boolean;
   acao: string;
-  etapa: "estrategia" | "pesquisa" | "validacao" | "consolidacao";
+  etapa: EtapaFila;
 }
 
 const REGRAS: Regra[] = [
@@ -84,6 +97,8 @@ export function priorizarFilaTrabalho(processos: FilaInput[]): FilaItem[] {
       objeto: p.objeto,
       urgencia: regra.urgencia,
       proximaAcao: regra.acao,
+      etapa: regra.etapa,
+      responsavel: p.responsavel ?? null,
       href: `/processos/${p.processoId}?etapa=${regra.etapa}`,
     });
   }

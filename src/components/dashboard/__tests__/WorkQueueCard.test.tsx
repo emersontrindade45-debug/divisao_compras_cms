@@ -53,3 +53,28 @@ describe("WorkQueueCard", () => {
     expect(links[1]?.getAttribute("href")).toContain("/processos/b");
   });
 });
+
+describe("WorkQueueCard — responsável, etapa e ver todos (M30.a)", () => {
+  it("mostra etapa e responsável; sem responsável fica sinalizado", () => {
+    const itens = priorizarFilaTrabalho([
+      proc({ processoId: "p1", numero: "2026/001", cotacoesVencidas: 1, responsavel: "Ana" }),
+      proc({ processoId: "p2", numero: "2026/002", temFontePublica: false, responsavel: null }),
+    ]);
+    render(<WorkQueueCard itens={itens} />);
+    expect(screen.getByText(/Validação · Ana/)).toBeInTheDocument();
+    expect(screen.getByText(/sem responsável/i)).toBeInTheDocument();
+  });
+
+  it("oferece 'ver todos' quando a fila tem mais itens que os exibidos", () => {
+    const itens = priorizarFilaTrabalho([proc({ cotacoesVencidas: 1 })]);
+    render(<WorkQueueCard itens={itens} total={12} verTodosHref="/dashboard?fila=todas" />);
+    const link = screen.getByRole("link", { name: /ver todos \(11 a mais\)/i });
+    expect(link).toHaveAttribute("href", "/dashboard?fila=todas");
+  });
+
+  it("não oferece 'ver todos' quando tudo já está na tela", () => {
+    const itens = priorizarFilaTrabalho([proc({ cotacoesVencidas: 1 })]);
+    render(<WorkQueueCard itens={itens} total={1} verTodosHref="/dashboard?fila=todas" />);
+    expect(screen.queryByRole("link", { name: /ver todos/i })).toBeNull();
+  });
+});

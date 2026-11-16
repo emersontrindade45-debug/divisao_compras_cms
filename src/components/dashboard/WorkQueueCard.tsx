@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, ListChecks } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { FilaItem } from "@/lib/domain/filaTrabalho";
+import { ETAPA_FILA_LABEL, type FilaItem } from "@/lib/domain/filaTrabalho";
 import { cn } from "@/lib/utils";
 
 /** Quanto menor a urgência, mais forte o destaque. */
@@ -16,15 +16,32 @@ const CLASSE_URGENCIA: Record<number, string> = {
  * Fila de trabalho: o que fazer a seguir, em ordem de urgência.
  *
  * Substitui o antigo card "Resumo de processos", que repetia as contagens já
- * exibidas nas métricas acima sem dizer o que fazer com elas.
+ * exibidas nas métricas acima sem dizer o que fazer com elas. Desde o M30.a
+ * cada linha diz também a etapa e quem é o responsável.
  */
-export function WorkQueueCard({ itens }: { itens: FilaItem[] }) {
+export function WorkQueueCard({
+  itens,
+  total,
+  verTodosHref,
+}: {
+  itens: FilaItem[];
+  /** Tamanho da fila completa; quando maior que `itens`, aparece "ver todos". */
+  total?: number;
+  verTodosHref?: string;
+}) {
+  const restantes = total !== undefined ? total - itens.length : 0;
+
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <ListChecks className="size-4" />
           Fila de trabalho
+          {total !== undefined && total > 0 && (
+            <span className="text-sm font-normal text-muted-foreground tabular-nums">
+              ({total})
+            </span>
+          )}
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           Processos com pendência, do mais urgente para o menos.
@@ -40,11 +57,15 @@ export function WorkQueueCard({ itens }: { itens: FilaItem[] }) {
             <Link
               key={item.processoId}
               href={item.href}
-              className="group flex items-center justify-between gap-3 rounded-md border px-3 py-2 transition-colors hover:border-primary/40 hover:bg-muted/50"
+              className="group flex flex-col gap-2 rounded-md border px-3 py-2 transition-colors hover:border-primary/40 hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
             >
               <div className="min-w-0">
                 <p className="text-sm font-medium tabular-nums">{item.numero}</p>
                 <p className="truncate text-xs text-muted-foreground">{item.objeto}</p>
+                <p className="text-xs text-muted-foreground">
+                  {ETAPA_FILA_LABEL[item.etapa]} ·{" "}
+                  {item.responsavel ?? <span className="text-warning-foreground dark:text-warning">sem responsável</span>}
+                </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Badge
@@ -60,6 +81,14 @@ export function WorkQueueCard({ itens }: { itens: FilaItem[] }) {
               </div>
             </Link>
           ))
+        )}
+        {restantes > 0 && verTodosHref && (
+          <Link
+            href={verTodosHref}
+            className="block pt-1 text-center text-xs font-medium text-primary hover:underline"
+          >
+            Ver todos ({restantes} a mais)
+          </Link>
         )}
       </CardContent>
     </Card>

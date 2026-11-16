@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const db = {
     processo: { findUnique: vi.fn(), update: vi.fn() },
+    user: { findUnique: vi.fn() },
   };
   return {
     db,
@@ -21,7 +22,7 @@ vi.mock("@/lib/auth/rbac", () => ({
 vi.mock("@/lib/auth/audit", () => ({ registrarAuditoria: mocks.registrarAuditoria }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 
-import { atualizarFaseAndamentoProcesso } from "../processos";
+import { atribuirResponsavel, atualizarFaseAndamentoProcesso } from "../processos";
 
 const PROCESSO_ID = "ckqut11d0000abcdefghijklm";
 
@@ -144,5 +145,42 @@ describe("atualizarFaseAndamentoProcesso — motivo do retrabalho (M30.0)", () =
     const res = await atualizarFaseAndamentoProcesso(PROCESSO_ID, "em_andamento");
 
     expect(res.error).toBeUndefined();
+  });
+});
+
+describe("atribuirResponsavel (M30.a)", () => {
+  const USER_ID = "ckqut11d0000abcdefghijkln";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireRole.mockResolvedValue({ id: "user-1", role: "pesquisa", email: "u@e.com", name: "U" });
+    mocks.db.processo.findUnique.mockResolvedValue({ id: PROCESSO_ID, responsavelId: null });
+    mocks.db.user.findUnique.mockResolvedValue({ id: USER_ID, name: "Ana" });
+    mocks.db.processo.update.mockResolvedValue({});
+  });
+
+  it("grava o id e o nome do responsável e audita de/para", async () => {
+    const res = await atribuirResponsavel(PROCESSO_ID, USER_ID);
+
+    expect(res.error).toBeUndefined();
+    expect(mocks.db.processo.update).toHaveBeenCalledWith({
+      where: { id: PROCESSO_ID },
+      data: { responsavelId: USER_ID, responsavel: "Ana" },
+    });
+    expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acao: "atribuir_responsavel_processo",
+        detalhes: { de: null, para: USER_ID },
+      }),
+    );
+  });
+
+  it("usuário inexistente não grava nada", async () => {
+    mocks.db.user.findUnique.mockResolvedValue(null);
+
+    const res = await atribuirResponsavel(PROCESSO_ID, USER_ID);
+
+    expect(res.error).toMatch(/usuário/i);
+    expect(mocks.db.processo.update).not.toHaveBeenCalled();
   });
 });

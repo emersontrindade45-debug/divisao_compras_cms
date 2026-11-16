@@ -1,237 +1,228 @@
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  FolderSearch,
-  Mail,
-} from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, CheckCircle2, Clock, FolderSearch, Mail, UserX } from "lucide-react";
 import { MetricCard } from "@/components/common/MetricCard";
 import { PageHeader } from "@/components/common/PageHeader";
-import { WorkQueueCard } from "@/components/dashboard/WorkQueueCard";
-import { priorizarFilaTrabalho } from "@/lib/domain/filaTrabalho";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusBadge } from "@/components/common/StatusBadge";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
+import { WorkQueueCard } from "@/components/dashboard/WorkQueueCard";
+import { AtribuirResponsavelSelect } from "@/components/dashboard/AtribuirResponsavelSelect";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { buscarAlertas } from "@/lib/actions/alertas";
+import { escopoPadrao } from "@/lib/domain/indicadores/camadaAcao";
+import {
+  carregarCamadaAcao,
+  contarProcessosDoUsuario,
+  listarUsuariosAtribuiveis,
+  type Escopo,
+} from "@/lib/indicadores/camadaAcao";
+import { cn } from "@/lib/utils";
 
-export default async function DashboardPage() {
-  await requireAuth();
+const FILA_RESUMIDA = 10;
+const DIA_MS = 24 * 60 * 60 * 1000;
 
-  const now = new Date();
-  const tresDiasAFrente = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+/**
+ * Dashboard em duas camadas (M30): AÇÃO no topo (o que fazer agora, sem
+ * período) e DESEMPENHO abaixo (indicadores do PRD — M30.b).
+ */
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ escopo?: string; fila?: string }>;
+}) {
+  const user = await requireAuth();
+  const params = await searchParams;
+  const agora = new Date();
 
-  const [processos, cotacoes, alertas] = await Promise.all([
-    db.processo.findMany({
-      orderBy: { dataAbertura: "desc" },
-      select: {
-        id: true,
-        numero: true,
-        objeto: true,
-        status: true,
-        itens: {
-          select: {
-            fontes: { select: { tipo: true, status: true } },
-            seriePrecos: {
-              select: { precosIncluidos: true, coeficienteVariacao: true },
-            },
-          },
-        },
-        cotacoes: {
-          select: {
-            status: true,
-            dataLimite: true,
-            proposta: { select: { statusGeral: true } },
-          },
-        },
-      },
-    }),
-    db.cotacao.findMany({
-      include: {
-        fornecedor: { select: { razaoSocial: true } },
-        processo: { select: { numero: true } },
-      },
-      orderBy: { dataLimite: "asc" },
-    }),
+  const escopo: Escopo =
+    params.escopo === "meus" || params.escopo === "todos"
+      ? params.escopo
+      : escopoPadrao(user.role, await contarProcessosDoUsuario(user.id));
+  const filaCompleta = params.fila === "todas";
+
+  const [acao, usuarios, alertas, cotacoesResposta] = await Promise.all([
+    carregarCamadaAcao(escopo, user.id, agora),
+    listarUsuariosAtribuiveis(),
     buscarAlertas(),
+    db.cotacao.findMany({ select: { status: true } }),
   ]);
 
-  const emAndamento = processos.filter(
-    (p) => p.status === "pendente" || p.status === "parcial",
-  ).length;
+  const { resumo } = acao;
+  const totalCotacoes = cotacoesResposta.length;
+  const respondidas = cotacoesResposta.filter((c) => c.status !== "silenciosa").length;
+  const taxaResposta = totalCotacoes > 0 ? Math.round((respondidas / totalCotacoes) * 100) : 0;
 
-  const total = cotacoes.length;
-  const respondidas = cotacoes.filter((c) => c.status === "positiva").length;
-  const taxaResposta = total > 0 ? Math.round((respondidas / total) * 100) : 0;
-  const silenciosas = cotacoes.filter((c) => c.status === "silenciosa").length;
-  const vencidas = cotacoes.filter(
-    (c) => c.status === "silenciosa" && c.dataLimite < now,
-  ).length;
-  const gargalos = processos.filter((p) => p.status === "nao_aderente").length;
-
-  const gargalosList = processos
-    .filter((p) => p.status === "nao_aderente" || p.status === "parcial")
-    .slice(0, 4);
-
-  const fila = priorizarFilaTrabalho(
-    processos.map((p) => {
-      const fontes = p.itens.flatMap((i) => i.fontes);
-      const series = p.itens.flatMap((i) => i.seriePrecos);
-      const cvs = series.map((s) => Number(s.coeficienteVariacao));
-      return {
-        processoId: p.id,
-        numero: p.numero,
-        objeto: p.objeto,
-        status: p.status,
-        temFontePublica: fontes.some(
-          (f) => f.tipo === "contratacao_publica" && f.status === "incluido",
-        ),
-        cotacoesVencidas: p.cotacoes.filter(
-          (c) => c.status === "silenciosa" && c.dataLimite < now,
-        ).length,
-        propostasPendentes: p.cotacoes.filter(
-          (c) => c.proposta && c.proposta.statusGeral !== "valida",
-        ).length,
-        precosIncluidos: Math.max(0, ...series.map((s) => s.precosIncluidos)),
-        coeficienteVariacao: cvs.length > 0 ? Math.max(...cvs) : null,
-        temPesquisaIniciada: fontes.length > 0 || p.cotacoes.length > 0,
-      };
-    }),
-  ).slice(0, 6);
-
-  const cotacoesPendentes = cotacoes
-    .filter(
-      (c) =>
-        (c.status === "silenciosa" || c.status === "incompleta") &&
-        c.dataLimite <= tresDiasAFrente,
-    )
-    .slice(0, 5);
+  const hrefEscopo = (e: Escopo) => `/dashboard?escopo=${e}${filaCompleta ? "&fila=todas" : ""}`;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Dashboard"
-        description="Visão geral da operação de pesquisa de preços."
+        description="O que fazer agora e como a pesquisa de preços está andando."
       />
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard
-          label="Processos em andamento"
-          value={emAndamento}
-          hint={`${processos.length} total`}
-          icon={FolderSearch}
-          href="/processos?status=pendente"
-        />
-        <MetricCard
-          label="Taxa de resposta"
-          value={`${taxaResposta}%`}
-          hint={`${respondidas} de ${total} cotações`}
-          icon={Mail}
-          href="/cotacoes"
-        />
-        <MetricCard
-          label="Cotações silenciosas"
-          value={silenciosas}
-          hint={`${vencidas} com prazo vencido`}
-          icon={Clock}
-          href="/cotacoes"
-        />
-        <MetricCard
-          label="Processos com gargalo"
-          value={gargalos}
-          hint="sem fonte pública suficiente"
-          icon={AlertTriangle}
-          href="/processos?status=nao_aderente"
-        />
-      </div>
+      <section aria-labelledby="camada-acao" className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="camada-acao" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Agora
+          </h2>
+          <nav aria-label="Escopo" className="inline-flex rounded-lg border p-0.5 text-xs">
+            {(["meus", "todos"] as const).map((e) => (
+              <Link
+                key={e}
+                href={hrefEscopo(e)}
+                aria-current={escopo === e ? "page" : undefined}
+                className={cn(
+                  "rounded-md px-3 py-1 font-medium",
+                  escopo === e ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {e === "meus" ? "Meus" : "Todos"}
+              </Link>
+            ))}
+          </nav>
+        </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="size-4 text-danger" />
-              Processos com gargalo
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 pb-4">
-            {gargalosList.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nenhum gargalo identificado.</p>
-            ) : (
-              gargalosList.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between rounded-md border px-3 py-2"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{p.numero}</p>
-                    <p className="text-xs text-muted-foreground truncate max-w-52">{p.objeto}</p>
-                  </div>
-                  <StatusBadge status={p.status as never} />
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="Processos em andamento"
+            value={resumo.ativos}
+            hint="nem aderentes nem concluídos"
+            icon={FolderSearch}
+            href="/processos?status=pendente"
+          />
+          <MetricCard
+            label="Sem fonte pública"
+            value={resumo.semFontePublica}
+            hint="nenhum preço de contratação pública incluído"
+            icon={AlertTriangle}
+            href="/processos"
+          />
+          <MetricCard
+            label="Cotações sem resposta"
+            value={resumo.semResposta}
+            hint={`${resumo.vencidas} com prazo vencido`}
+            icon={Clock}
+            href="/cotacoes"
+          />
+          <MetricCard
+            label="Sem responsável"
+            value={resumo.semResponsavel}
+            hint="processos ativos de toda a Divisão"
+            icon={UserX}
+          />
+        </div>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Clock className="size-4 text-warning" />
-              Cotações pendentes de retorno
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 pb-4">
-            {cotacoesPendentes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nenhuma pendência no momento.</p>
-            ) : (
-              cotacoesPendentes.map((c) => {
-                const diasRestantes = Math.ceil(
-                  (c.dataLimite.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
-                );
-                return (
-                  <div
-                    key={c.id}
-                    className="flex items-center justify-between rounded-md border px-3 py-2"
-                  >
-                    <div>
-                      <p className="text-sm font-medium truncate max-w-44">
-                        {c.fornecedor.razaoSocial}
-                      </p>
-                      <p className="text-xs text-muted-foreground font-mono">
-                        {c.processo.numero}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span
-                        className={
-                          diasRestantes < 0
-                            ? "text-xs font-medium text-danger tabular-nums"
-                            : "text-xs text-muted-foreground tabular-nums"
-                        }
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <WorkQueueCard
+              itens={filaCompleta ? acao.fila : acao.fila.slice(0, FILA_RESUMIDA)}
+              total={acao.fila.length}
+              verTodosHref={`/dashboard?escopo=${escopo}&fila=todas`}
+            />
+          </div>
+
+          <div className="space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Clock className="size-4 text-warning" />
+                  Cotações perto do prazo
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 pb-4">
+                {acao.cotacoesPendentes.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nenhuma pendência no momento.</p>
+                ) : (
+                  acao.cotacoesPendentes.slice(0, 5).map((c) => {
+                    const dias = Math.ceil((c.dataLimite.getTime() - agora.getTime()) / DIA_MS);
+                    return (
+                      <Link
+                        key={c.id}
+                        href={`/processos/${c.processoId}?etapa=validacao`}
+                        className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 hover:bg-muted/50"
                       >
-                        {diasRestantes < 0
-                          ? `Vencido ${Math.abs(diasRestantes)}d`
-                          : `${diasRestantes}d restantes`}
-                      </span>
-                      {c.lembreteEnviado && (
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <CheckCircle2 className="size-3 text-success" />
-                          Lembrete enviado
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{c.fornecedor}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{c.processoNumero}</p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-0.5">
+                          <span
+                            className={cn(
+                              "text-xs tabular-nums",
+                              dias < 0 ? "font-medium text-danger" : "text-muted-foreground",
+                            )}
+                          >
+                            {dias < 0 ? `Vencido ${Math.abs(dias)}d` : `${dias}d restantes`}
+                          </span>
+                          {c.lembreteEnviado && (
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <CheckCircle2 className="size-3 text-success" />
+                              Lembrete enviado
+                            </span>
+                          )}
+                        </div>
+                      </Link>
+                    );
+                  })
+                )}
+                {acao.cotacoesPendentes.length > 5 && (
+                  <Link href="/cotacoes" className="block pt-1 text-center text-xs font-medium text-primary hover:underline">
+                    Ver todas ({acao.cotacoesPendentes.length})
+                  </Link>
+                )}
+              </CardContent>
+            </Card>
 
-      <WorkQueueCard itens={fila} />
+            {acao.semResponsavel.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <UserX className="size-4 text-warning" />
+                    Processos sem responsável
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 pb-4">
+                  {acao.semResponsavel.slice(0, 8).map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <Link href={`/processos/${p.id}`} className="min-w-0 hover:underline">
+                        <p className="text-sm font-medium tabular-nums">{p.numero}</p>
+                        <p className="truncate text-xs text-muted-foreground">{p.objeto}</p>
+                      </Link>
+                      <AtribuirResponsavelSelect processoId={p.id} numero={p.numero} usuarios={usuarios} />
+                    </div>
+                  ))}
+                  {acao.semResponsavel.length > 8 && (
+                    <p className="pt-1 text-center text-xs text-muted-foreground">
+                      e mais {acao.semResponsavel.length - 8} — atribua estes primeiro.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="camada-desempenho" className="space-y-4">
+        <h2 id="camada-desempenho" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Desempenho
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="Taxa de resposta"
+            value={`${taxaResposta}%`}
+            hint={`${respondidas} de ${totalCotacoes} cotações tiveram resposta (inclui recusas)`}
+            icon={Mail}
+            href="/cotacoes"
+          />
+        </div>
+      </section>
     </div>
   );
 }

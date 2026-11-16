@@ -96,3 +96,44 @@ describe("priorizarFilaTrabalho", () => {
     expect(fila.map((f) => f.numero)).toEqual(["2026/002", "2026/010"]);
   });
 });
+
+describe("priorizarFilaTrabalho — etapa e responsável (M30.a)", () => {
+  it("cada item carrega a etapa da regra e o responsável do processo", () => {
+    const [item] = priorizarFilaTrabalho([
+      {
+        processoId: "p1",
+        numero: "2026/001",
+        objeto: "x",
+        status: "pendente",
+        temFontePublica: false,
+        cotacoesVencidas: 0,
+        propostasPendentes: 0,
+        precosIncluidos: 0,
+        coeficienteVariacao: null,
+        temPesquisaIniciada: false,
+        responsavel: "Ana",
+      },
+    ]);
+    expect(item?.etapa).toBe("pesquisa");
+    expect(item?.responsavel).toBe("Ana");
+    expect(item?.href).toBe("/processos/p1?etapa=pesquisa");
+  });
+
+  it("sem responsável vira null", () => {
+    const [item] = priorizarFilaTrabalho([
+      {
+        processoId: "p1",
+        numero: "2026/001",
+        objeto: "x",
+        status: "pendente",
+        temFontePublica: false,
+        cotacoesVencidas: 0,
+        propostasPendentes: 0,
+        precosIncluidos: 0,
+        coeficienteVariacao: null,
+        temPesquisaIniciada: false,
+      },
+    ]);
+    expect(item?.responsavel).toBeNull();
+  });
+});
