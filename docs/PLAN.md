@@ -2964,17 +2964,34 @@ caso reescrito para as duas definições darem números diferentes; agora é det
 Sem verificação no navegador nesta etapa (ver pendência de UI no fim do M30.b).
 
 ### M30.b — Indicadores do PRD com dado existente
-- [ ] Tempo até 1ª referência · tempo até série mínima · % processos com fonte pública ·
+- [x] Tempo até 1ª referência · tempo até série mínima · % processos com fonte pública ·
       taxa de resposta por categoria (normalizada: acento/caixa/espaço) · % propostas
       invalidadas · média de fontes por item até suficiência.
-- [ ] `?periodo=30d|90d|12m` (padrão 90d) com comparação ao período anterior; a camada de ação
+- [x] `?periodo=30d|90d|12m` (padrão 90d) com comparação ao período anterior; a camada de ação
       não usa período.
-- [ ] **Cobertura visível** por indicador ("sobre N de M processos; K sem data confiável").
-- [ ] Gráficos em SVG/CSS próprios com tokens (sem dependência nova). Sem metas fixas na v1.
-- [ ] Filtro "Meus/Todos" (padrão Meus para analista, Todos para chefia); todos os perfis veem
+- [x] **Cobertura visível** por indicador ("sobre N de M processos; K sem data confiável").
+- [x] Gráficos em SVG/CSS próprios com tokens (sem dependência nova). Sem metas fixas na v1.
+- [x] Filtro "Meus/Todos" (padrão Meus para analista, Todos para chefia); todos os perfis veem
       as duas camadas.
-- [ ] Antes de ir ao ar: ler volumes e grafias de categoria em produção (pendente: driver travou
+- [ ] **PENDENTE:** antes de ir ao ar, ler volumes e grafias de categoria em produção (pendente: driver travou
       no WSL nesta sessão).
+
+**Implementado em 2026-11-16.** Decisões de implementação:
+- Tempos por EVENTO (marco caiu na janela), não por coorte de abertura — processo aberto ontem não
+  teve chance de atingir o marco. Mediana, não média (mutação confirma que o teste distingue).
+- % fonte pública: denominador = processos abertos na janela que já têm preço (sem preço ficam
+  fora, contados na cobertura).
+- Sem sparkline: o único gráfico é a barra por categoria (série única, cor primária, valor em
+  texto). Mais gráficos só quando houver série histórica confiável.
+- Escopo "Meus/Todos" vale também para o desempenho.
+- Banner de alertas "sem fonte pública" alinhado à mesma definição do card (achado na tela real:
+  4 no card × 2 no banner — CLAUDE.md §9.130).
+- Verificação: 1556 testes, tsc, ESLint, `next build`; 5 mutações nos indicadores (média×mediana,
+  denominador, filtro de confiança, taxa só positiva, normalização de categoria) — todas
+  detectadas. Navegador (Playwright, banco local com a migration): dashboard desktop e 390px,
+  troca de período, diálogo de motivo. Transbordo no celular encontrado e corrigido (§9.129).
+- Visto e fora do escopo: a coluna "Fase" da lista de processos mostra o valor cru
+  (`nao_iniciado`) no gatilho do Select — comportamento anterior ao M30.
 
 ### M30.d — Classificação automática das respostas de e-mail
 **Regra de sigilo (inegociável, decidida com o usuário):** conteúdo de e-mail nunca sai do Google

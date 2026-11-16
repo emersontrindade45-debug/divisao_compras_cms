@@ -1,15 +1,18 @@
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Clock, FolderSearch, Mail, UserX } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, FolderSearch, UserX } from "lucide-react";
 import { MetricCard } from "@/components/common/MetricCard";
 import { PageHeader } from "@/components/common/PageHeader";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
 import { WorkQueueCard } from "@/components/dashboard/WorkQueueCard";
 import { AtribuirResponsavelSelect } from "@/components/dashboard/AtribuirResponsavelSelect";
+import { IndicadoresDesempenho } from "@/components/dashboard/IndicadoresDesempenho";
+import { RespostaPorCategoria } from "@/components/dashboard/RespostaPorCategoria";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
 import { buscarAlertas } from "@/lib/actions/alertas";
 import { escopoPadrao } from "@/lib/domain/indicadores/camadaAcao";
+import { lerPeriodo, PERIODO_LABEL, PERIODOS, type Periodo } from "@/lib/domain/indicadores/desempenho";
+import { carregarCamadaDesempenho } from "@/lib/indicadores/desempenho";
 import {
   carregarCamadaAcao,
   contarProcessosDoUsuario,
@@ -28,7 +31,7 @@ const DIA_MS = 24 * 60 * 60 * 1000;
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ escopo?: string; fila?: string }>;
+  searchParams: Promise<{ escopo?: string; fila?: string; periodo?: string }>;
 }) {
   const user = await requireAuth();
   const params = await searchParams;
@@ -39,20 +42,22 @@ export default async function DashboardPage({
       ? params.escopo
       : escopoPadrao(user.role, await contarProcessosDoUsuario(user.id));
   const filaCompleta = params.fila === "todas";
+  const periodo = lerPeriodo(params.periodo);
 
-  const [acao, usuarios, alertas, cotacoesResposta] = await Promise.all([
+  const [acao, desempenho, usuarios, alertas] = await Promise.all([
     carregarCamadaAcao(escopo, user.id, agora),
+    carregarCamadaDesempenho(periodo, escopo, user.id, agora),
     listarUsuariosAtribuiveis(),
     buscarAlertas(),
-    db.cotacao.findMany({ select: { status: true } }),
   ]);
 
   const { resumo } = acao;
-  const totalCotacoes = cotacoesResposta.length;
-  const respondidas = cotacoesResposta.filter((c) => c.status !== "silenciosa").length;
-  const taxaResposta = totalCotacoes > 0 ? Math.round((respondidas / totalCotacoes) * 100) : 0;
 
-  const hrefEscopo = (e: Escopo) => `/dashboard?escopo=${e}${filaCompleta ? "&fila=todas" : ""}`;
+  const href = (o: { escopo?: Escopo; periodo?: Periodo; fila?: boolean }) => {
+    const q = new URLSearchParams({ escopo: o.escopo ?? escopo, periodo: o.periodo ?? periodo });
+    if (o.fila ?? filaCompleta) q.set("fila", "todas");
+    return `/dashboard?${q.toString()}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -72,7 +77,7 @@ export default async function DashboardPage({
             {(["meus", "todos"] as const).map((e) => (
               <Link
                 key={e}
-                href={hrefEscopo(e)}
+                href={href({ escopo: e })}
                 aria-current={escopo === e ? "page" : undefined}
                 className={cn(
                   "rounded-md px-3 py-1 font-medium",
@@ -115,16 +120,16 @@ export default async function DashboardPage({
           />
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="min-w-0 lg:col-span-2">
             <WorkQueueCard
               itens={filaCompleta ? acao.fila : acao.fila.slice(0, FILA_RESUMIDA)}
               total={acao.fila.length}
-              verTodosHref={`/dashboard?escopo=${escopo}&fila=todas`}
+              verTodosHref={href({ fila: true })}
             />
           </div>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -210,18 +215,36 @@ export default async function DashboardPage({
       </section>
 
       <section aria-labelledby="camada-desempenho" className="space-y-4">
-        <h2 id="camada-desempenho" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Desempenho
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard
-            label="Taxa de resposta"
-            value={`${taxaResposta}%`}
-            hint={`${respondidas} de ${totalCotacoes} cotações tiveram resposta (inclui recusas)`}
-            icon={Mail}
-            href="/cotacoes"
-          />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 id="camada-desempenho" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Desempenho · últimos {PERIODO_LABEL[periodo]}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {desempenho.dadosTempoDesde
+                ? `Tempos calculados com dados confiáveis desde ${desempenho.dadosTempoDesde.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`
+                : "Ainda não há processo com data de abertura confirmada — os tempos aparecem a partir das próximas importações."}
+            </p>
+          </div>
+          <nav aria-label="Período" className="inline-flex rounded-lg border p-0.5 text-xs">
+            {PERIODOS.map((p) => (
+              <Link
+                key={p}
+                href={href({ periodo: p })}
+                aria-current={periodo === p ? "page" : undefined}
+                className={cn(
+                  "rounded-md px-3 py-1 font-medium",
+                  periodo === p ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {PERIODO_LABEL[p]}
+              </Link>
+            ))}
+          </nav>
         </div>
+
+        <IndicadoresDesempenho dados={desempenho} />
+        <RespostaPorCategoria categorias={desempenho.porCategoria} />
       </section>
     </div>
   );

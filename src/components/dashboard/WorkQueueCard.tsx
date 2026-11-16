@@ -67,10 +67,10 @@ export function WorkQueueCard({
                   {item.responsavel ?? <span className="text-warning-foreground dark:text-warning">sem responsável</span>}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2 sm:shrink-0">
                 <Badge
                   variant="outline"
-                  className={cn("text-xs", CLASSE_URGENCIA[item.urgencia])}
+                  className={cn("h-auto whitespace-normal text-left text-xs", CLASSE_URGENCIA[item.urgencia])}
                 >
                   {item.proximaAcao}
                 </Badge>

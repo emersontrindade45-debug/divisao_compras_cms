@@ -28,9 +28,11 @@ export async function buscarAlertas(): Promise<Alerta[]> {
         },
       }),
 
-      // Processos sem nenhuma fonte do tipo contratacao_publica
+      // Processos ativos sem preço público incluído. Mesma definição do card
+      // "Sem fonte pública" do dashboard (M30.a): fonte canônica é o
+      // PrecoConsolidado — `Fonte` não enxerga os preços que vêm da planilha.
       db.processo.findMany({
-        where: { status: { in: ["pendente", "parcial"] } },
+        where: { status: { not: "aderente" }, faseAndamento: { not: "concluido" } },
         select: {
           id: true,
           numero: true,
@@ -41,7 +43,15 @@ export async function buscarAlertas(): Promise<Alerta[]> {
           itens: {
             select: {
               id: true,
-              fontes: { where: { tipo: "contratacao_publica" }, take: 1, select: { id: true } },
+              seriePrecos: {
+                select: {
+                  precos: {
+                    where: { status: "incluido", fonte: "contratacao_publica" },
+                    take: 1,
+                    select: { id: true },
+                  },
+                },
+              },
             },
           },
         },
@@ -78,7 +88,7 @@ export async function buscarAlertas(): Promise<Alerta[]> {
 
   // Processos sem fonte pública em nenhum item
   const processosSemFontePublica = processos.filter((p) =>
-    p.itens.every((i) => i.fontes.length === 0),
+    p.itens.every((i) => i.seriePrecos.every((sp) => sp.precos.length === 0)),
   );
 
   const alertas = gerarAlertas({

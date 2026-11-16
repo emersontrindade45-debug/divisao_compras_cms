@@ -1725,3 +1725,20 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      clique simplesmente não faz nada. Ao portar padrão do shadcn/Radix, conferir as props no
      `.d.ts` do componente Base UI instalado (`esm/menu/item/MenuItem.d.ts`), não confiar no
      typecheck: prop errada que coincide com atributo HTML não gera erro.
+129. **`document.documentElement.scrollWidth` não detecta transbordo dentro de container — medir o
+     elemento mais à direita.** Ao verificar o dashboard no celular (M30, 2026-11-16) li
+     `scrollWidth = 390` como "sem rolagem horizontal" e a captura saiu com 454px: o transbordo
+     acontecia dentro do `main` (que rola sozinho), invisível para o documento. A causa era a
+     clássica de CSS grid — item de grid tem `min-width: auto`, então um badge `whitespace-nowrap`
+     alarga a trilha inteira em vez de quebrar. Correção: `min-w-0` nos filhos da grade e badge que
+     pode quebrar. Verificação correta:
+     `Math.max(...[...document.querySelectorAll("main *")].map(e => e.getBoundingClientRect().right))`
+     ≤ largura do viewport — e olhar a captura, que foi o que denunciou o erro (§9.37: exercitar a
+     propriedade, não um indicador indireto dela).
+130. **A mesma pergunta respondida em dois lugares da tela precisa da mesma definição — senão o
+     usuário vê dois números e não confia em nenhum.** Ao trocar o card "Sem fonte pública" para a
+     fonte canônica (`PrecoConsolidado`, processos ativos), o banner de alertas logo acima seguia
+     contando pela tabela `Fonte` e só status `pendente`/`parcial`: 4 no card, 2 no banner, na
+     mesma página. Só apareceu olhando a tela real. Ao mudar a definição de um indicador, `grep`
+     pela pergunta em linguagem de domínio (aqui: "fonte pública", `contratacao_publica`) e alinhar
+     todos os pontos que a respondem — e testar o argumento passado ao Prisma em cada um (§9.46).
