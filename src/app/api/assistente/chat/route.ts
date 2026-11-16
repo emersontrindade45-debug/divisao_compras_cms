@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import {
+  ehCodigoMunicipioValido,
+  MAX_MUNICIPIOS_FILTRO,
+} from "@/lib/domain/municipios/municipios";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
@@ -64,6 +68,19 @@ const corpoSchema = z.object({
       filtrarPorAderencia: z.boolean(),
       valorMinimo: z.number().positive().optional(),
       valorMaximo: z.number().positive().optional(),
+      /**
+       * Códigos IBGE do dropdown de cidades. Conferidos contra a lista oficial:
+       * código inexistente faz o PNCP devolver 0 sem erro (CLAUDE.md §9.98).
+       */
+      municipios: z
+        .array(
+          z
+            .number()
+            .int()
+            .refine(ehCodigoMunicipioValido, { message: "Cidade não reconhecida." }),
+        )
+        .max(MAX_MUNICIPIOS_FILTRO, `Escolha no máximo ${MAX_MUNICIPIOS_FILTRO} cidades.`)
+        .optional(),
     })
     .optional(),
 });

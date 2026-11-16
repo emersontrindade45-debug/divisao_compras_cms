@@ -244,6 +244,39 @@ describe("contexto do item e tempo por fonte", () => {
   });
 });
 
+describe("filtro de cidades", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("com cidades, só consulta os provedores que aplicam o recorte", async () => {
+    const pncpSpy = vi.spyOn(pncp, "buscarContratosPNCP").mockResolvedValue([]);
+    const painelSpy = vi.spyOn(painelPrecos, "buscarPrecosPainelPrecos").mockResolvedValue([]);
+
+    const { porProvedor } = await buscarCandidatosPublicosComDiagnostico("cadeira", {
+      filtros: { municipios: [3548500] },
+    });
+
+    const esperados = REGISTRY_PROVEDORES_PUBLICOS.filter((p) => p.habilitado && p.aplicaFiltros)
+      .map((p) => p.chave)
+      .sort();
+    expect(Object.keys(porProvedor).sort()).toEqual(esperados);
+    expect(esperados).toContain("pncp");
+    expect(pncpSpy).toHaveBeenCalledWith("cadeira", undefined, { municipios: [3548500] });
+    // O Painel de serviços não sabe a cidade de cada preço: nem é chamado.
+    expect(painelSpy).not.toHaveBeenCalled();
+  });
+
+  it("sem cidades (só UF), consulta todos os provedores habilitados", async () => {
+    vi.spyOn(pncp, "buscarContratosPNCP").mockResolvedValue([]);
+    const painelSpy = vi.spyOn(painelPrecos, "buscarPrecosPainelPrecos").mockResolvedValue([]);
+
+    await buscarCandidatosPublicosComDiagnostico("cadeira", { filtros: { uf: "SP" } });
+
+    expect(painelSpy).toHaveBeenCalled();
+  });
+});
+
 describe("REGISTRY_PROVEDORES_PUBLICOS", () => {
   it("inclui o provedor do modulo-contratacoes do Compras.gov, habilitado (M16)", () => {
     const provedor = REGISTRY_PROVEDORES_PUBLICOS.find(

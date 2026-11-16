@@ -538,8 +538,10 @@ export const STATUS_VALIDOS = ["encerradas", "recebendo_proposta", "em_julgament
  * é feita na fronteira, com Zod, antes de chegar aqui (ver `lib/assistente`), e
  * os valores aceitos vivem nas constantes acima.
  *
- * **Multivalor não existe**: `ufs=SP,RJ` devolve 0, e não a união. Um filtro por
- * vez.
+ * **Multivalor só com `|`**: `ufs=SP,RJ` (vírgula) devolve 0, e não a união. Em
+ * 2026-11-16 medi que o separador aceito é a barra vertical (`ufs=SP|RJ` e
+ * `municipios=3548500|3550308` devolvem a união). Por ora só `municipios` usa
+ * multivalor; `uf`/`esfera`/`status` seguem um valor por vez.
  */
 export interface FiltrosBuscaPNCP {
   /** Sigla da UF em maiúsculas. Ver `UFS_VALIDAS`. */
@@ -548,6 +550,13 @@ export interface FiltrosBuscaPNCP {
   esfera?: string;
   /** Situação da contratação. Ver `STATUS_VALIDOS`. */
   status?: string;
+  /**
+   * Códigos IBGE de 7 dígitos, escolhidos pelo analista no dropdown de cidades.
+   * Viram `municipios=cod1|cod2` (medido: o parâmetro recebe código IBGE —
+   * Santos `3548500` devolveu só editais de Santos —, e código inexistente
+   * devolve 0 sem erro). Validar contra `lib/domain/municipios` antes.
+   */
+  municipios?: number[];
 }
 
 /** Converte os filtros em parâmetros de query, omitindo os não informados. */
@@ -557,6 +566,9 @@ function paramsDosFiltros(filtros: FiltrosBuscaPNCP | undefined): Record<string,
     ...(filtros.uf ? { ufs: filtros.uf } : {}),
     ...(filtros.esfera ? { esferas: filtros.esfera } : {}),
     ...(filtros.status ? { status: filtros.status } : {}),
+    ...(filtros.municipios && filtros.municipios.length > 0
+      ? { municipios: filtros.municipios.join("|") }
+      : {}),
   };
 }
 

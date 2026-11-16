@@ -9,6 +9,11 @@ import {
   urlEditalHomologadoPncp,
 } from "@/lib/integracoes/comprasGovMateriais";
 import { contemCnpjProprio } from "@/lib/domain/orgaoProprio";
+import {
+  municipioEstaNaSelecao,
+  municipioPorCodigo,
+  type Municipio,
+} from "@/lib/domain/municipios/municipios";
 import { encontrarCodigosCatalogoLocal } from "./matchingCatalogoLocal";
 import { processarComConcorrencia } from "./processarComConcorrencia";
 import { chaveDescricao } from "./chaveDescricao";
@@ -294,6 +299,15 @@ export async function buscarCandidatosPainelMateriais(
   if (familias.length === 0) return [];
 
   const { dataInicio, dataFim } = janelaRecencia(agora);
+  // Cidades: a API não tem parâmetro de município, mas cada linha traz o nome
+  // dele — filtra-se depois. Quando todas as cidades são da mesma UF, a UF vai
+  // na origem para que a página de 500 linhas não seja gasta com o país inteiro.
+  const cidades = (filtros?.municipios ?? [])
+    .map((codigo) => municipioPorCodigo(codigo))
+    .filter((m): m is Municipio => m !== undefined);
+  const ufsDasCidades = new Set(cidades.map((m) => m.uf));
+  const estadoNaOrigem =
+    filtros?.uf ?? (ufsDasCidades.size === 1 ? [...ufsDasCidades][0] : undefined);
   let falhas = 0;
   const porFamilia = await processarComConcorrencia(
     familias,
@@ -303,7 +317,7 @@ export async function buscarCandidatosPainelMateriais(
         codigoPdm,
         dataInicio,
         dataFim,
-        estado: filtros?.uf,
+        estado: estadoNaOrigem,
         esfera: filtros?.esfera,
       }),
     (codigoPdm, erro) => {
@@ -315,7 +329,10 @@ export async function buscarCandidatosPainelMateriais(
     throw new Error(`Painel de Preços (materiais) não respondeu para "${termo}".`);
   }
 
-  const precos = porFamilia.filter((r): r is PrecoMaterialPainel[] => Array.isArray(r)).flat();
+  const precos = porFamilia
+    .filter((r): r is PrecoMaterialPainel[] => Array.isArray(r))
+    .flat()
+    .filter((p) => cidades.length === 0 || municipioEstaNaSelecao(p.municipio, p.estado, cidades));
   const selecionados = selecionarParaValidacao(termo, precos);
   if (selecionados.length === 0) return [];
 

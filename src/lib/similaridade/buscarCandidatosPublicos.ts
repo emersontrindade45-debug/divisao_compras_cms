@@ -83,7 +83,12 @@ export async function buscarCandidatosPublicosComDiagnostico(
   termo: string,
   opcoes: OpcoesBuscarCandidatosPublicos = {},
 ): Promise<ResultadoBuscaPublica> {
-  const provedoresHabilitados = REGISTRY_PROVEDORES_PUBLICOS.filter((provedor) => provedor.habilitado);
+  // Com cidades no recorte, só consulta quem sabe filtrar cidade — ver
+  // `aplicaFiltros` em `registryProvedores.ts`.
+  const filtraCidade = (opcoes.filtros?.municipios?.length ?? 0) > 0;
+  const provedoresHabilitados = REGISTRY_PROVEDORES_PUBLICOS.filter(
+    (provedor) => provedor.habilitado && (!filtraCidade || provedor.aplicaFiltros),
+  );
 
   const duracoes: number[] = new Array(provedoresHabilitados.length).fill(0);
   const resultados = await Promise.allSettled(

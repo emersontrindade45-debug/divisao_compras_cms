@@ -144,6 +144,44 @@ describe("buscarCandidatosPainelMateriais", () => {
     expect((AGORA.getTime() - consulta.dataInicio.getTime()) / 86_400_000).toBe(730);
   });
 
+  it("com cidades escolhidas, mantém só as linhas dessas cidades (nome sem acento/caixa)", async () => {
+    mocks.buscarPrecos.mockResolvedValue([
+      preco({ idCompra: "11111111111111111", municipio: "CUBATAO", estado: "SP" }),
+      preco({ idCompra: "22222222222222222", municipio: "Santos", estado: "SP", precoUnitario: 3000 }),
+      preco({ idCompra: "33333333333333333", municipio: "MANAUS", estado: "AM", precoUnitario: 2900 }),
+    ]);
+
+    const candidatos = await buscarCandidatosPainelMateriais(
+      "impressora",
+      { municipios: [3513504 /* Cubatão */, 3548500 /* Santos */] },
+      undefined,
+      AGORA,
+    );
+
+    expect(candidatos.map((c) => c.fonteUrl).sort()).toEqual(
+      [urlDe("11111111111111111"), urlDe("22222222222222222")].sort(),
+    );
+  });
+
+  it("cidades da mesma UF levam a UF para a origem; de UFs diferentes, não", async () => {
+    await buscarCandidatosPainelMateriais(
+      "impressora",
+      { municipios: [3513504, 3548500] },
+      undefined,
+      AGORA,
+    );
+    expect(mocks.buscarPrecos.mock.calls[0]![0].estado).toBe("SP");
+
+    mocks.buscarPrecos.mockClear();
+    await buscarCandidatosPainelMateriais(
+      "impressora",
+      { municipios: [3548500, 3304557 /* Rio de Janeiro */] },
+      undefined,
+      AGORA,
+    );
+    expect(mocks.buscarPrecos.mock.calls[0]![0].estado).toBeUndefined();
+  });
+
   it("mapeia o candidato com o link verificado como evidência", async () => {
     const [candidato] = await buscarCandidatosPainelMateriais(
       "impressora",

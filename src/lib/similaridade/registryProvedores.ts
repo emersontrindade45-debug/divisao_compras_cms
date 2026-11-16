@@ -31,6 +31,13 @@ export interface ProvedorBuscaPublica {
    * fontes ignoraram o recorte pedido. Sem isso a busca prometeria "só SP" e
    * devolveria resultado de todo o país por três das quatro fontes, sem nada na
    * tela indicando (CLAUDE.md §9.40).
+   *
+   * **Cidades são mais estritas que UF.** Com cidades escolhidas no filtro da
+   * tela, os provedores sem `aplicaFiltros` NÃO são consultados (ver
+   * `buscarCandidatosPublicosComDiagnostico`): o analista pediu "só Santos", e
+   * um card de Manaus vindo de uma fonte que não sabe a cidade de cada preço
+   * desmentiria o filtro que ele está vendo. Quem passa a ter `true` aqui
+   * precisa aplicar também `filtros.municipios`.
    */
   aplicaFiltros: boolean;
   buscar: (

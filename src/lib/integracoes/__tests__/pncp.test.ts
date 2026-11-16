@@ -1474,6 +1474,32 @@ describe("recorte da busca por UF/esfera/situação", () => {
     for (const u of buscaAta) expect(u).toContain("ufs=SP");
   });
 
+  it("põe as cidades na query como códigos IBGE separados por barra vertical", async () => {
+    // Medido em 2026-11-16: `municipios=3548500|3550308` devolve a união e
+    // `municipios=3548500,3550308` (vírgula) devolve ZERO sem erro.
+    const urls: string[] = [];
+    mockPncp({ processos: [], onUrl: (u) => urls.push(u) });
+
+    await buscarContratosPNCP("cadeira", undefined, { municipios: [3548500, 3550308] });
+
+    const busca = urls.filter((u) => u.includes("/api/search/"));
+    expect(busca.length).toBe(6); // 4 páginas de edital + 2 de ata
+    for (const u of busca) {
+      expect(new URL(u).searchParams.get("municipios")).toBe("3548500|3550308");
+    }
+  });
+
+  it("não manda municipios quando a lista vem vazia", async () => {
+    const urls: string[] = [];
+    mockPncp({ processos: [], onUrl: (u) => urls.push(u) });
+
+    await buscarContratosPNCP("cadeira", undefined, { municipios: [] });
+
+    for (const u of urls.filter((u) => u.includes("/api/search/"))) {
+      expect(u).not.toContain("municipios=");
+    }
+  });
+
   it("omite da query o que não foi pedido", async () => {
     const urls: string[] = [];
     mockPncp({ processos: [], onUrl: (u) => urls.push(u) });

@@ -20,6 +20,8 @@ import type { CandidatoSugerido } from "@/lib/assistente/sugestoes";
 import { PassoFerramenta, type PassoExibido } from "./PassoFerramenta";
 import { RespostaFormatada } from "./RespostaFormatada";
 import { SugestoesCandidatos } from "./SugestoesCandidatos";
+import { FiltroCidades } from "./FiltroCidades";
+import type { Municipio } from "@/lib/domain/municipios/municipios";
 
 // Chat do assistente de pesquisa (M13).
 //
@@ -104,6 +106,7 @@ export function AssistenteChat({
   const [filtrarAderencia, setFiltrarAderencia] = useState(true);
   const [valorMinimoTexto, setValorMinimoTexto] = useState("");
   const [valorMaximoTexto, setValorMaximoTexto] = useState("");
+  const [cidades, setCidades] = useState<Municipio[]>([]);
   const conversaId = useRef<string | null>(null);
   // Carregar mensagens antigas insere no TOPO. Sem esta marca o efeito de
   // rolagem levaria o painel de volta ao fim, desfazendo o que o clique pediu.
@@ -291,6 +294,7 @@ export function AssistenteChat({
               filtrarPorAderencia: filtrarAderencia,
               ...(valorMinimoNumero !== undefined ? { valorMinimo: valorMinimoNumero } : {}),
               ...(valorMaximoNumero !== undefined ? { valorMaximo: valorMaximoNumero } : {}),
+              ...(cidades.length > 0 ? { municipios: cidades.map((c) => c.codigo) } : {}),
             },
           }),
           signal: controller.signal,
@@ -422,12 +426,15 @@ export function AssistenteChat({
         setEnviando(false);
       }
     },
-    [enviando, processoId, filtrarAderencia, valorMinimoTexto, valorMaximoTexto],
+    [enviando, processoId, filtrarAderencia, valorMinimoTexto, valorMaximoTexto, cidades],
   );
 
   const vazio = !carregando && mensagens.length === 0;
   const filtrosBuscaAtivos =
-    !filtrarAderencia || valorMinimoTexto.trim() !== "" || valorMaximoTexto.trim() !== "";
+    !filtrarAderencia ||
+    valorMinimoTexto.trim() !== "" ||
+    valorMaximoTexto.trim() !== "" ||
+    cidades.length > 0;
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
@@ -635,6 +642,7 @@ export function AssistenteChat({
                 />
               </div>
             </div>
+            <FiltroCidades selecionadas={cidades} onChange={setCidades} />
             {filtrosBuscaAtivos && (
               <Button
                 type="button"
@@ -645,6 +653,7 @@ export function AssistenteChat({
                   setFiltrarAderencia(true);
                   setValorMinimoTexto("");
                   setValorMaximoTexto("");
+                  setCidades([]);
                 }}
               >
                 Limpar filtros

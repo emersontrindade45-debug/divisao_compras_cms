@@ -1023,6 +1023,42 @@ describe("registry de ferramentas do assistente", () => {
       expect(resposta.total).toBe(1);
     });
 
+    it("as cidades da tela entram no recorte e substituem a UF do modelo", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([candidato({})]);
+      const registry = montarRegistry({
+        ...CTX_PROCESSO,
+        preferenciasBusca: { filtrarPorAderencia: true, municipios: [3548500, 3550308] },
+      });
+
+      // O modelo pede RJ; com Santos e São Paulo escolhidas, a UF dele zeraria
+      // a busca (o PNCP faz interseção) — por isso sai.
+      const resposta = await chamar(registry, "buscar_pncp", {
+        termo: "cadeira",
+        uf: "RJ",
+        esfera: "M",
+      });
+
+      expect(mocks.buscarCandidatosPublicos).toHaveBeenCalledWith("cadeira", {
+        timeoutMsPorProvedor: expect.any(Number),
+        filtros: { esfera: "M", municipios: [3548500, 3550308] },
+        contexto: expect.any(Object),
+      });
+      expect(resposta.observacao).toMatch(/FILTRO DE CIDADES.*Santos\/SP, São Paulo\/SP/);
+    });
+
+    it("sem resultado nas cidades, manda o modelo pedir ao usuário para ampliar o filtro", async () => {
+      mocks.buscarCandidatosPublicos.mockResolvedValue([]);
+      const registry = montarRegistry({
+        ...CTX_PROCESSO,
+        preferenciasBusca: { filtrarPorAderencia: true, municipios: [3548500] },
+      });
+
+      const resposta = await chamar(registry, "buscar_pncp", { termo: "cadeira" });
+
+      expect(resposta.observacao).toMatch(/NAS CIDADES ESCOLHIDAS/);
+      expect(resposta.observacao).toMatch(/não consegue remover esse filtro/);
+    });
+
     it("a faixa de valor da tela vale mesmo quando o modelo não pediu nenhuma", async () => {
       mocks.buscarCandidatosPublicos.mockResolvedValue([
         candidato({ valorUnitario: 20 }),

@@ -366,6 +366,35 @@ describe("POST /api/assistente/chat", () => {
     );
   });
 
+  it("repassa as cidades do filtro da tela ao registry", async () => {
+    await POST(
+      requisicao({
+        mensagem: "procure cadeiras",
+        processoId: "proc-1",
+        preferenciasBusca: { filtrarPorAderencia: true, municipios: [3548500, 3550308] },
+      }),
+    );
+
+    expect(mocks.montarRegistry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferenciasBusca: { filtrarPorAderencia: true, municipios: [3548500, 3550308] },
+      }),
+    );
+  });
+
+  it("recusa código de cidade que não existe no IBGE (o PNCP devolveria 0 sem erro)", async () => {
+    const res = await POST(
+      requisicao({
+        mensagem: "procure cadeiras",
+        processoId: "proc-1",
+        preferenciasBusca: { filtrarPorAderencia: true, municipios: [9999999] },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(mocks.executarTurno).not.toHaveBeenCalled();
+  });
+
   it("não inclui preferenciasBusca no registry quando o cliente não manda nada", async () => {
     await POST(requisicao({ mensagem: "procure cadeiras", processoId: "proc-1" }));
 

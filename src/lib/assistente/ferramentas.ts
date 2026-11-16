@@ -28,6 +28,11 @@ import {
 } from "@/lib/integracoes/perplexity";
 import type { CandidatoSimilaridade, ItemExtraidoTR } from "@/lib/ia/types";
 import { filtrarResultadosWeb, resumirDescartes } from "./guardas";
+import {
+  municipioPorCodigo,
+  rotuloMunicipio,
+  type Municipio,
+} from "@/lib/domain/municipios/municipios";
 import type {
   ChamadaFerramenta,
   ExecutorFerramenta,
@@ -111,6 +116,12 @@ export interface PreferenciasBusca {
   filtrarPorAderencia: boolean;
   valorMinimo?: number;
   valorMaximo?: number;
+  /**
+   * Códigos IBGE das cidades escolhidas no dropdown da tela (já validados na
+   * rota contra `lib/domain/municipios`). Recortam a busca a contratações
+   * desses municípios. O modelo não escolhe cidade: é decisão do analista.
+   */
+  municipios?: number[];
 }
 
 export interface ContextoFerramentas {
@@ -828,6 +839,23 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
    * UF/esfera/situação na origem; as demais não têm equivalente.
    */
   function avisoRecorteParcial(filtros?: FiltrosBuscaPNCP): string {
+    const cidades = (filtros?.municipios ?? [])
+      .map((codigo) => municipioPorCodigo(codigo))
+      .filter((m): m is Municipio => m !== undefined)
+      .map(rotuloMunicipio);
+    if (cidades.length > 0) {
+      // Com cidades, as fontes que não sabem filtrar cidade nem são consultadas
+      // (`buscarCandidatosPublicosComDiagnostico`) — o aviso é outro.
+      const fora = fontesQueIgnoramFiltros();
+      return (
+        ` FILTRO DE CIDADES (escolhido pelo usuário na tela): ${cidades.join(", ")}. ` +
+        "Todos os candidatos são dessas cidades. Só o PNCP e o Painel de Preços de " +
+        "materiais foram consultados" +
+        (fora.length > 0 ? ` — as demais fontes (${fora.join(", ")}) não informam a cidade ` +
+          "de cada preço e ficaram de fora" : "") +
+        ". Diga isso ao usuário se o resultado vier curto."
+      );
+    }
     const pedidos = [
       filtros?.uf ? `UF ${filtros.uf}` : null,
       filtros?.esfera ? `esfera ${filtros.esfera}` : null,
@@ -851,8 +879,19 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     itemIdSugerido: string | null,
     valorMinimo?: number,
     valorMaximo?: number,
-    filtros?: FiltrosBuscaPNCP,
+    filtrosDoModelo?: FiltrosBuscaPNCP,
   ) {
+    // Cidades vêm da tela e prevalecem. A UF que o modelo tenha mandado sai:
+    // as cidades já determinam o estado, e uma UF diferente da delas zeraria a
+    // busca (o PNCP faz interseção dos filtros).
+    const municipiosDaTela = ctx.preferenciasBusca?.municipios ?? [];
+    const filtrosSemUf = filtrosDoModelo
+      ? montarFiltros({ esfera: filtrosDoModelo.esfera, status: filtrosDoModelo.status })
+      : undefined;
+    const filtros: FiltrosBuscaPNCP | undefined =
+      municipiosDaTela.length > 0
+        ? { ...filtrosSemUf, municipios: municipiosDaTela }
+        : filtrosDoModelo;
     // Preferência da tela prevalece sobre o argumento do modelo — ver
     // `PreferenciasBusca`.
     const valorMinimoEfetivo = ctx.preferenciasBusca?.valorMinimo ?? valorMinimo;
@@ -860,7 +899,9 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
     const aderenciaLigada = ctx.preferenciasBusca?.filtrarPorAderencia ?? true;
 
     const temFiltroValor = valorMinimoEfetivo !== undefined || valorMaximoEfetivo !== undefined;
-    const temRecorte = Boolean(filtros?.uf || filtros?.esfera || filtros?.status);
+    const temRecorte = Boolean(
+      filtros?.uf || filtros?.esfera || filtros?.status || municipiosDaTela.length > 0,
+    );
     // Tempo por etapa, gravado com o passo (`metricas`). Sem isto só existia a
     // duração total: uma busca de 47,5s em produção (2026-11-09) não tinha como
     // ser atribuída às fontes, à demoção ou à IA.
@@ -981,10 +1022,15 @@ export function montarRegistry(ctx: ContextoFerramentas): Registry {
           ? "Nenhuma fonte pública devolveu nada para este termo dentro da faixa de valor " +
             "informada. Tente ampliar a faixa ou remover o filtro de valor antes de trocar o termo."
           : temRecorte
-            ? "Nenhuma fonte pública devolveu nada para este termo COM O RECORTE PEDIDO " +
-              "(UF/esfera/situação). Antes de mexer no termo, tente remover o recorte: ele " +
-              "reduz muito o universo — filtrar por uma UF sozinha costuma cortar mais de 85% " +
-              "dos editais."
+            ? municipiosDaTela.length > 0
+              ? "Nenhuma fonte pública devolveu nada para este termo NAS CIDADES ESCOLHIDAS " +
+                "pelo usuário no filtro da tela. Você não consegue remover esse filtro: diga ao " +
+                "usuário que nada foi achado nessas cidades e sugira acrescentar cidades ou " +
+                "limpar o filtro de cidades, antes de trocar o termo."
+              : "Nenhuma fonte pública devolveu nada para este termo COM O RECORTE PEDIDO " +
+                "(UF/esfera/situação). Antes de mexer no termo, tente remover o recorte: ele " +
+                "reduz muito o universo — filtrar por uma UF sozinha costuma cortar mais de 85% " +
+                "dos editais."
             : "Nenhuma fonte pública (PNCP, Painel de Preços, Compras.gov, SINAPI) devolveu nada " +
               "para este termo. Tente outro recorte: troque o substantivo-núcleo, remova " +
               "qualificadores ou use o nome comercial do produto." + ressalvaCobertura
