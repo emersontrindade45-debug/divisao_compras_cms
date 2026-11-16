@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { descartarEventosDeEmail } from "@/lib/emailCotacao/sentryFiltro";
 
 // Observabilidade de erros em produção (docs/PLAN.md, M11).
 //
@@ -15,6 +16,8 @@ if (process.env.SENTRY_DSN) {
     // Amostragem de performance desligada: o objetivo aqui é rastrear erros,
     // não medir latência. Ligar isso tem custo de plano e de ruído.
     tracesSampleRate: 0,
+    // Sigilo do e-mail de cotação (M30.d): erro vindo desse módulo nunca sai do sistema.
+    beforeSend: descartarEventosDeEmail,
     // `NODE_ENV` distingue produção de preview/dev no painel do Sentry.
     environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
   });
