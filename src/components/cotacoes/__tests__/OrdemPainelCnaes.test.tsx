@@ -2,7 +2,7 @@
  * Posição do painel de CNAEs na página.
  *
  * Existe por um defeito real (2026-08-22): o painel foi inserido DEPOIS do card "Seleção de
- * Fornecedores", que é uma tabela longa, então ficava fora da primeira tela e o usuário relatou
+ * Fornecedores" (tabela longa, removida em 2026-11-16), então ficava fora da primeira tela e o usuário relatou
  * que ele "não apareceu". Os testes que havia verificavam que o painel existe e funciona — nenhum
  * verificava onde ele estava, e por isso todos passavam com o defeito no ar.
  *
@@ -31,23 +31,9 @@ vi.mock("@/lib/actions/sugerirCnaesComContagem", () => ({
 import { SelecaoFornecedoresForm } from "../SelecaoFornecedoresForm";
 
 const PROCESSOS = [{ id: "p1", numero: "0908/2022", objeto: "Limpeza predial" }];
-const FORNECEDORES = [
-  {
-    id: "f1",
-    razaoSocial: "Fornecedor Cadastrado",
-    email: "f@x.com",
-    cidade: "Santos",
-    estado: "SP",
-    responsavelContato: "",
-    categoria: ["limpeza"],
-    score: 0,
-    taxaResposta: 0,
-  },
-];
-
 function renderComProcesso() {
   const { container } = render(
-    <SelecaoFornecedoresForm fornecedores={FORNECEDORES} processos={PROCESSOS} />,
+    <SelecaoFornecedoresForm processos={PROCESSOS} />,
   );
   const select = container.querySelector("select") as HTMLSelectElement;
   select.value = "p1";
@@ -65,26 +51,22 @@ describe("posição do painel de CNAEs", () => {
   });
 
   it("não aparece antes de escolher o processo (não há objeto para analisar)", () => {
-    render(<SelecaoFornecedoresForm fornecedores={FORNECEDORES} processos={PROCESSOS} />);
+    render(<SelecaoFornecedoresForm processos={PROCESSOS} />);
 
     expect(screen.queryByText("Atividades (CNAE) a buscar")).not.toBeInTheDocument();
   });
 
-  it("vem ANTES da tabela de fornecedores, não enterrado abaixo dela", () => {
+  it("não mostra mais a lista do cadastro próprio de fornecedores (removida em 2026-11-16)", () => {
     renderComProcesso();
 
-    const painel = screen.getByText("Atividades (CNAE) a buscar");
-    const tabela = screen.getByText("Seleção de Fornecedores");
-
-    // DOCUMENT_POSITION_FOLLOWING: `tabela` vem depois de `painel` na ordem do documento.
-    const posicao = painel.compareDocumentPosition(tabela);
-    expect(posicao & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Seleção de Fornecedores")).not.toBeInTheDocument();
+    expect(screen.queryByText("Registrar cotações")).not.toBeInTheDocument();
   });
 
   it("vem DEPOIS do card de processo — a ordem espelha a do trabalho", () => {
     renderComProcesso();
 
-    const processo = screen.getByText("Processo e prazo");
+    const processo = screen.getByText("Processo", { selector: '[data-slot="card-title"]' });
     const painel = screen.getByText("Atividades (CNAE) a buscar");
 
     const posicao = processo.compareDocumentPosition(painel);

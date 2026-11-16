@@ -67,7 +67,7 @@ async function renderComCandidatos() {
     totalEncontrado: CANDIDATOS.length,
   });
 
-  render(<SelecaoFornecedoresForm fornecedores={[]} processos={PROCESSOS} />);
+  render(<SelecaoFornecedoresForm processos={PROCESSOS} />);
 
   fireEvent.change(screen.getByRole("combobox", { name: "" }) ?? screen.getAllByRole("combobox")[0], {
     target: { value: "p1" },
