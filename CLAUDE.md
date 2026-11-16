@@ -1742,3 +1742,27 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      mesma página. Só apareceu olhando a tela real. Ao mudar a definição de um indicador, `grep`
      pela pergunta em linguagem de domínio (aqui: "fonte pública", `contratacao_publica`) e alinhar
      todos os pontos que a respondem — e testar o argumento passado ao Prisma em cada um (§9.46).
+131. **`Session.getActiveUser()` do Apps Script é VAZIO quando o app da web é chamado por anônimo —
+     use `getEffectiveUser()`.** O script do M30.d (lê a caixa `divisaocompras@` e responde ao
+     sistema) comparava o remetente de cada e-mail com `getActiveUser().getEmail()` para "só contar
+     o que a própria caixa enviou". Rodando no editor, o usuário ativo é o dono e tudo funcionava;
+     chamado pela URL `/exec` com acesso "Qualquer pessoa", ele é `""` e o filtro descartava todo
+     envio: a resposta vinha `{"envios":[],"respostas":[]}`, HTTP 200, sem erro. Custou ~6 ciclos,
+     agravados por três coisas que parecem a mesma falha e não são: (a) o script aberto na conta
+     Google errada também dá tudo zero; (b) uma implantação nova pode **reverter "Quem pode
+     acessar"** para "somente o domínio" (a chamada passa a dar 401, "página não encontrada");
+     (c) a URL `/exec` serve a **versão publicada**, não a do editor — sem "Nova versão" a correção
+     não chega. O que desfez o nó foi pôr um `diagnostico` no próprio payload (versão do código,
+     conta efetiva, fios achados): uma chamada respondeu qual das três era. Regra: ao integrar
+     serviço que executa código seu em outro ambiente, devolva sempre um carimbo de versão e da
+     identidade com que roda, e trate "resposta vazia com 200" como suspeita (§9.93).
+132. **`col = ANY($1::text[])` em tabela grande com índice de expressão pode virar Seq Scan —
+     medir o plano, e preferir `unnest + LATERAL ... LIMIT`.** No VPS (14 M de linhas), a busca de
+     2.000 e-mails por `lower(email)` fez `Seq Scan` (10 s) mesmo com o índice parcial criado e
+     `ANALYZE` rodado: o planejador estimava 12 M de linhas porque o `n_distinct` da expressão sai
+     subestimado em amostra, e a soma por elemento do array explode. A forma
+     `unnest($1) e CROSS JOIN LATERAL (SELECT ... WHERE lower(email)=e.email AND <predicado do
+     índice parcial> LIMIT 2)` usou `Index Scan` e levou 82–531 ms. O `LIMIT 2` também resolve o
+     e-mail compartilhado (um contador atende milhares de CNPJs): distingue "um dono" de "vários"
+     sem puxar tudo. Ao criar índice, o teste não é "o índice existe", é `EXPLAIN` da consulta
+     real; e o predicado de um índice parcial precisa estar escrito na consulta.

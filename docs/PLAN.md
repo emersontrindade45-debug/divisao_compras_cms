@@ -3050,6 +3050,27 @@ e nunca é gravado. Sem IA externa. Sem TI envolvida.
       Devolvidos no cadastro: 2/323. Envios com processo existente no sistema: 7/20. Cadastro
       limpo (1 e-mail por linha; 5.352/5.360 vindos da planilha). PENDENTE (Q49): de onde vêm os
       e-mails de envio — decide como criar/ligar fornecedores.
+- [x] **Servidor implementado (2026-11-17, commits `f5531ab`, `6df42b3`):** migration
+      `20261117120000_m30d_cotacao_email` (4 tabelas, 2 enums, sem coluna de conteúdo; aplicada
+      SÓ no banco LOCAL); regras puras em `lib/domain/cotacaoEmail/` (prazo, ligação por
+      endereço/domínio, ligação ao processo, classificação); `lib/emailCotacao/` (payload Zod
+      estrito, busca na base da Receita, sincronização em lote com guarda atômica);
+      `actions/verificarRespostasEmail.ts`; filtro `beforeSend` do Sentry. Verificação: 1.663
+      testes, tsc, ESLint; 20 mutações detectadas (uma — fuso horário — sobreviveu à 1ª versão do
+      teste e foi corrigida); SQL em lote exercitado em Postgres local com dados sintéticos
+      (classificação, idempotência, "analista resolveu não é sobrescrito", promoção de a_confirmar).
+- [x] **Índice no VPS (autorizado na Q53):** `empresas_candidatas_fornecedor_email_lower_idx`
+      (`lower(email)` parcial, 459 MB, 97 s, `CONCURRENTLY`) + `ANALYZE`. A forma `= ANY(array)`
+      NÃO usa o índice (Seq Scan, 10 s/2.000 e-mails — planejador estima 12 M de linhas); a forma
+      `unnest + LATERAL LIMIT 2` leva 82–531 ms. E-mail de contador atende milhares de CNPJs:
+      consulta sem CNPJ quando o e-mail tem mais de um dono.
+- [ ] **FALTA (M30.d2, UI):** botão "Verificar respostas" (página do processo e Cotações); painel
+      "Respostas a confirmar" com resolução em um clique; esconder e-mails inválidos na
+      "Nova cotação" (Q54); espelho na planilha de fornecedores ("Processos Cotação", e-mail
+      inválido, "Respondeu?"/"Enviou orçamento?"); dashboard lendo `ConsultaCotacao` (taxa de
+      resposta por CNAE). **Dependem de ação do usuário:** `APPS_SCRIPT_URL` e
+      `APPS_SCRIPT_SEGREDO` no `.env` e na Vercel; autorização para aplicar a migration do
+      M30.d em produção (§9.19) e para o push.
 - [ ] Gatilho só por botão "Verificar respostas" (página do processo e Cotações).
 - [ ] Espelho na planilha de fornecedores: "Respondeu?"/"Enviou orçamento?" = cotação mais
       recente; colunas novas "Processos Respondidos" e "Processos com Orçamento".
