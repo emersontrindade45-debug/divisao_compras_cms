@@ -3038,6 +3038,18 @@ e nunca é gravado. Sem IA externa. Sem TI envolvida.
 - [ ] **Resposta de outro endereço (Q48, aprovado):** liga pelo domínio quando um único
       destinatário do envio tem aquele domínio; domínio genérico (gmail, hotmail, outlook, yahoo,
       uol, bol) ou ambíguo → fila.
+- [x] **Spike passo 2 (2026-11-16): sistema chama o script como app da web e recebe só
+      metadados.** Implantação `AKfycbxSQ…` (Executar como: divisaocompras@; acesso: Qualquer
+      pessoa; sem segredo → `nao_autorizado`). Precisou de `getEffectiveUser` — anônimo tem
+      `getActiveUser` VAZIO (causa dos zeros). Resposta: 23 envios, 551 respostas, 12,5 s,
+      265 KB; campos todos dentro da lista combinada. Lição de processo: dois projetos em contas
+      diferentes + reimplantação que reverte "Quem pode acessar" custaram 6 ciclos — o diagnóstico
+      no payload (`versao`, conta efetiva, fios achados) resolveu na primeira chamada.
+- [ ] **Cruzamento com produção:** só 102 de 2.118 destinatários estão no cadastro (5%); 89 com
+      domínio de empresa cadastrada; 1.927 fora. Respostas humanas com remetente cadastrado: 3/121.
+      Devolvidos no cadastro: 2/323. Envios com processo existente no sistema: 7/20. Cadastro
+      limpo (1 e-mail por linha; 5.352/5.360 vindos da planilha). PENDENTE (Q49): de onde vêm os
+      e-mails de envio — decide como criar/ligar fornecedores.
 - [ ] Gatilho só por botão "Verificar respostas" (página do processo e Cotações).
 - [ ] Espelho na planilha de fornecedores: "Respondeu?"/"Enviou orçamento?" = cotação mais
       recente; colunas novas "Processos Respondidos" e "Processos com Orçamento".
