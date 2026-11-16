@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, LogOut, User } from "lucide-react";
+import { BookOpen, KeyRound, LogOut } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,8 +57,8 @@ export function UserMenu({ name, role }: UserMenuProps) {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem>
-          <User className="mr-2 size-4" /> Perfil
+        <DropdownMenuItem render={<Link href="/conta/senha" />}>
+          <KeyRound className="mr-2 size-4" /> Alterar senha
         </DropdownMenuItem>
         <DropdownMenuItem render={<Link href="/onboarding" />}>
           <BookOpen className="mr-2 size-4" /> Guia de uso
