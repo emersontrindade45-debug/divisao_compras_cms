@@ -21,6 +21,23 @@ enum OrigemDataAbertura {
   importacao
 }
 
+// M30.d — de onde veio o prazo de resposta de um envio de cotação por e-mail.
+enum PrazoOrigem {
+  assunto
+  corpo
+  padrao
+}
+
+// M30.d — situação de um fornecedor consultado por e-mail num envio.
+enum SituacaoConsulta {
+  sem_resposta
+  /// Respondeu, mas nenhuma regra decidiu se é orçamento ou recusa — aguarda o analista.
+  a_confirmar
+  orcamento
+  recusa
+  email_invalido
+}
+
 enum StatusProcesso {
   aderente
   parcial
@@ -245,6 +262,7 @@ model Processo {
 
   conversas          ConversaAssistente[]
   instrucoesPesquisa InstrucaoPesquisa[]
+  enviosCotacao      EnvioCotacao[]
 
   @@index([responsavelId])
   @@map("processos")
@@ -580,6 +598,7 @@ model Fornecedor {
 
   cotacoes          Cotacao[]
   historicoCotacoes HistoricoCotacao[]
+  consultasCotacao  ConsultaCotacao[]
   qualificacoes     QualificacaoFornecedor[]
 
   @@map("fornecedores")
@@ -1085,4 +1104,100 @@ model ItemCatalogoReferencia {
   @@unique([fonteChave, codigo])
   @@index([descricaoNormalizada])
   @@map("itens_catalogo_referencia")
+}
+
+// ── M30.d — Cotação por e-mail (caixa divisaocompras@) ────────────────────
+//
+// REGRA DE SIGILO (decidida com o usuário): nada de conteúdo de e-mail é
+// gravado — sem assunto, corpo, anexo. Só metadados: ids opacos do Gmail,
+// datas, o número do processo e o prazo extraídos do assunto, e a situação.
+// Os e-mails dos fornecedores consultados vêm da base de candidatos (Receita)
+// e do cadastro — são dado cadastral, não conteúdo de mensagem.
+
+/// Uma "Solicitação de Orçamento" enviada pela caixa da Divisão.
+model EnvioCotacao {
+  id                    String      @id @default(cuid())
+  /// Id da mensagem no Gmail — chave de idempotência (clicar de novo não duplica).
+  gmailMensagemId       String      @unique
+  gmailFio              String
+  dataEnvio             DateTime
+  /// Prazo de resposta: "Entrega:" do assunto, data no texto, ou envio + 5 dias úteis.
+  prazo                 DateTime
+  prazoOrigem           PrazoOrigem
+  /// Número como veio no assunto ("382"), sem ano. Liga ao Processo quando ele existir (Q51).
+  numeroProcessoAssunto String?
+  processoId            String?
+  totalDestinatarios    Int
+  createdAt             DateTime    @default(now())
+
+  processo  Processo?         @relation(fields: [processoId], references: [id], onDelete: SetNull)
+  consultas ConsultaCotacao[]
+  pendentes RespostaEmailPendente[]
+
+  @@index([processoId])
+  @@index([numeroProcessoAssunto])
+  @@map("envios_cotacao")
+}
+
+/// Um fornecedor consultado num envio. Registro exigido pela IN 65/2021
+/// (quem foi consultado e quem não respondeu).
+model ConsultaCotacao {
+  id              String           @id @default(cuid())
+  envioId         String
+  /// Minúsculo, sem espaços.
+  email           String
+  cnpj            String?
+  razaoSocial     String?
+  cnaeDescricao   String?
+  fornecedorId    String?
+  situacao        SituacaoConsulta @default(sem_resposta)
+  /// Hora do cabeçalho do e-mail de resposta (não a hora da classificação).
+  dataResposta    DateTime?
+  gmailRespostaId String?
+  /// Qual regra classificou (ex.: "anexo_orcamento", "frase_recusa", "devolucao", "manual").
+  regra           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  envio      EnvioCotacao @relation(fields: [envioId], references: [id], onDelete: Cascade)
+  fornecedor Fornecedor?  @relation(fields: [fornecedorId], references: [id], onDelete: SetNull)
+
+  @@unique([envioId, email])
+  @@index([email])
+  @@map("consultas_cotacao")
+}
+
+/// Resposta que nenhuma regra decidiu com segurança — fila "a confirmar".
+/// Não guarda o remetente (Q28): só o domínio, a sugestão e o link do Gmail.
+model RespostaEmailPendente {
+  id                 String    @id @default(cuid())
+  gmailMensagemId    String    @unique
+  envioId            String
+  dataResposta       DateTime
+  remetenteDominio   String
+  /// Consulta provável (mesmo e-mail ou domínio), quando houver.
+  sugestaoConsultaId String?
+  /// remetente_desconhecido | dominio_generico | dominio_ambiguo | sinais_ambiguos
+  motivo             String
+  temAnexoOrcamento  Boolean
+  contemRecusa       Boolean
+  contemValor        Boolean
+  resolvidaEm        DateTime?
+  createdAt          DateTime  @default(now())
+
+  envio EnvioCotacao @relation(fields: [envioId], references: [id], onDelete: Cascade)
+
+  @@index([resolvidaEm])
+  @@map("respostas_email_pendentes")
+}
+
+/// E-mail que voltou (devolução do servidor). Some da lista de envio da "Nova cotação".
+model EmailInvalido {
+  /// Minúsculo.
+  email             String   @id
+  primeiraDevolucao DateTime
+  gmailMensagemId   String
+  createdAt         DateTime @default(now())
+
+  @@map("emails_invalidos")
 }
