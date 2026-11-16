@@ -119,6 +119,10 @@ function metadadosDaMensagem_(msg, envio) {
     processo: (envio && envio.processo) || numeroProcessoDoAssunto_(assunto),
     remetenteEraDestinatario: envio ? envio.destinatarios.indexOf(remetente) !== -1 : false,
     devolucao: REMETENTE_DEVOLUCAO.test(remetente),
+    // Endereço que voltou: cabeçalho técnico do servidor, sem ler o texto da devolução.
+    enderecosDevolvidos: REMETENTE_DEVOLUCAO.test(remetente)
+      ? enderecos_(msg.getHeader("X-Failed-Recipients"))
+      : [],
     automatica: ehAutomatica_(msg),
     temAnexoOrcamento: anexos.some(function (a) { return EXTENSOES_ORCAMENTO.test(a.getName()); }),
     contemRecusa: FRASES_RECUSA.some(function (f) { return corpo.indexOf(f) !== -1; }),
@@ -168,6 +172,11 @@ function testeLeitura() {
     " | devoluções: " + conta(r, function (x) { return x.devolucao; }) +
     " | automáticas: " + conta(r, function (x) { return x.automatica && !x.devolucao; }) +
     " | humanas: " + humanas.length);
+  var devolvidos = {};
+  r.forEach(function (x) { x.enderecosDevolvidos.forEach(function (d) { devolvidos[d] = 1; }); });
+  Logger.log("DEVOLUÇÕES: com endereço identificado: " +
+    conta(r, function (x) { return x.enderecosDevolvidos.length > 0; }) +
+    " | endereços inválidos distintos: " + Object.keys(devolvidos).length);
   Logger.log("HUMANAS: com anexo: " + conta(humanas, function (x) { return x.temAnexoOrcamento; }) +
     " | com recusa: " + conta(humanas, function (x) { return x.contemRecusa; }) +
     " | com R$ no texto: " + conta(humanas, function (x) { return x.contemValor; }) +
