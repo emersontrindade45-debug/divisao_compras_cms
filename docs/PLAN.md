@@ -2925,7 +2925,7 @@ espelha nas planilhas. Ordem: **M30.0 → M30.a → M30.b → M30.d → M30.c**.
       6 apontamento do controle interno/jurídico · 7 outro (texto obrigatório). 1–4 = "falha
       documental".
 - [x] Sem backfill inventado: só o que o `AuditLog` prova; a tela diz "dados desde dd/mm/aaaa".
-- [ ] **PENDENTE (exige autorização):** migration aplicada em produção via `/api/admin/migrate` + `migrate status` (§9.19).
+- [x] Migration aplicada em produção em 2026-11-16 16:16 UTC via `POST /api/admin/migrate` (deploy de `704ebe1`); status: 0 pendentes, 0 órfãs. Banco conferido por `PROD_READ_URL`: 16 processos `importacao`/incertos, `dataResposta` presente, consulta do dashboard roda. Originalmente: via `/api/admin/migrate` + `migrate status` (§9.19).
 
 **Implementado em 2026-11-16** (commit local, sem push). Decisões de implementação:
 - Todo processo nasce pela sincronização da planilha (não existe criação manual) — a data
@@ -2973,7 +2973,7 @@ Sem verificação no navegador nesta etapa (ver pendência de UI no fim do M30.b
 - [x] Gráficos em SVG/CSS próprios com tokens (sem dependência nova). Sem metas fixas na v1.
 - [x] Filtro "Meus/Todos" (padrão Meus para analista, Todos para chefia); todos os perfis veem
       as duas camadas.
-- [ ] **PENDENTE:** antes de ir ao ar, ler volumes e grafias de categoria em produção (pendente: driver travou
+- [x] Volumes lidos em produção (2026-11-16): 16 processos (1 ativo), **0 cotações, 0 propostas**, 249 preços incluídos, 72 grafias de categoria (68 sem caixa), 6 usuários todos `aprovacao` ("Emerson Trindade" duplicado). Originalmente: ler volumes e grafias de categoria em produção (pendente: driver travou
       no WSL nesta sessão).
 
 **Implementado em 2026-11-16.** Decisões de implementação:
@@ -2994,6 +2994,12 @@ Sem verificação no navegador nesta etapa (ver pendência de UI no fim do M30.b
   (`nao_iniciado`) no gatilho do Select — comportamento anterior ao M30.
 
 ### M30.d — Classificação automática das respostas de e-mail
+
+> **Achado de 2026-11-16:** produção tem **zero** `Cotacao`. A classificação liga cada resposta a
+> uma cotação registrada; sem cotação, não há o que classificar. Decisão pendente com o usuário:
+> criar as cotações a partir dos e-mails ENVIADOS ("Solicitação de Orçamento Proc. N … / Entrega:
+> dd/mm/aaaa" — destinatário, data de envio e prazo estão no próprio e-mail). Script do spike:
+> `scripts/apps-script/respostasCotacao.gs`.
 **Regra de sigilo (inegociável, decidida com o usuário):** conteúdo de e-mail nunca sai do Google
 e nunca é gravado. Sem IA externa. Sem TI envolvida.
 - [ ] **Spike primeiro, com o usuário** (~30min): Google Apps Script na conta compartilhada
