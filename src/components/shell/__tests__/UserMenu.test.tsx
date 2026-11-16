@@ -4,9 +4,10 @@
  * abria o menu, então o defeito existia desde a criação do componente sem ninguém ver.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-vi.mock("@/lib/actions/auth", () => ({ logout: vi.fn() }));
+const mocks = vi.hoisted(() => ({ logout: vi.fn() }));
+vi.mock("@/lib/actions/auth", () => ({ logout: mocks.logout }));
 
 import { UserMenu } from "../UserMenu";
 
@@ -29,5 +30,16 @@ describe("UserMenu", () => {
 
     const item = await screen.findByText("Alterar senha");
     expect(item.closest("a")).toHaveAttribute("href", "/conta/senha");
+  });
+
+  // "Sair" usava `onSelect` (padrão do Radix); o MenuItem do Base UI não tem essa prop, e o clique
+  // não fazia nada em produção (2026-11-16).
+  it("clicar em Sair chama o logout", async () => {
+    render(<UserMenu name="Pedro Tavares da Costa" role="aprovacao" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Menu do usuário" }));
+    fireEvent.click(await screen.findByText("Sair"));
+
+    await waitFor(() => expect(mocks.logout).toHaveBeenCalledTimes(1));
   });
 });

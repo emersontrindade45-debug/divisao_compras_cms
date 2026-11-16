@@ -71,7 +71,9 @@ export function UserMenu({ name, role }: UserMenuProps) {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="text-red-600 focus:text-red-600 dark:text-red-400"
-          onSelect={async () => {
+          // `onClick`, não `onSelect`: o MenuItem do Base UI não tem `onSelect` (isso é do Radix), e
+          // com ele o clique em "Sair" não fazia nada.
+          onClick={async () => {
             await logout();
           }}
         >

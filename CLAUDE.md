@@ -1719,3 +1719,9 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      que o gatilho renderiza não diz nada sobre o que está atrás dele. Erro minificado de lib se lê
      no próprio pacote: `grep -rl "formatErrorMessage(31" node_modules/.pnpm/@base-ui*/.../esm`
      devolve o arquivo com a mensagem completa, sem depender do site.
+     **Mesmo dia, mesmo menu, mesma causa:** o item "Sair" usava `onSelect`, que é a prop de item
+     do Radix. O `MenuItem` do Base UI só tem `onClick` — e `onSelect` passa no typecheck porque é
+     um atributo DOM válido de `<div>` (evento de seleção de texto), então nada acusa o erro e o
+     clique simplesmente não faz nada. Ao portar padrão do shadcn/Radix, conferir as props no
+     `.d.ts` do componente Base UI instalado (`esm/menu/item/MenuItem.d.ts`), não confiar no
+     typecheck: prop errada que coincide com atributo HTML não gera erro.
