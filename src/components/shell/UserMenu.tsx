@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -50,12 +51,16 @@ export function UserMenu({ name, role }: UserMenuProps) {
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col gap-0.5">
-            <span className="font-medium">{name}</span>
-            <span className="text-xs text-muted-foreground">{ROLE_LABELS[role] ?? role}</span>
-          </div>
-        </DropdownMenuLabel>
+        {/* GroupLabel do Base UI só funciona dentro de um Group — solto, o menu quebra ao abrir
+            (Base UI error #31). */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="font-normal">
+            <div className="flex flex-col gap-0.5">
+              <span className="font-medium">{name}</span>
+              <span className="text-xs text-muted-foreground">{ROLE_LABELS[role] ?? role}</span>
+            </div>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem render={<Link href="/conta/senha" />}>
           <KeyRound className="mr-2 size-4" /> Alterar senha

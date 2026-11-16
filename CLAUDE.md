@@ -1706,3 +1706,16 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      por fonte) em `ferramentasUsadas`. Ao investigar lentidão, ler esse campo antes de propor
      correção (§9.67). E nos testes: `vi.spyOn(global, "fetch")` sem `restoreAllMocks` acumula
      chamadas entre blocos do mesmo arquivo — o teste novo "via" chamadas que eram do anterior.
+128. **Componente que só renderiza aberto nunca foi testado se nenhum teste o abre — e no Base UI
+     `Menu.GroupLabel` (`DropdownMenuLabel`) fora de `Menu.Group` quebra o menu inteiro.** O menu do
+     usuário (`UserMenu.tsx`) tinha o rótulo com nome e papel solto no `DropdownMenuContent` desde a
+     criação. O conteúdo de um dropdown só monta ao abrir, então build, typecheck e a suíte inteira
+     ficavam verdes enquanto, em produção, clicar nas iniciais lançava `Base UI error #31`
+     ("MenuGroupContext is missing") e nada abria. Só apareceu em 2026-11-16, quando o menu ganhou
+     o item "Alterar senha" e alguém precisou de fato clicar nele. Duas regras: (a) no Base UI,
+     `DropdownMenuLabel` vai dentro de `DropdownMenuGroup` — é diferente do Radix/shadcn, onde o
+     label pode ficar solto (§9.4); (b) componente cujo conteúdo depende de interação (menu,
+     popover, dialog) precisa de um teste que **dispare a abertura** e procure o conteúdo — testar
+     que o gatilho renderiza não diz nada sobre o que está atrás dele. Erro minificado de lib se lê
+     no próprio pacote: `grep -rl "formatErrorMessage(31" node_modules/.pnpm/@base-ui*/.../esm`
+     devolve o arquivo com a mensagem completa, sem depender do site.
