@@ -292,6 +292,9 @@ model Item {
   // de referência, que é outro dado e mora em ResultadoSimilaridade.
   trFrequencia            FrequenciaExecucao?
   trVigenciaMeses         Int?
+  // Posição (1-based) do item no TR, a mesma das linhas da planilha. Gravada pela sincronização;
+  // null = sem posição conhecida (item preservado que saiu da planilha).
+  ordem                   Int?
   createdAt               DateTime            @default(now())
   updatedAt               DateTime            @updatedAt
 

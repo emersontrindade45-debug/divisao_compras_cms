@@ -14,6 +14,7 @@ import {
   type ItemIrmaoDaContratacao,
 } from "@/lib/actions/assistente";
 import { identidadeDaContratacao, type CandidatoSugerido } from "@/lib/assistente/sugestoes";
+import { rotuloDoItem } from "@/lib/itens/ordem";
 import {
   precisaCompletarLinkPainel,
   resolverLinkOrigem,
@@ -59,7 +60,7 @@ export function SugestoesCandidatos({
   /** Nulo enquanto o turno ainda não foi gravado: sem id não há o que aprovar. */
   mensagemId: string | null;
   sugestoes: CandidatoSugerido[];
-  itens: { id: string; descricao: string }[];
+  itens: { id: string; descricao: string; numero?: number }[];
 }) {
   const router = useRouter();
   /** Por chave (candidato, ou `candidatoId:numeroItem` para item-irmão), os itens que já o receberam nesta sessão. */
@@ -127,7 +128,7 @@ export function SugestoesCandidatos({
   };
 
   const idsItens = new Set(itens.map((it) => it.id));
-  const descricaoDoItem = new Map(itens.map((it) => [it.id, it.descricao]));
+  const descricaoDoItem = new Map(itens.map((it) => [it.id, rotuloDoItem(it.numero, it.descricao)]));
 
   /**
    * Estado de destino de uma chave (candidato principal, ou item-irmão sob a
@@ -376,7 +377,7 @@ export function SugestoesCandidatos({
                     >
                       {pendentes.map((item) => (
                         <option key={item.id} value={item.id}>
-                          {item.descricao}
+                          {rotuloDoItem(item.numero, item.descricao)}
                         </option>
                       ))}
                     </select>
@@ -460,11 +461,11 @@ function ItemIrmaoRow({
 }: {
   sugestao: CandidatoSugerido;
   itemIrmao: ItemIrmaoDaContratacao;
-  itens: { id: string; descricao: string }[];
+  itens: { id: string; descricao: string; numero?: number }[];
   destinosDe: (
     chave: string,
     itemIdSugerido: string | null,
-  ) => { jaRecebidos: string[]; pendentes: { id: string; descricao: string }[]; itemId: string | null };
+  ) => { jaRecebidos: string[]; pendentes: { id: string; descricao: string; numero?: number }[]; itemId: string | null };
   descricaoDoItem: Map<string, string>;
   setItemEscolhido: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   emCurso: string | null;
@@ -506,7 +507,7 @@ function ItemIrmaoRow({
             >
               {pendentes.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.descricao}
+                  {rotuloDoItem(item.numero, item.descricao)}
                 </option>
               ))}
             </select>

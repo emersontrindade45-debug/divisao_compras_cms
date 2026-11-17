@@ -25,6 +25,7 @@ import {
   resolverLinkOrigem,
 } from "@/lib/similaridade/linkOrigem";
 import type { CandidatoSimilaridade, ItemExtraidoTR } from "@/lib/ia/types";
+import { ORDEM_ITENS, numeroDoItem } from "@/lib/itens/ordem";
 
 // Leitura da conversa do assistente (M13).
 //
@@ -312,16 +313,24 @@ export async function listarConversas(processoId: string | null): Promise<Conver
     .sort((a, b) => b.ultimaMensagemEm.localeCompare(a.ultimaMensagemEm));
 }
 
-/** Itens do processo, para o cartão de candidato saber a qual deles adicionar. */
+/**
+ * Itens do processo, para o cartão de candidato saber a qual deles adicionar. Na ordem do TR e
+ * com o número dele, para escolher o item sem abrir o termo de referência.
+ */
 export async function listarItensDoProcesso(
   processoId: string,
-): Promise<{ id: string; descricao: string }[]> {
+): Promise<{ id: string; descricao: string; numero: number }[]> {
   await requireAuth();
-  return db.item.findMany({
+  const itens = await db.item.findMany({
     where: { processoId },
-    orderBy: { createdAt: "asc" },
-    select: { id: true, descricao: true },
+    orderBy: ORDEM_ITENS,
+    select: { id: true, descricao: true, ordem: true },
   });
+  return itens.map((it, i) => ({
+    id: it.id,
+    descricao: it.descricao,
+    numero: numeroDoItem(it.ordem, i + 1),
+  }));
 }
 
 const completarLinksSchema = z.object({

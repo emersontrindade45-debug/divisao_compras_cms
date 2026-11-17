@@ -2,6 +2,7 @@
 
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/rbac";
+import { ORDEM_ITENS } from "@/lib/itens/ordem";
 import type { StatusProcesso } from "@prisma/client";
 
 export interface FiltrosProcessoServer {
@@ -124,10 +125,11 @@ export async function obterFontesSimilaridade(processoId: string) {
 
   return db.item.findMany({
     where: { processoId },
-    orderBy: { createdAt: "asc" },
+    orderBy: ORDEM_ITENS,
     select: {
       id: true,
       descricao: true,
+      ordem: true,
       unidade: true,
       quantidade: true,
       natureza: true,

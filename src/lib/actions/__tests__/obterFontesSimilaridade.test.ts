@@ -87,4 +87,23 @@ describe("obterFontesSimilaridade", () => {
       true,
     );
   });
+
+  // Os cards seguem a ordem do TR (a das linhas da planilha), não a de criação: item recriado
+  // pela sincronização nasce depois dos demais e ia para o fim da lista. Valores escritos à mão
+  // (e não importados da constante), para uma mudança na constante derrubar o teste (§9.105).
+  it("ordena pela ordem do TR, itens sem ordem no fim, e lê a coluna `ordem`", async () => {
+    await obterFontesSimilaridade("proc-1");
+
+    const argumento = mocks.db.item.findMany.mock.calls[0]![0] as {
+      orderBy: unknown;
+      select: { ordem?: boolean };
+    };
+
+    expect(argumento.orderBy).toEqual([
+      { ordem: { sort: "asc", nulls: "last" } },
+      { createdAt: "asc" },
+      { id: "asc" },
+    ]);
+    expect(argumento.select.ordem).toBe(true);
+  });
 });

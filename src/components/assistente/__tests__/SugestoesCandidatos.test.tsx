@@ -299,3 +299,30 @@ describe("SugestoesCandidatos", () => {
     expect(adicionarMock.mock.calls[0]![0].itemId).toBe("item-1");
   });
 });
+
+describe("SugestoesCandidatos — número do item no TR", () => {
+  it("mostra o número do TR junto da descrição no seletor, na ordem recebida", async () => {
+    const itens = [
+      { id: "item-1", descricao: "Controle de pragas", numero: 1 },
+      { id: "item-3", descricao: "Limpeza de reservatório", numero: 3 },
+    ];
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={itens} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar à lista/ }));
+    await waitFor(() => expect(adicionarMock).toHaveBeenCalled());
+
+    const seletor = await screen.findByLabelText<HTMLSelectElement>("Item que receberá o candidato");
+    expect(Array.from(seletor.options).map((o) => o.textContent)).toEqual([
+      "3. Limpeza de reservatório",
+    ]);
+  });
+
+  it("sem número (quem ainda não manda), o seletor segue só com a descrição", () => {
+    render(<SugestoesCandidatos mensagemId="msg-1" sugestoes={[SUGESTAO]} itens={ITENS} />);
+    const seletor = screen.getByLabelText<HTMLSelectElement>("Item que receberá o candidato");
+    expect(Array.from(seletor.options).map((o) => o.textContent)).toEqual([
+      "Lavagem da fachada",
+      "Limpeza das calhas",
+    ]);
+  });
+});

@@ -93,7 +93,7 @@ export function AssistenteChat({
   const [rascunho, setRascunho] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [carregando, setCarregando] = useState(retomarConversa || conversaIdInicial !== null);
-  const [itens, setItens] = useState<{ id: string; descricao: string }[]>([]);
+  const [itens, setItens] = useState<{ id: string; descricao: string; numero?: number }[]>([]);
   const [temMaisAntigas, setTemMaisAntigas] = useState(false);
   const [carregandoAntigas, setCarregandoAntigas] = useState(false);
   /**

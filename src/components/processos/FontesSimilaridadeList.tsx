@@ -9,6 +9,7 @@ import {
   type CandidatoSimilaridadeView,
 } from "@/components/processos/LinhaCandidatoSimilaridade";
 import { obterFontesSimilaridade } from "@/lib/actions/listar";
+import { numeroDoItem } from "@/lib/itens/ordem";
 import { lerContratosVigencia } from "@/lib/domain/contratosVigencia";
 import { lerRoteiro } from "@/lib/validations/roteiroCalculo";
 import {
@@ -96,11 +97,41 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
   return (
     <div className="space-y-6">
       <p className="text-xs text-muted-foreground">
-        Fontes utilizadas no preenchimento da cotação, para comprovação junto ao auditor. Itens
-        sem candidato suficientemente similar (score abaixo de 70) não aparecem aqui — exigem
-        pesquisa direta com fornecedores.
+        Fontes utilizadas no preenchimento da cotação, para comprovação junto ao auditor. Os itens
+        seguem a ordem do Termo de Referência; o card em branco é item que ainda não tem preço
+        adicionado (sem candidato suficientemente similar, score abaixo de 70, exige pesquisa
+        direta com fornecedores).
       </p>
-      {itensComFontes.map((item, indice) => {
+      {itens.map((item, indice) => {
+        const numero = numeroDoItem(item.ordem, indice + 1);
+
+        if (item.resultadosSimilaridade.length === 0) {
+          return (
+            <Card
+              key={item.id}
+              size="sm"
+              data-testid="card-item-sem-preco"
+              className="gap-0 overflow-hidden border-t-2 border-dashed border-t-border py-0 shadow-none ring-1 ring-border"
+            >
+              <CardHeader className="rounded-none !py-3">
+                <div className="flex items-start gap-2.5">
+                  <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[0.7rem] font-semibold tabular-nums text-muted-foreground">
+                    {numero}
+                  </span>
+                  <div>
+                    <CardTitle className="text-base! font-semibold! leading-snug text-muted-foreground">
+                      {item.descricao}
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                      {item.quantidade} {item.unidade}
+                    </p>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+          );
+        }
+
         const candidatos = item.resultadosSimilaridade.map(paraView);
         const tr = parametrosTRdoItem(item);
         const grandezas = candidatos.map((c) =>
@@ -116,7 +147,7 @@ export async function FontesSimilaridadeList({ processoId }: { processoId: strin
             <CardHeader className="flex flex-row items-start justify-between gap-3 rounded-none border-b border-border bg-muted/40 !py-3">
               <div className="flex items-start gap-2.5">
                 <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[0.7rem] font-semibold tabular-nums text-primary">
-                  {indice + 1}
+                  {numero}
                 </span>
                 <div>
                   <CardTitle className="text-base! font-semibold! leading-snug text-foreground">

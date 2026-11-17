@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/auth/audit";
 import { registrarMarcosProcesso } from "@/lib/indicadores/marcos";
 import { validarDataAberturaInformada } from "@/lib/domain/indicadores/dataAbertura";
+import { planejarItens } from "@/lib/domain/planilha/planejarItens";
 import { carregarPlanilha, extrairObjetoDoTitulo } from "@/lib/sheets/googleSheets";
 import {
   parsePlanilha,
@@ -17,20 +18,15 @@ export interface SincronizacaoResultado {
   numero: string;
   itensImportados: number;
   precosImportados: number;
+  /** Itens cuja descrição mudou na planilha e foram renomeados no lugar (candidatos preservados). */
+  itensRenomeados?: number;
+  /** Itens com candidatos/fontes que saíram da planilha: continuam no sistema, sem ordem. */
+  itensPreservados?: number;
 }
 
 export interface ActionResult<T> {
   data?: T;
   error?: string;
-}
-
-/** Normaliza a descrição do item para casamento sem distinção de maiúsculas/acentos. */
-function normalizarDescricao(s: string): string {
-  return s
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
 }
 
 /**
@@ -88,6 +84,8 @@ export async function sincronizarPlanilha(
   const quantidadeTotal = itens.reduce((acc, it) => acc + (it.quantidade || 0), 0) || itens.length;
 
   let precosImportados = 0;
+  let itensRenomeados = 0;
+  let itensPreservados = 0;
 
   try {
     const processo = await db.processo.upsert({
@@ -115,62 +113,74 @@ export async function sincronizarPlanilha(
     });
 
     // Carrega os itens que já existem no banco para este processo.
-    // A planilha é fonte de verdade para descrições e preços, mas os
-    // ResultadoSimilaridade (pesquisa PNCP) são trabalho do analista e devem
-    // ser preservados quando o item ainda existe na nova versão da planilha.
+    // A planilha é fonte de verdade para descrições, preços e ORDEM, mas os
+    // ResultadoSimilaridade (pesquisa PNCP) e as fontes são trabalho do analista e não podem
+    // ser perdidos por uma edição de texto na planilha (ver `planejarItens`).
     const itensExistentes = await db.item.findMany({
       where: { processoId: processo.id },
-      select: { id: true, descricao: true },
+      select: {
+        id: true,
+        descricao: true,
+        ordem: true,
+        _count: { select: { resultadosSimilaridade: true, fontes: true } },
+      },
     });
 
-    const existentePorDescricao = new Map(
-      itensExistentes.map((it) => [normalizarDescricao(it.descricao), it.id]),
+    const plano = planejarItens(
+      itensExistentes.map((it) => ({
+        id: it.id,
+        descricao: it.descricao,
+        ordem: it.ordem,
+        temTrabalho: it._count.resultadosSimilaridade > 0 || it._count.fontes > 0,
+      })),
+      itens.map((it) => it.material),
     );
 
-    // Descobre quais itens existentes não aparecem mais na planilha nova e os apaga.
-    // O cascade do banco remove os ResultadoSimilaridade associados — o que é correto,
-    // pois a pesquisa de similaridade perde o sentido para um item removido.
-    const descricoesPlanilha = new Set(itens.map((it) => normalizarDescricao(it.material)));
-    const idsParaDeletar = itensExistentes
-      .filter((it) => !descricoesPlanilha.has(normalizarDescricao(it.descricao)))
-      .map((it) => it.id);
-    if (idsParaDeletar.length > 0) {
-      await db.item.deleteMany({ where: { id: { in: idsParaDeletar } } });
+    itensRenomeados = plano.itens.filter((p) => p.acao === "renomear").length;
+    itensPreservados = plano.preservar.length;
+
+    // Só apaga item SEM trabalho ligado: o cascade do banco leva os candidatos junto.
+    if (plano.apagar.length > 0) {
+      await db.item.deleteMany({ where: { id: { in: plano.apagar } } });
+    }
+    // Item com trabalho que saiu da planilha e não tem par fica no sistema, fora da ordem.
+    if (plano.preservar.length > 0) {
+      await db.item.updateMany({ where: { id: { in: plano.preservar } }, data: { ordem: null } });
     }
 
-    // Upsert cada item da planilha:
-    // – item já existe → atualiza metadados + recria SeriePreco (preserva similaridade)
-    // – item novo      → cria
-    for (const item of itens) {
-      const chave = normalizarDescricao(item.material);
-      const idExistente = existentePorDescricao.get(chave);
+    // Aplica o plano linha a linha da planilha:
+    // – casa por descrição → atualiza metadados + ordem e recria SeriePreco (preserva similaridade)
+    // – descrição editada na mesma posição → renomeia o item (preserva similaridade)
+    // – item novo → cria
+    for (const [indice, item] of itens.entries()) {
+      const passo = plano.itens[indice]!;
+      const metadados = {
+        quantidade: item.quantidade || 1,
+        caracteristicasTecnicas: item.grupo ? `Grupo: ${item.grupo}` : null,
+        palavrasChave: item.grupo ? [item.grupo] : [],
+        ordem: passo.ordem,
+      };
 
       let itemId: string;
 
-      if (idExistente) {
+      if (passo.acao === "atualizar" || passo.acao === "renomear") {
         // Preserva o Item (e seus ResultadoSimilaridade associados) — atualiza só
-        // os metadados que a planilha controla.
+        // o que a planilha controla.
         await db.item.update({
-          where: { id: idExistente },
-          data: {
-            quantidade: item.quantidade || 1,
-            caracteristicasTecnicas: item.grupo ? `Grupo: ${item.grupo}` : null,
-            palavrasChave: item.grupo ? [item.grupo] : [],
-          },
+          where: { id: passo.itemId },
+          data: passo.acao === "renomear" ? { ...metadados, descricao: item.material } : metadados,
         });
         // A planilha é fonte de verdade dos preços: recria a série de preços.
-        await db.seriePreco.deleteMany({ where: { itemId: idExistente } });
-        itemId = idExistente;
+        await db.seriePreco.deleteMany({ where: { itemId: passo.itemId } });
+        itemId = passo.itemId;
       } else {
         const criado = await db.item.create({
           data: {
             processoId: processo.id,
             descricao: item.material,
             unidade: "unidade",
-            quantidade: item.quantidade || 1,
             classificacao: "comum",
-            caracteristicasTecnicas: item.grupo ? `Grupo: ${item.grupo}` : null,
-            palavrasChave: item.grupo ? [item.grupo] : [],
+            ...metadados,
           },
         });
         itemId = criado.id;
@@ -220,6 +230,8 @@ export async function sincronizarPlanilha(
         numero,
         itens: itens.length,
         precos: precosImportados,
+        itensRenomeados,
+        itensPreservados,
         origem: url.trim(),
       },
     });
@@ -235,6 +247,12 @@ export async function sincronizarPlanilha(
   revalidatePath("/processos");
 
   return {
-    data: { numero, itensImportados: itens.length, precosImportados },
+    data: {
+      numero,
+      itensImportados: itens.length,
+      precosImportados,
+      ...(itensRenomeados > 0 ? { itensRenomeados } : {}),
+      ...(itensPreservados > 0 ? { itensPreservados } : {}),
+    },
   };
 }

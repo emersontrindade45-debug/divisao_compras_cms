@@ -283,3 +283,57 @@ it("substitui a coluna Referência por Período do contrato, sem perder o dado S
   // O dado SINAPI continua visível, só que fora de uma coluna dedicada.
   expect(screen.getByText("Não desonerado")).toBeInTheDocument();
 });
+
+describe("FontesSimilaridadeList — ordem e itens sem preço", () => {
+  const candidato = {
+    id: "res-x",
+    tipoCandidato: "contratacao_publica",
+    fonteDescricao: "Contrato qualquer",
+    fonteOrgaoOuId: "ORGAO X",
+    fonteUrl: "https://pncp.gov.br/app/editais/1/2026/1",
+    valorUnitario: 100,
+    dataReferencia: new Date("2026-03-03T12:00:00Z"),
+    scoreFinal: 80,
+    justificativa: "ok",
+    promovidoParaFonte: false,
+    competenciaReferencia: null,
+    regimeReferencia: null,
+    localidadeReferencia: null,
+  };
+
+  // O item 2 não tem preço ainda: o card fica em branco, com a descrição, no lugar dele — é o que
+  // permite ver de relance o que falta (pedido do analista, 2026-11-18).
+  it("mostra os itens na ordem do TR e deixa em branco o que ainda não tem preço", async () => {
+    mocks.obterFontesSimilaridade.mockResolvedValue([
+      { ...ITEM_BASE, id: "i1", descricao: "Primeiro item", ordem: 1, resultadosSimilaridade: [candidato] },
+      { ...ITEM_BASE, id: "i2", descricao: "Segundo item sem preço", ordem: 2, resultadosSimilaridade: [] },
+      { ...ITEM_BASE, id: "i3", descricao: "Terceiro item", ordem: 3, resultadosSimilaridade: [{ ...candidato, id: "res-y" }] },
+    ]);
+
+    render(await FontesSimilaridadeList({ processoId: "proc-1" }));
+
+    const titulos = screen
+      .getAllByText(/^(Primeiro|Segundo|Terceiro) item/)
+      .map((e) => e.textContent);
+    expect(titulos).toEqual(["Primeiro item", "Segundo item sem preço", "Terceiro item"]);
+
+    const em_branco = screen.getAllByTestId("card-item-sem-preco");
+    expect(em_branco).toHaveLength(1);
+    expect(em_branco[0]).toHaveTextContent("Segundo item sem preço");
+    expect(em_branco[0]).toHaveTextContent("2");
+    // Em branco de verdade: sem tabela de candidatos.
+    expect(em_branco[0]!.querySelector("table")).toBeNull();
+  });
+
+  it("numera pelo número do TR, não pela posição: sem o item 2, o seguinte continua 3", async () => {
+    mocks.obterFontesSimilaridade.mockResolvedValue([
+      { ...ITEM_BASE, id: "i1", descricao: "Item um", ordem: 1, resultadosSimilaridade: [candidato] },
+      { ...ITEM_BASE, id: "i3", descricao: "Item três", ordem: 3, resultadosSimilaridade: [{ ...candidato, id: "res-y" }] },
+    ]);
+
+    render(await FontesSimilaridadeList({ processoId: "proc-1" }));
+
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.queryByText("2")).not.toBeInTheDocument();
+  });
+});

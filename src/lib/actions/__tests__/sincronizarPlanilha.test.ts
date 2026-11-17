@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   db: {
     processo: { upsert: vi.fn() },
-    item: { findMany: vi.fn(), deleteMany: vi.fn(), update: vi.fn(), create: vi.fn() },
+    item: { findMany: vi.fn(), deleteMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), create: vi.fn() },
     seriePreco: { deleteMany: vi.fn(), create: vi.fn() },
   },
   requireAuth: vi.fn(),
@@ -168,5 +168,89 @@ describe("sincronizarPlanilha — dados de origem do dashboard (M30.0)", () => {
     await sincronizarPlanilha("https://docs.google.com/spreadsheets/d/abc/edit", "2026-03-10");
 
     expect(mocks.registrarMarcosProcesso).toHaveBeenCalledWith(mocks.db, "proc-1", expect.any(Date));
+  });
+});
+
+describe("sincronizarPlanilha — não perde o trabalho do analista (2026-11-17)", () => {
+  const sem = { resultadosSimilaridade: 0, fontes: 0 };
+  const existente = (id: string, descricao: string, ordem: number | null, _count = sem) => ({
+    id,
+    descricao,
+    ordem,
+    _count,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireAuth.mockResolvedValue(USER);
+    mocks.db.processo.upsert.mockResolvedValue({
+      id: "proc-1",
+      numero: "2433/2025",
+      dataAbertura: new Date("2025-01-01"),
+    });
+    mocks.db.item.create.mockImplementation(async ({ data }: { data: { descricao: string } }) => ({
+      id: `novo-${data.descricao.slice(0, 5)}`,
+    }));
+    mocks.carregarPlanilha.mockResolvedValue({
+      numeroProcesso: "2433/2025",
+      titulo: "Proc_2433/2025",
+      rows: parseCsv(CSV_MEDIANA_VAZIA),
+      abaNome: "Modelo",
+    });
+  });
+
+  // O caso real: a descrição da linha 1 foi editada na planilha. Antes o item era apagado, e o
+  // banco levava junto, em cascata, os candidatos já adicionados a ele.
+  it("descrição editada na mesma posição renomeia o item com candidatos, sem apagar", async () => {
+    mocks.db.item.findMany.mockResolvedValue([
+      existente("velho", "Descrição antiga do CPF", 1, { resultadosSimilaridade: 3, fontes: 0 }),
+      existente("cnpj", "e-CNPJ Tipo A3 c/ Token", 2),
+    ]);
+
+    const res = await sincronizarPlanilha("https://docs.google.com/spreadsheets/d/abc/edit");
+
+    expect(mocks.db.item.deleteMany).not.toHaveBeenCalled();
+    expect(mocks.db.item.create).not.toHaveBeenCalled();
+    const renomeio = mocks.db.item.update.mock.calls.find((c) => c[0].where.id === "velho")!;
+    expect(renomeio[0].data.descricao).toContain("e-CPF");
+    expect(renomeio[0].data.ordem).toBe(1);
+    expect(res.data?.itensRenomeados).toBe(1);
+  });
+
+  it("item que saiu da planilha SEM candidatos nem fontes ainda é apagado", async () => {
+    mocks.db.item.findMany.mockResolvedValue([
+      existente("sumiu", "Item que saiu", 3),
+      existente("cpf", "e-CPF Tipo A3 c/ Token", 1),
+      existente("cnpj", "e-CNPJ Tipo A3 c/ Token", 2),
+    ]);
+
+    await sincronizarPlanilha("https://docs.google.com/spreadsheets/d/abc/edit");
+
+    expect(mocks.db.item.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["sumiu"] } } });
+  });
+
+  it("item com candidatos que saiu da planilha e não tem par é preservado, sem ordem, e avisado", async () => {
+    mocks.db.item.findMany.mockResolvedValue([
+      existente("trabalho", "Item que saiu da planilha", 9, { resultadosSimilaridade: 1, fontes: 0 }),
+    ]);
+
+    const res = await sincronizarPlanilha("https://docs.google.com/spreadsheets/d/abc/edit");
+
+    expect(mocks.db.item.deleteMany).not.toHaveBeenCalled();
+    expect(mocks.db.item.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["trabalho"] } },
+      data: { ordem: null },
+    });
+    expect(res.data?.itensPreservados).toBe(1);
+  });
+
+  it("grava a posição de cada linha da planilha como ordem do item", async () => {
+    mocks.db.item.findMany.mockResolvedValue([existente("cnpj", "e-CNPJ Tipo A3 c/ Token", 7)]);
+
+    await sincronizarPlanilha("https://docs.google.com/spreadsheets/d/abc/edit");
+
+    expect(mocks.db.item.create.mock.calls[0]![0].data.ordem).toBe(1); // e-CPF, linha 1, item novo
+    const atualizacao = mocks.db.item.update.mock.calls.find((c) => c[0].where.id === "cnpj")!;
+    expect(atualizacao[0].data.ordem).toBe(2); // e-CNPJ passa de 7 para a posição dele: 2
   });
 });

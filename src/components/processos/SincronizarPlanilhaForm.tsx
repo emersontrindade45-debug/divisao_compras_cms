@@ -59,6 +59,16 @@ export function SincronizarPlanilhaForm({ defaultUrl }: { defaultUrl?: string })
       toast.success(
         `Processo ${d.numero} sincronizado: ${d.itensImportados} item(ns) e ${d.precosImportados} preço(s).`,
       );
+      if (d.itensRenomeados) {
+        toast.info(
+          `${d.itensRenomeados} item(ns) com a descrição alterada na planilha foram renomeados, mantendo os preços já adicionados.`,
+        );
+      }
+      if (d.itensPreservados) {
+        toast.warning(
+          `${d.itensPreservados} item(ns) com preços adicionados não estão mais na planilha e foram mantidos, fora da ordem. Confira se devem ser removidos.`,
+        );
+      }
       router.refresh();
       // Notifica o assistente para recarregar a lista de itens — sem isso o
       // botão "Adicionar à lista" continua desabilitado até F5.
