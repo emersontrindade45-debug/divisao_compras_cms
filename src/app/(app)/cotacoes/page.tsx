@@ -185,23 +185,29 @@ async function carregarRespostasPendentes(): Promise<RespostaPendenteItem[]> {
         select: { numeroProcessoAssunto: true, processo: { select: { numero: true } } },
       },
     } as const;
-    // A recusa provável vem INTEIRA (o lote age sobre todas, e o teto de 200 as cortaria); o resto
-    // segue limitado, como antes.
-    const [recusaProvavel, demais] = await Promise.all([
+    // As sugestões (recusa, orçamento, dúvida) vêm INTEIRAS: o lote de recusa age sobre todas, e o
+    // teto de 200 as cortaria. O resto segue limitado, como antes.
+    const MOTIVOS_SUGERIDOS = ["provavel_recusa", "provavel_orcamento", "provavel_duvida"];
+    const [sugeridas, demais] = await Promise.all([
       db.respostaEmailPendente.findMany({
-        where: { resolvidaEm: null, motivo: "provavel_recusa" },
-        orderBy: { dataResposta: "desc" },
-        take: 500,
+        where: { resolvidaEm: null, motivo: { in: MOTIVOS_SUGERIDOS } },
+        orderBy: [{ motivo: "asc" }, { dataResposta: "desc" }],
+        take: 1000,
         select: selecao,
       }),
       db.respostaEmailPendente.findMany({
-        where: { resolvidaEm: null, motivo: { not: "provavel_recusa" } },
+        where: { resolvidaEm: null, motivo: { notIn: MOTIVOS_SUGERIDOS } },
         orderBy: { dataResposta: "desc" },
         take: 200,
         select: selecao,
       }),
     ]);
-    const pendentes = [...recusaProvavel, ...demais];
+    // Ordem de leitura: orçamento (o que vale mais), dúvida e recusa antes do resto.
+    const ORDEM: Record<string, number> = { provavel_orcamento: 0, provavel_duvida: 1, provavel_recusa: 2 };
+    const pendentes = [
+      ...sugeridas.sort((x, y) => (ORDEM[x.motivo] ?? 9) - (ORDEM[y.motivo] ?? 9)),
+      ...demais,
+    ];
     const ids = pendentes.map((p) => p.sugestaoConsultaId).filter((x): x is string => x !== null);
     const sugestoes = ids.length
       ? await db.consultaCotacao.findMany({

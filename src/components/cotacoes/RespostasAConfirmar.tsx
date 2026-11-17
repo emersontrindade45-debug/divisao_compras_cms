@@ -26,6 +26,13 @@ export interface RespostaPendenteItem {
   linkGmail: string;
 }
 
+/** Motivo da fila → botão que a sugestão destaca. Sem motivo conhecido, nenhum é destacado. */
+const DESFECHO_SUGERIDO: Record<string, DesfechoResposta | undefined> = {
+  provavel_orcamento: "orcamento",
+  provavel_recusa: "recusa",
+  provavel_duvida: "duvida",
+};
+
 function Linha({ item }: { item: RespostaPendenteItem }) {
   const [pending, startTransition] = useTransition();
   const [emailConsulta, setEmailConsulta] = useState("");
@@ -52,6 +59,8 @@ function Linha({ item }: { item: RespostaPendenteItem }) {
   }
 
   const precisaEmail = !item.sugestao;
+  const semFornecedor = pending || (precisaEmail && !emailConsulta.trim());
+  const sugerido = DESFECHO_SUGERIDO[item.motivo];
 
   return (
     <li className="space-y-2 rounded-md border p-3">
@@ -94,11 +103,15 @@ function Linha({ item }: { item: RespostaPendenteItem }) {
         )}
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" disabled={pending || (precisaEmail && !emailConsulta.trim())} onClick={() => resolver("orcamento")}>
+          {/* O botão da sugestão fica em destaque, mas a decisão continua sendo do analista. */}
+          <Button size="sm" variant={sugerido === "orcamento" ? "default" : "outline"} disabled={semFornecedor} onClick={() => resolver("orcamento")}>
             É orçamento
           </Button>
-          <Button size="sm" variant="outline" disabled={pending || (precisaEmail && !emailConsulta.trim())} onClick={() => resolver("recusa")}>
+          <Button size="sm" variant={sugerido === "recusa" ? "default" : "outline"} disabled={semFornecedor} onClick={() => resolver("recusa")}>
             É recusa
+          </Button>
+          <Button size="sm" variant={sugerido === "duvida" ? "default" : "outline"} disabled={semFornecedor} onClick={() => resolver("duvida")}>
+            É dúvida
           </Button>
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => resolver("nao_e_resposta")}>
             Não é resposta
