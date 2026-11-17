@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 /** Funções REAIS do script (não cópias): o teste quebra se o script mudar. */
 const fonte = readFileSync(join(__dirname, "..", "respostasCotacao.gs"), "utf-8");
 // normalizar_ é usada por várias funções do script (mesmo escopo): vai junto em todo carregamento.
-const normalizarSrc = /function normalizar_[\s\S]*?\n}\n/.exec(fonte)![0];
+const normalizarSrc =
+  /function normalizar_[\s\S]*?\n}\n/.exec(fonte)![0] + "\n" + /function semAssinatura_[\s\S]*?\n}\n/.exec(fonte)![0];
 function carregar<T>(nome: string): T {
   const trecho = new RegExp(`function ${nome}[\\s\\S]*?\\n}\\n`).exec(fonte)?.[0];
   if (!trecho) throw new Error(`${nome} não encontrada no script`);
@@ -371,5 +372,47 @@ describe("provavelRecusa_ — 3ª rodada (fila inteira de 2026-11-18)", () => {
     expect(nfd).not.toBe(nfd.normalize("NFC"));
     expect(provavelRecusa(nfd)).toBe(true);
     expect(provavelRecusa(nbsp)).toBe(true);
+  });
+});
+
+describe("provavelRecusa_ — rodapé, espaços estranhos e frases da 4ª rodada", () => {
+  const recusa = "Agradecemos o contato. Infelizmente não conseguiremos atender a esta solicitação neste momento.";
+  const rodape = "Atenciosamente,\nFulano\nEsta mensagem é confidencial. Se houver possibilidade de erro, poderia nos avisar? Gostaria de saber mais? Visite o site.";
+
+  it("rodapé com 'poderia'/'possibilidade de' não desliga a recusa do começo do texto", () => {
+    expect(provavelRecusa(recusa)).toBe(true);
+    expect(provavelRecusa(`${recusa}\n\n${rodape}`)).toBe(true);
+  });
+
+  it("a guarda continua valendo DENTRO da resposta (antes da assinatura)", () => {
+    expect(provavelRecusa("Não será possível concluir hoje, mas poderia estender o prazo? Temos interesse.\n\nAtenciosamente,\nFulano")).toBe(false);
+  });
+
+  it.each([
+    ["espaço fino", "não\u2009conseguiremos atender"],
+    ["espaço ideográfico", "não\u3000conseguiremos atender"],
+    ["zero-width joiner", "n\u200dão conseguiremos atender"],
+    ["BOM no meio", "não\ufeff conseguiremos atender"],
+    ["hífen suave", "não conse\u00adguiremos atender"],
+  ])("%s não esconde a recusa", (_nome, texto) => {
+    expect(provavelRecusa(texto)).toBe(true);
+  });
+
+  const recusas = [
+    "Agradecemos o contato, mas não vamos conseguir atendê-los nessa proposta.",
+    "No momento não conseguiremos seguir com a participação, por se tratar de licitação.",
+    "Neste momento não conseguiremos assumir novos trabalhos.",
+    "Agradecemos o contato, não conseguimos a demanda solicitada.",
+    "No momento não estamos disponibilizando este serviço.",
+    "Neste momento, nossa atuação não contempla a solução que você procura.",
+    "Nossa empresa não é operadora, portanto não reunimos condições de realizar oferta.",
+  ];
+  it.each(recusas)("reconhece: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(true);
+  });
+
+  it("assinatura de rodapé não vira texto da resposta (limite de 800 caracteres)", () => {
+    const longo = `Bom dia. ${"Segue o detalhamento solicitado. ".repeat(40)} Infelizmente não conseguiremos atender.`;
+    expect(provavelRecusa(longo)).toBe(false);
   });
 });

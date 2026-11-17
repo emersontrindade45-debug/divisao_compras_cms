@@ -255,7 +255,24 @@ function testeLeitura() {
  * sem isto "não temos interesse" não casa com a lista de frases (visto na fila de 2026-11-18).
  */
 function normalizar_(texto) {
-  return String(texto || "").normalize("NFC").replace(/[\u00a0\u200b\u202f\u2007]/g, " ").toLowerCase();
+  return String(texto || "")
+    .normalize("NFC")
+    .replace(/[\u200b-\u200d\u2060\ufeff\u00ad]/g, "") // invisíveis (zero-width, BOM, hífen suave): somem
+    .replace(/\s+/g, " ") // qualquer espaço Unicode (nbsp, fino, ideográfico…) vira espaço comum
+    .toLowerCase();
+}
+
+/**
+ * Parte do texto onde a resposta do fornecedor de fato está: sem a assinatura/rodapé (despedida,
+ * bloco de contato) e limitada a 800 caracteres. Rodapé de confidencialidade e assinatura trazem
+ * "poderia", "possibilidade de"… que desligavam a recusa mesmo com "não conseguiremos atender" no
+ * começo (reproduzido em 2026-11-18).
+ */
+function semAssinatura_(texto) {
+  var t = String(texto || "");
+  var corte = t.search(/\n\s*(att\.?|atenciosamente|cordialmente|abra[cç]os?|grato|grata|--)\s*[,.;]?\s*(\n|$)|\s(fone\/fax|fone:|tel\.?:|cel\.?:|whatsapp|site:|e-mail:)|(essa|esta) mensagem [eé] (destinada|confidencial)|aviso de confidencialidade/i);
+  if (corte !== -1) t = t.slice(0, corte);
+  return t.slice(0, 800);
 }
 
 /**
@@ -282,19 +299,21 @@ function semCitacao_(corpo) {
  * 0 falsos positivos. Amostra pequena: por isso só SUGERE, nunca aplica sozinha.
  */
 function provavelRecusa_(texto) {
-  var t = normalizar_(texto);
+  var t = normalizar_(semAssinatura_(texto));
   // "temos interesse" só protege quando NÃO vem depois de "não" ("não temos interesse" é recusa).
   var guarda = /((?<!n[aã]o )temos interesse|estamos providenciando|extens[aã]o (do )?prazo|possibilidade de|gostaria de (saber|validar)|poderia)/;
   var recusa = new RegExp("(" + [
     // "não" + verbo de atender/fornecer/participar (singular, plural e futuro)
-    "n[aã]o (conseguimos|conseguiremos|consigo|vamos conseguir|vou conseguir) (atender|participar|cotar|enviar|fornecer|ofertar|apresentar|fazer|contribuir|ajudar|prosseguir|orçar|responder)",
+    "n[aã]o (conseguimos|conseguiremos|consigo|vamos conseguir|vou conseguir) (atend\\w*|participar|cotar|enviar|fornecer|ofertar|apresentar|fazer|contribuir|ajudar|prosseguir|seguir|assumir|orçar|responder|a demanda)",
     "n[aã]o (podemos|poderemos|produzimos|fornece|fornecemos|atendo|atendemos|atende|atendem|trabalhamos|trabalha|comercializamos|comercializa|revende|revendemos|participamos|dispomos|realizamos|prestamos|imprimimos|disponibilizamos|ofertamos|vendemos|possu[ií]mos|executamos|atuamos|atuo|fazemos|fa[cç]o|operamos|cotamos|cotado)",
     "n[aã]o (iremos|vamos|vou|poderemos|teremos|desejamos|pretendemos|queremos) (participar|prosseguir|apresentar|cotar|atender|enviar|seguir|orçar)",
     "n[aã]o (seguiremos|prosseguiremos|apresentaremos|participaremos|cotaremos)",
     "n[aã]o (temos|tem|tenho|teremos|terei) (como|condi[cç](ão|ões)|esses|esse|este|estes|interesse|o interesse|atendimento|disponibilidade|viabilidade|itens)",
     "n[aã]o h[aá] (interesse|tempo h[aá]bil)",
-    "n[aã]o (estamos|estou) (mais |participando|assumindo|fornecendo|fazendo|trabalhando|atuando|atendendo|operando|conseguindo (repassar|cotar|atender|participar|fornecer))",
+    "n[aã]o (estamos|estou) (mais |participando|assumindo|fornecendo|fazendo|trabalhando|atuando|atendendo|operando|disponibilizando|conseguindo (repassar|cotar|atender|participar|fornecer))",
     "n[aã]o participar",
+    "n[aã]o (reunimos|contempla|contemplamos|possui|possuo) (condi|a solu|habilita|habita|esse|este)",
+    "nossa atua[cç][aã]o n[aã]o contempla",
     "n[aã]o [eé] (compat[ií]vel|o (meu|nosso) ramo)",
     "n[aã]o s[aã]o compat[ií]veis",
     "n[aã]o se (aplica|encaixa)",
