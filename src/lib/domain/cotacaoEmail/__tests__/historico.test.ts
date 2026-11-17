@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lerHistorico, planejarFatias, type FatiaLeitura, type ResultadoFatia } from "../historico";
+import { INICIO_HISTORICO, diasDesde, lerHistorico, planejarFatias, type FatiaLeitura, type ResultadoFatia } from "../historico";
 
 describe("planejarFatias", () => {
   it("divide de hoje para trás em fatias de 30 dias, a última com o resto", () => {
@@ -53,5 +53,20 @@ describe("lerHistorico", () => {
   it("dia único ainda truncado é reportado, não aceito em silêncio", async () => {
     const r = await lerHistorico(1, async () => ({ truncada: true }));
     expect(r.fatiaSemSolucao).toEqual({ desdeDias: 0, dias: 1 });
+  });
+});
+
+describe("diasDesde", () => {
+  it("cobre o 1º de janeiro de 2026: de 17/11/2026 são 320 dias e uma fração, arredondado para cima", () => {
+    expect(diasDesde(INICIO_HISTORICO, new Date("2026-11-17T12:00:00-03:00"))).toBe(321);
+  });
+
+  it("arredonda para cima, nunca para baixo (um dia a menos deixaria 1º de janeiro de fora)", () => {
+    expect(diasDesde(INICIO_HISTORICO, new Date("2026-01-02T00:00:01-03:00"))).toBe(2);
+    expect(diasDesde(INICIO_HISTORICO, new Date("2026-01-02T00:00:00-03:00"))).toBe(1);
+  });
+
+  it("nunca devolve menos de 1", () => {
+    expect(diasDesde(INICIO_HISTORICO, new Date("2025-12-01T00:00:00-03:00"))).toBe(1);
   });
 });

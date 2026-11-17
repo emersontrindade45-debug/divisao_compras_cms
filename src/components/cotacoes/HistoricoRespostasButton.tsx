@@ -6,11 +6,8 @@ import { History } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { verificarRespostasEmail } from "@/lib/actions/verificarRespostasEmail";
-import { lerHistorico, planejarFatias } from "@/lib/domain/cotacaoEmail/historico";
+import { INICIO_HISTORICO, diasDesde, lerHistorico, planejarFatias } from "@/lib/domain/cotacaoEmail/historico";
 import { resumirVerificacao, type ResumoVerificacao } from "@/lib/domain/cotacaoEmail/resumo";
-
-/** Quanto do histórico a leitura percorre, de hoje para trás. */
-const DIAS_HISTORICO = 360;
 
 /**
  * Importa o histórico da caixa da Divisão em fatias de 30 dias, da mais recente para a mais
@@ -20,14 +17,17 @@ const DIAS_HISTORICO = 360;
 export function HistoricoRespostasButton() {
   const [pending, startTransition] = useTransition();
   const [progresso, setProgresso] = useState(0);
+  const [total, setTotal] = useState(0);
   const router = useRouter();
-  const total = planejarFatias(DIAS_HISTORICO).length;
 
   function importar() {
     startTransition(async () => {
       setProgresso(0);
+      // Calculado no clique (não na renderização): depende da data de hoje.
+      const diasHistorico = diasDesde(INICIO_HISTORICO, new Date());
+      setTotal(planejarFatias(diasHistorico).length);
       const r = await lerHistorico(
-        DIAS_HISTORICO,
+        diasHistorico,
         async (fatia) => {
           const resp = await verificarRespostasEmail(undefined, fatia);
           if (resp.error || !resp.data) {
@@ -50,14 +50,14 @@ export function HistoricoRespostasButton() {
         );
         return;
       }
-      toast.success(`Histórico de ${DIAS_HISTORICO} dias lido. ${resumirVerificacao(r.totais as unknown as ResumoVerificacao)}`);
+      toast.success(`Histórico de 2026 lido (${diasHistorico} dias). ${resumirVerificacao(r.totais as unknown as ResumoVerificacao)}`);
     });
   }
 
   return (
     <Button variant="outline" size="sm" onClick={importar} disabled={pending} className="gap-2">
       <History className={pending ? "size-4 animate-pulse" : "size-4"} aria-hidden />
-      {pending ? `Lendo histórico… ${progresso}/${total}` : "Importar histórico"}
+      {pending ? `Lendo histórico… ${progresso}/${total || "?"}` : "Importar histórico"}
     </Button>
   );
 }

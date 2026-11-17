@@ -32,6 +32,19 @@ export interface ResultadoHistorico {
 
 export const DIAS_POR_FATIA = 30;
 
+/** Início do histórico a importar: o ano de 2026 inteiro (meia-noite em Brasília). */
+export const INICIO_HISTORICO = new Date("2026-01-01T00:00:00-03:00");
+
+/**
+ * Quantos dias para trás é preciso ler para cobrir de `inicio` até `agora`. Arredonda para CIMA:
+ * o Gmail trabalha em dias inteiros, e faltar um dia deixaria o 1º de janeiro de fora. Ler um dia
+ * a mais é inofensivo, porque a gravação ignora o que já existe.
+ */
+export function diasDesde(inicio: Date, agora: Date): number {
+  const ms = agora.getTime() - inicio.getTime();
+  return Math.max(1, Math.ceil(ms / 86_400_000));
+}
+
 export function planejarFatias(totalDias: number): FatiaLeitura[] {
   const fatias: FatiaLeitura[] = [];
   for (let desde = 0; desde < totalDias; desde += DIAS_POR_FATIA) {
