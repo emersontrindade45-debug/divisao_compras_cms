@@ -6,6 +6,7 @@ import {
   tempoRespostaDias,
   type ConsultaDesempenhoInput,
   janelas,
+  tituloPeriodo,
   lerPeriodo,
   mediaFontesAteSuficiencia,
   referenciaProcesso,
@@ -327,5 +328,30 @@ describe("indicadores das consultas por e-mail (M30.d)", () => {
       J,
     );
     expect(r).toEqual({ valor: 25, base: 4, excluidos: 0 });
+  });
+});
+
+describe("período ano", () => {
+  it("é reconhecido na URL", () => {
+    expect(lerPeriodo("ano")).toBe("ano");
+  });
+
+  it("começa em 1º de janeiro, meia-noite em Brasília, e a janela anterior tem o mesmo tamanho", () => {
+    const agora = new Date("2026-11-17T15:00:00.000Z");
+    const { atual, anterior } = janelas("ano", agora);
+    expect(atual.inicio.toISOString()).toBe("2026-01-01T03:00:00.000Z");
+    expect(atual.fim).toEqual(agora);
+    expect(anterior.fim).toEqual(atual.inicio);
+    expect(atual.fim.getTime() - atual.inicio.getTime()).toBe(anterior.fim.getTime() - anterior.inicio.getTime());
+  });
+
+  it("à 1h de 1º de janeiro em UTC ainda é 31/12 em Brasília: o ano é o anterior", () => {
+    const { atual } = janelas("ano", new Date("2026-01-01T02:00:00.000Z"));
+    expect(atual.inicio.toISOString()).toBe("2025-01-01T03:00:00.000Z");
+  });
+
+  it("o título diz o ano, não 'últimos Ano'", () => {
+    expect(tituloPeriodo("ano", new Date("2026-11-17T15:00:00.000Z"))).toBe("ano de 2026, desde 1º de janeiro");
+    expect(tituloPeriodo("90d", new Date())).toBe("últimos 90 dias");
   });
 });

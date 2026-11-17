@@ -8,19 +8,31 @@
  */
 import { SERIE_MINIMA_PRECOS } from "./marcos";
 
-export type Periodo = "30d" | "90d" | "12m";
+export type Periodo = "30d" | "90d" | "12m" | "ano";
 
-export const PERIODOS: Periodo[] = ["30d", "90d", "12m"];
+export const PERIODOS: Periodo[] = ["30d", "90d", "12m", "ano"];
 export const PERIODO_PADRAO: Periodo = "90d";
 
 export const PERIODO_LABEL: Record<Periodo, string> = {
   "30d": "30 dias",
   "90d": "90 dias",
   "12m": "12 meses",
+  ano: "Ano",
 };
 
+/** Título da seção: "ano" depende da data de hoje (desde 1º de janeiro do ano corrente). */
+export function tituloPeriodo(periodo: Periodo, agora: Date): string {
+  return periodo === "ano"
+    ? `ano de ${anoEmSaoPaulo(agora)}, desde 1º de janeiro`
+    : `últimos ${PERIODO_LABEL[periodo]}`;
+}
+
+function anoEmSaoPaulo(data: Date): number {
+  return Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric" }).format(data));
+}
+
 const DIA_MS = 24 * 60 * 60 * 1000;
-const DURACAO_DIAS: Record<Periodo, number> = { "30d": 30, "90d": 90, "12m": 365 };
+const DURACAO_DIAS: Record<Exclude<Periodo, "ano">, number> = { "30d": 30, "90d": 90, "12m": 365 };
 
 export interface Janela {
   inicio: Date;
@@ -33,8 +45,13 @@ export function lerPeriodo(valor: string | undefined): Periodo {
 
 /** Janela atual `[agora − duração, agora)` e a anterior, de mesmo tamanho. */
 export function janelas(periodo: Periodo, agora: Date): { atual: Janela; anterior: Janela } {
-  const dur = DURACAO_DIAS[periodo] * DIA_MS;
-  const inicio = new Date(agora.getTime() - dur);
+  // "ano": do 1º de janeiro (meia-noite em Brasília) até agora. A janela anterior tem o mesmo
+  // tamanho, como nos demais períodos, e a base de cada indicador mostra o quanto ela tem de dado.
+  const inicio =
+    periodo === "ano"
+      ? new Date(`${anoEmSaoPaulo(agora)}-01-01T00:00:00-03:00`)
+      : new Date(agora.getTime() - DURACAO_DIAS[periodo] * DIA_MS);
+  const dur = agora.getTime() - inicio.getTime();
   return {
     atual: { inicio, fim: agora },
     anterior: { inicio: new Date(inicio.getTime() - dur), fim: inicio },

@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAuth } from "@/lib/auth/rbac";
 import { buscarAlertas } from "@/lib/actions/alertas";
 import { escopoPadrao } from "@/lib/domain/indicadores/camadaAcao";
-import { lerPeriodo, PERIODO_LABEL, PERIODOS, type Periodo } from "@/lib/domain/indicadores/desempenho";
+import { lerPeriodo, PERIODO_LABEL, PERIODOS, tituloPeriodo, type Periodo } from "@/lib/domain/indicadores/desempenho";
 import { carregarCamadaDesempenho } from "@/lib/indicadores/desempenho";
 import {
   carregarCamadaAcao,
@@ -235,7 +235,7 @@ export default async function DashboardPage({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 id="camada-desempenho" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Desempenho · últimos {PERIODO_LABEL[periodo]}
+              Desempenho · {tituloPeriodo(periodo, agora)}
             </h2>
             <p className="text-xs text-muted-foreground">
               {desempenho.dadosTempoDesde
