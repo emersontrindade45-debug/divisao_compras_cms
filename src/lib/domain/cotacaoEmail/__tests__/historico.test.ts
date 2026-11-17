@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { INICIO_HISTORICO, diasDesde, lerHistorico, planejarFatias, type FatiaLeitura, type ResultadoFatia } from "../historico";
 
 describe("planejarFatias", () => {
-  it("divide de hoje para trás em fatias de 30 dias, a última com o resto", () => {
-    expect(planejarFatias(75)).toEqual([
-      { desdeDias: 0, dias: 30 },
-      { desdeDias: 30, dias: 30 },
-      { desdeDias: 60, dias: 15 },
+  it("divide de hoje para trás em fatias de 15 dias, a última com o resto", () => {
+    expect(planejarFatias(40)).toEqual([
+      { desdeDias: 0, dias: 15 },
+      { desdeDias: 15, dias: 15 },
+      { desdeDias: 30, dias: 10 },
     ]);
   });
 });
@@ -15,19 +15,19 @@ describe("lerHistorico", () => {
   it("lê as fatias na ordem, da mais recente para a mais antiga", async () => {
     const vistas: FatiaLeitura[] = [];
     await lerHistorico(60, async (f) => { vistas.push(f); return {}; });
-    expect(vistas).toEqual([{ desdeDias: 0, dias: 30 }, { desdeDias: 30, dias: 30 }]);
+    expect(vistas).toEqual([{ desdeDias: 0, dias: 15 }, { desdeDias: 15, dias: 15 }, { desdeDias: 30, dias: 15 }, { desdeDias: 45, dias: 15 }]);
   });
 
   it("fatia truncada é dividida ao meio e relida, sem pular nenhum dia", async () => {
     const vistas: FatiaLeitura[] = [];
-    const r = await lerHistorico(30, async (f) => {
+    const r = await lerHistorico(15, async (f) => {
       vistas.push(f);
-      return { truncada: f.dias === 30 };
+      return { truncada: f.dias === 15 };
     });
     expect(vistas).toEqual([
-      { desdeDias: 0, dias: 30 },
       { desdeDias: 0, dias: 15 },
-      { desdeDias: 15, dias: 15 },
+      { desdeDias: 0, dias: 8 },
+      { desdeDias: 8, dias: 7 },
     ]);
     expect(r.fatiaSemSolucao).toBeUndefined();
   });
@@ -37,17 +37,44 @@ describe("lerHistorico", () => {
       { contagens: { enviosNovos: 2, respostasNaFila: 5, envios: 10, enviosSemProcesso: 4 } },
       { contagens: { enviosNovos: 3, respostasNaFila: 7, envios: 6, enviosSemProcesso: 1 } },
     ];
-    const r = await lerHistorico(60, async () => respostas.shift()!);
+    const r = await lerHistorico(30, async () => respostas.shift()!);
     expect(r.totais).toEqual({ enviosNovos: 5, respostasNaFila: 7, envios: 6, enviosSemProcesso: 1 });
   });
 
-  it("erro numa fatia interrompe, mantendo o que já foi lido", async () => {
+  // O defeito real (2026-11-18): uma fatia estourava o prazo de 40 s e o histórico inteiro parava
+  // no meio, duas vezes seguidas, deixando meses sem reler.
+  it("fatia que dá erro é dividida e relida; o histórico continua", async () => {
+    const vistas: FatiaLeitura[] = [];
+    const r = await lerHistorico(30, async (f) => {
+      vistas.push(f);
+      // A 2ª fatia inteira (15 dias, de 15 a 30) estoura; as metades passam.
+      return f.desdeDias === 15 && f.dias === 15 ? { erro: "Prazo." } : { contagens: { enviosNovos: 1 } };
+    });
+    expect(r.erro).toBeUndefined();
+    expect(vistas).toEqual([
+      { desdeDias: 0, dias: 15 },
+      { desdeDias: 15, dias: 15 },
+      { desdeDias: 15, dias: 8 },
+      { desdeDias: 23, dias: 7 },
+    ]);
+    expect(r.totais.enviosNovos).toBe(3);
+  });
+
+  it("erro que persiste nas metades interrompe, mantendo o que já foi lido", async () => {
     let n = 0;
-    const r = await lerHistorico(90, async () => (++n === 2 ? { erro: "Falhou." } : { contagens: { enviosNovos: 1 } }));
+    const r = await lerHistorico(90, async () => (++n >= 2 ? { erro: "Falhou." } : { contagens: { enviosNovos: 1 } }));
     expect(r.erro).toBe("Falhou.");
     expect(r.fatiasLidas).toBe(1);
     expect(r.totais.enviosNovos).toBe(1);
-    expect(n).toBe(2);
+    // 1 leitura boa + a fatia que falhou + a primeira metade que falhou de novo: sem laço.
+    expect(n).toBe(3);
+  });
+
+  it("dia único com erro interrompe de imediato, sem dividir", async () => {
+    let n = 0;
+    const r = await lerHistorico(1, async () => { n++; return { erro: "Falhou." }; });
+    expect(r.erro).toBe("Falhou.");
+    expect(n).toBe(1);
   });
 
   it("dia único ainda truncado é reportado, não aceito em silêncio", async () => {

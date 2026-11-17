@@ -30,7 +30,12 @@ export interface ResultadoHistorico {
   fatiaSemSolucao?: FatiaLeitura;
 }
 
-export const DIAS_POR_FATIA = 30;
+/**
+ * Cada fatia é uma chamada que tem 40 s para ler o Gmail (limite da ação). Com 30 dias, fatias
+ * mais cheias passavam disso e interrompiam o histórico no meio (2026-11-18: parou na 3ª e na 5ª
+ * de ~11, duas vezes). 15 dias cabem com folga; uma que ainda falhe é dividida e tentada de novo.
+ */
+export const DIAS_POR_FATIA = 15;
 
 /** Início do histórico a importar: o ano de 2026 inteiro (meia-noite em Brasília). */
 export const INICIO_HISTORICO = new Date("2026-01-01T00:00:00-03:00");
@@ -77,12 +82,25 @@ export async function lerHistorico(
   aoAvancar?: (lidas: number) => void,
 ): Promise<ResultadoHistorico> {
   const resultado: ResultadoHistorico = { fatiasLidas: 0, totais: {} };
-  const fila = planejarFatias(totalDias);
+  // `nivel` conta quantas vezes a fatia já foi dividida por erro: uma só, para não virar laço.
+  const fila = planejarFatias(totalDias).map((fatia) => ({ fatia, nivel: 0 }));
 
   while (fila.length > 0) {
-    const fatia = fila.shift()!;
+    const { fatia, nivel } = fila.shift()!;
     const r = await ler(fatia);
-    if (r.erro) return { ...resultado, erro: r.erro };
+    if (r.erro) {
+      // Erro numa fatia com mais de 1 dia: quase sempre ela estourou o prazo. Divide e tenta de
+      // novo as duas metades, em vez de abandonar o resto do histórico.
+      if (nivel === 0 && fatia.dias > 1) {
+        const metade = Math.ceil(fatia.dias / 2);
+        fila.unshift(
+          { fatia: { desdeDias: fatia.desdeDias, dias: metade }, nivel: 1 },
+          { fatia: { desdeDias: fatia.desdeDias + metade, dias: fatia.dias - metade }, nivel: 1 },
+        );
+        continue;
+      }
+      return { ...resultado, erro: r.erro };
+    }
 
     // A fatia truncada também grava o que leu (idempotente); reler as metades cobre o resto.
     agregar(resultado.totais, r.contagens);
@@ -94,8 +112,8 @@ export async function lerHistorico(
       const metade = Math.ceil(fatia.dias / 2);
       // A mais recente primeiro, mantendo a ordem "de hoje para trás".
       fila.unshift(
-        { desdeDias: fatia.desdeDias, dias: metade },
-        { desdeDias: fatia.desdeDias + metade, dias: fatia.dias - metade },
+        { fatia: { desdeDias: fatia.desdeDias, dias: metade }, nivel },
+        { fatia: { desdeDias: fatia.desdeDias + metade, dias: fatia.dias - metade }, nivel },
       );
     }
   }
