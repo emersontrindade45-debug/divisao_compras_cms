@@ -253,13 +253,31 @@ function testeLeitura() {
  */
 function semCitacao_(corpo) {
   var t = String(corpo || "");
-  var corte = t.search(/\n\s*(em .{5,90} escreveu|on .{5,90} wrote|-{2,}\s*(mensagem|original|forwarded)|de:\s|from:\s|>)/i);
+  // O cabeçalho "Em qui., 5 de mar. de 2026 10:00 Fulano <x@y> escreveu:" passa de 100 caracteres e
+  // pode quebrar de linha: por isso o intervalo é largo e atravessa quebras. Medido em 2026-11-18.
+  var corte = t.search(
+    /(\bem|\bon)\s+(seg|ter|qua|qui|sex|s[aá]b|dom|mon|tue|wed|thu|fri|sat|sun|\d{1,2}\s+de|\d{1,2}\/\d{1,2}|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez|feb|apr|may|aug|sep|oct|dec)[\s\S]{3,240}?(escreveu|wrote)\s*:|-{2,}\s*(mensagem|original|forwarded)|\n\s*(de|from):\s|\n\s*>|c[aâ]mara municipal de santos\s+cnpj/i,
+  );
   return corte === -1 ? t : t.slice(0, corte);
+}
+
+/**
+ * Recusa provável, por frases mais amplas que a lista fixa (FRASES_RECUSA), com EXCEÇÃO para quem
+ * demonstra interesse ou pede prazo: "temos interesse… não será possível concluir hoje" não é
+ * recusa. Validada em 2026-11-18 numa amostra rotulada de 30 respostas: 24 de 24 recusas casadas,
+ * 0 falsos positivos. Amostra pequena: por isso só SUGERE, nunca aplica sozinha.
+ */
+function provavelRecusa_(texto) {
+  var t = String(texto || "").toLowerCase();
+  var guarda = /(temos interesse|estamos providenciando|extens[aã]o (do )?prazo|possibilidade de|gostaria de (saber|validar)|poderia)/;
+  var recusa = /(n[aã]o (conseguimos|consigo|podemos|produzimos|fornece|fornecemos|atendo|atendemos|trabalhamos|comercializamos|participamos|temos (como|condi[cç][oõ]es|esses|esse|interesse)|estamos (participando|assumindo|fornecendo|fazendo))|n[aã]o [eé] o (meu|nosso) ramo|fora d[oe] (nosso )?(ramo|segmento|escopo|perfil)|n[aã]o faz parte d[oe] (nosso )?escopo|declinando|declinamos|atuamos (apenas|somente|exclusivamente)|n[aã]o ser[aá] poss[ií]vel (encaminhar|enviar|atender|participar))/;
+  return recusa.test(t) && !guarda.test(t);
 }
 
 /**
  * Marcadores candidatos para as respostas que hoje não têm sinal nenhum. Só booleanos: o texto
  * nunca sai. Servem para MEDIR (testeSemSinal) antes de virar regra de classificação.
+ * (`numeroDecimal` foi retirado: acendia por telefone, CEP e CNPJ — 0 de 15 eram valor.)
  */
 function marcadoresDoTexto_(texto) {
   var t = String(texto || "").toLowerCase();
@@ -267,11 +285,16 @@ function marcadoresDoTexto_(texto) {
     vazio: t.replace(/\s+/g, " ").trim().length < 20,
     pergunta: t.indexOf("?") !== -1,
     pedeInformacao: /(termo de refer|\btr\b|especifica|detalh|mais informa|poderia (enviar|informar)|gostaria de saber|qual (a|o) |quantidade|prazo de entrega|local de entrega)/.test(t),
-    semInteresse: /(n[aã]o (temos|possu[ií]mos|trabalh|fornec|atend|realiz|vend|produz|prestamos)|fora d[oe] (nosso )?(ramo|segmento|escopo|perfil)|infelizmente|n[aã]o ser[aá] poss[ií]vel|n[aã]o (conseguimos|podemos))/.test(t),
+    provavelRecusa: provavelRecusa_(t),
     mencionaProposta: /(segue|em anexo|anexo|proposta|or[cç]amento|cota[cç][aã]o)/.test(t),
-    numeroDecimal: /\d+[.,]\d{2}/.test(t),
     recebido: /(recebemos|recebido|obrigad|agradec|aguard|encaminh|repass|setor|respons[aá]vel|retornar|retorno)/.test(t),
   };
+}
+
+/** Resposta de quem é da própria Câmara (a Divisão responde dentro do fio): não é fornecedor. */
+function ehInterna_(msg) {
+  var de = (/<([^>]+)>/.exec(msg.getFrom()) || [null, msg.getFrom()])[1].trim().toLowerCase();
+  return /@camarasantos\.sp\.gov\.br$/.test(de);
 }
 
 /**
@@ -283,7 +306,7 @@ function testeSemSinal() {
   Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
   if (!contaCerta_()) return;
   var c = { humanas: 0, semSinal: 0, anexoQualquer: 0, anexoImagem: 0, anexoOutro: 0 };
-  var m = { vazio: 0, pergunta: 0, pedeInformacao: 0, semInteresse: 0, mencionaProposta: 0, numeroDecimal: 0, recebido: 0, nenhum: 0 };
+  var m = { vazio: 0, pergunta: 0, pedeInformacao: 0, provavelRecusa: 0, mencionaProposta: 0, recebido: 0, nenhum: 0 };
   [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
     var envios = buscarEnvios_(j[1], j[0]);
     var porFio = {};
@@ -294,7 +317,7 @@ function testeSemSinal() {
         if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
         if (msg.getDate() < new Date(envio.data)) return;
         var meta = metadadosDaMensagem_(msg, envio);
-        if (meta.automatica || meta.devolucao) return;
+        if (meta.automatica || meta.devolucao || ehInterna_(msg)) return;
         c.humanas++;
         if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
         c.semSinal++;
@@ -335,7 +358,7 @@ function amostraParaConferir() {
   if (!contaCerta_()) return;
   var N = 15;
   var grupos = {};
-  ["semInteresse", "numeroDecimal", "pedeInformacao", "recebido", "mencionaProposta", "pergunta", "nenhum"].forEach(function (k) {
+  ["provavelRecusa", "pedeInformacao", "recebido", "mencionaProposta", "pergunta", "nenhum"].forEach(function (k) {
     grupos[k] = { n: N, vistos: 0, itens: [] };
   });
   [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
@@ -348,7 +371,7 @@ function amostraParaConferir() {
         if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
         if (msg.getDate() < new Date(envio.data)) return;
         var meta = metadadosDaMensagem_(msg, envio);
-        if (meta.automatica || meta.devolucao) return;
+        if (meta.automatica || meta.devolucao || ehInterna_(msg)) return;
         if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
         var marc = marcadoresDoTexto_(semCitacao_(msg.getPlainBody()));
         var algum = false;
@@ -374,8 +397,13 @@ function amostraParaConferir() {
  */
 function anonimizar_(corpo) {
   var t = semCitacao_(corpo);
-  var corte = t.search(/\n\s*(att\.?|atenciosamente|cordialmente|abra[cç]os?|grato|grata|--)\s*[,.]?\s*(\n|$)/i);
+  // Assinatura: despedida, ou o primeiro bloco de contato (fone, whatsapp, site...).
+  var corte = t.search(/\n\s*(att\.?|atenciosamente|cordialmente|abra[cç]os?|grato|grata|--)\s*[,.;]?\s*(\n|$)|\s(fone\/fax|fone:|tel\.?:|cel\.?:|whatsapp|site:|e-mail:)/i);
   if (corte !== -1) t = t.slice(0, corte);
+  // Saudação com nome ("Olá Ana, boa tarde.", "Prezado Sr. Fulano,"): até 2 cláusulas iniciais.
+  for (var i = 0; i < 2; i++) {
+    t = t.replace(/^\s*(ol[aá]|oi|bom dia|boa tarde|boa noite|prezad[oa]s?|caro|cara)[^,.!?\n]{0,60}[,.!?]\s*/i, "");
+  }
   return t
     .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "[email]")
     .replace(/(https?:\/\/|www\.)\S+/gi, "[link]")
@@ -399,7 +427,7 @@ function amostraAnonimizada() {
   Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
   if (!contaCerta_()) return;
   var N = 15;
-  var grupos = { semInteresse: { n: N, vistos: 0, itens: [] }, numeroDecimal: { n: N, vistos: 0, itens: [] } };
+  var grupos = { provavelRecusa: { n: N, vistos: 0, itens: [] } };
   [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
     var envios = buscarEnvios_(j[1], j[0]);
     var porFio = {};
@@ -410,7 +438,7 @@ function amostraAnonimizada() {
         if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
         if (msg.getDate() < new Date(envio.data)) return;
         var meta = metadadosDaMensagem_(msg, envio);
-        if (meta.automatica || meta.devolucao) return;
+        if (meta.automatica || meta.devolucao || ehInterna_(msg)) return;
         if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
         var corpo = msg.getPlainBody();
         var marc = marcadoresDoTexto_(semCitacao_(corpo));

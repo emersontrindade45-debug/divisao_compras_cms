@@ -12,15 +12,19 @@ function carregar<T>(nome: string): T {
 
 const semCitacao = carregar<(c: string) => string>("semCitacao_");
 // anonimizar_ depende de semCitacao_ (mesmo escopo do script): carrega as duas juntas.
+const provavelRecusa = carregar<(t: string) => boolean>("provavelRecusa_");
 const anonimizar = new Function(
   `${/function semCitacao_[\s\S]*?\n}\n/.exec(fonte)![0]}\n${/function anonimizar_[\s\S]*?\n}\n/.exec(fonte)![0]}; return anonimizar_;`,
 )() as (c: string) => string;
-const marcadores = carregar<(t: string) => Record<string, boolean>>("marcadoresDoTexto_");
+// marcadoresDoTexto_ chama provavelRecusa_ (mesmo escopo do script): carrega as duas juntas.
+const marcadores = new Function(
+  `${/function provavelRecusa_[\s\S]*?\n}\n/.exec(fonte)![0]}\n${/function marcadoresDoTexto_[\s\S]*?\n}\n/.exec(fonte)![0]}; return marcadoresDoTexto_;`,
+)() as (t: string) => Record<string, boolean>;
 
 describe("semCitacao_", () => {
   it("corta no 'Em … escreveu:' do e-mail original", () => {
     const corpo = "Obrigado, vamos analisar.\n\nEm seg., 3 de nov. de 2026 10:00, Compras <compras@x.gov.br> escreveu:\nSolicitamos orçamento?";
-    expect(semCitacao(corpo)).toBe("Obrigado, vamos analisar.");
+    expect(semCitacao(corpo).trim()).toBe("Obrigado, vamos analisar.");
   });
 
   it("corta na primeira linha citada com '>'", () => {
@@ -39,15 +43,16 @@ describe("marcadoresDoTexto_", () => {
   });
 
   it("reconhece recusa por frase fora da lista fixa", () => {
-    expect(marcadores("Infelizmente não trabalhamos com esse segmento.").semInteresse).toBe(true);
+    expect(marcadores("Infelizmente não trabalhamos com esse segmento.").provavelRecusa).toBe(true);
   });
 
   it("reconhece pedido de informação", () => {
     expect(marcadores("Poderia enviar o termo de referência?").pedeInformacao).toBe(true);
   });
 
-  it("reconhece valor decimal sem R$", () => {
-    expect(marcadores("Fica em 1.250,00 a unidade").numeroDecimal).toBe(true);
+  // Retirado: acendia por telefone, CEP e CNPJ da assinatura — 0 de 15 eram valor (2026-11-18).
+  it("não tem mais o marcador numeroDecimal", () => {
+    expect(marcadores("Telefone 13 3202.1234, CEP 11013-923")).not.toHaveProperty("numeroDecimal");
   });
 
   it("texto muito curto conta como vazio", () => {
@@ -112,5 +117,88 @@ describe("anonimizar_", () => {
 
   it("limita o tamanho a 400 caracteres", () => {
     expect(anonimizar("a".repeat(2000)).length).toBe(400);
+  });
+});
+
+// Respostas reais rotuladas à mão em 2026-11-18 (nomes e empresas retirados do texto). A = recusa.
+describe("provavelRecusa_ — amostra rotulada", () => {
+  it.each([
+    "Infelizmente não conseguimos atender licitação.",
+    "Informo que não produzimos o produto solicitado.",
+    "Infelizmente não temos condições de atender à solicitação do termo de referência.",
+    "Infelizmente nós não conseguimos atender.",
+    "Neste momento não estamos assumindo novos projetos.",
+    "Infelizmente não conseguimos atender as especificações dos lotes.",
+    "Nossa empresa não fornece esse sistema. Agradecemos pela oportunidade.",
+    "Não temos esses itens.",
+    "Eu não atendo Santos",
+    "Infelizmente não conseguimos contribuir com esse projeto.",
+    "Não conseguimos atender esse processo.",
+    "Infelizmente não consigo atender essas prerrogativas.",
+    "Informamos que o material não faz parte do escopo de nossa empresa. Estamos declinando a sua consulta.",
+    "Agradecemos a consulta, mas infelizmente não temos como atender por ser um material fora do nosso perfil de produção.",
+    "No momento não estamos fornecendo cotações para novas contratações.",
+    "Obrigado pelo convite mas não estamos participando de licitações",
+    "bom dia, não é o meu ramo, de qualquer forma obrigado.",
+    "Infelizmente não podemos dar andamento em sua solicitação, pois atuamos apenas em São Paulo.",
+    "Bom dia! Não participamos de processos licitatórios.",
+    "boa tarde não estamos fazendo estimativas, alta demanda de orçamentos",
+    "Não comercializamos contratos com prazo inferior a 12 meses.",
+  ])("reconhece a recusa: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(true);
+  });
+
+  // Os dois falsos positivos da regra antiga: interesse + pedido de prazo.
+  it.each([
+    "Sim, temos interesse e já estamos providenciando o orçamento, mas não será possível concluir hoje.",
+    "Sim, temos interesse e estamos providenciando a cotação, mas não será possível concluir até amanhã, existe a possibilidade de extensão do prazo?",
+  ])("NÃO confunde pedido de prazo com recusa: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(false);
+  });
+
+  it.each([
+    "Gostaria de validar dois pontos antes de enviar a proposta: será dispensa de licitação?",
+    "Por nada, eu fico à disposição!",
+    "Segue em anexo a nossa proposta com os valores.",
+  ])("não marca como recusa: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(false);
+  });
+});
+
+describe("semCitacao_ — cabeçalhos longos e quebrados (2026-11-18)", () => {
+  it("corta o 'Em … escreveu:' com mais de 100 caracteres, no meio da linha", () => {
+    const corpo = "Bom dia, não temos esses itens. Em quinta-feira, 5 de março de 2026 10:00:00 GMT-3 Divisão de Compras e Licitação <compras@camarasantos.sp.gov.br> escreveu: CÂMARA MUNICIPAL DE SANTOS CNPJ: 12.345.678/0001-90 PROCESSO Nº.: 382/2026 Solicitamos, por meio deste, a gentileza de nos enviar proposta de orçamento";
+    expect(semCitacao(corpo)).toBe("Bom dia, não temos esses itens. ");
+  });
+
+  it("corta o cabeçalho em inglês que quebra de linha antes de 'wrote:'", () => {
+    const corpo = "Boa tarde. Por nada!\nOn set 23 2026 at 3:41 pm, Divisão de Compras e Licitação <compras@camarasantos.sp.gov.br>\nwrote: Boa Tarde, Tá ok";
+    expect(semCitacao(corpo)).toBe("Boa tarde. Por nada!\n");
+  });
+
+  it("corta no bloco 'CÂMARA MUNICIPAL DE SANTOS CNPJ' mesmo sem cabeçalho reconhecível", () => {
+    expect(semCitacao("Não é o meu ramo. CÂMARA MUNICIPAL DE SANTOS CNPJ: 1 PROCESSO")).toBe("Não é o meu ramo. ");
+  });
+});
+
+describe("anonimizar_ — saudação e assinatura (2026-11-18)", () => {
+  it("tira a saudação com nome e o bloco de contato da assinatura", () => {
+    const saida = anonimizar("Olá Ana, boa tarde. Infelizmente não conseguimos atender. Maria Souza Fone/fax: 13 3202-1234 WhatsApp 13 99876-5432 Site: www.x.com.br");
+    expect(saida).toBe("Infelizmente não conseguimos atender. Maria Souza");
+    expect(saida).not.toContain("Ana");
+    expect(saida).not.toMatch(/\d/);
+  });
+});
+
+describe("ehInterna_", () => {
+  const ehInterna = carregar<(m: { getFrom: () => string }) => boolean>("ehInterna_");
+  const de = (from: string) => ({ getFrom: () => from });
+
+  it("resposta de quem é da Câmara não é de fornecedor", () => {
+    expect(ehInterna(de("Felipe <felipe@camarasantos.sp.gov.br>"))).toBe(true);
+  });
+  it("fornecedor externo, e domínio parecido, não são internos", () => {
+    expect(ehInterna(de("Ana <ana@empresa.com.br>"))).toBe(false);
+    expect(ehInterna(de("x@camarasantos.sp.gov.br.fake.com"))).toBe(false);
   });
 });
