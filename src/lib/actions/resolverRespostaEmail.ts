@@ -9,7 +9,7 @@ import type { ActionResult } from "./processos";
 
 const schema = z.object({
   id: z.string().cuid(),
-  desfecho: z.enum(["orcamento", "recusa", "nao_e_resposta"]),
+  desfecho: z.enum(["orcamento", "recusa", "duvida", "nao_e_resposta"]),
   /** E-mail ao qual a solicitação foi enviada. Obrigatório só quando o sistema não sugeriu o fornecedor. */
   emailConsulta: z.string().trim().toLowerCase().email().max(320).optional(),
 });
@@ -22,8 +22,8 @@ export interface ResolucaoResultado {
 }
 
 /**
- * Resolve uma resposta da fila "a confirmar" (M30.d): o analista diz se é orçamento, recusa ou se
- * não é resposta de cotação. Só grava o desfecho — o VALOR do orçamento nunca entra na série por
+ * Resolve uma resposta da fila "a confirmar" (M30.d): o analista diz se é orçamento, recusa, dúvida
+ * ou se não é resposta de cotação. Só grava o desfecho — o VALOR do orçamento nunca entra na série por
  * aqui; a proposta segue pelo registro e checklist de validade.
  *
  * Atômica (CLAUDE.md §9.14): a fila é marcada como resolvida com `updateMany ... WHERE
@@ -90,7 +90,8 @@ export async function resolverRespostaEmail(
     }
 
     const alterou = await tx.consultaCotacao.updateMany({
-      where: { id: consultaId!, situacao: { in: ["sem_resposta", "a_confirmar"] } },
+      // "duvida" entra na lista: orçamento ou recusa depois de uma pergunta é a resposta que vale.
+      where: { id: consultaId!, situacao: { in: ["sem_resposta", "a_confirmar", "duvida"] } },
       data: { situacao: desfecho, regra: "manual", gmailRespostaId: pendente.gmailMensagemId },
     });
     await tx.consultaCotacao.updateMany({

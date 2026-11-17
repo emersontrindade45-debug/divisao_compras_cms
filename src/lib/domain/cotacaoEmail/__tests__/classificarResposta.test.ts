@@ -86,4 +86,51 @@ describe("classificarResposta", () => {
       expect(c({})).toEqual({ acao: "fila", motivo: "sinais_ambiguos" });
     });
   });
+
+  describe("possível orçamento e possível dúvida (sugestões, nunca aplicam)", () => {
+    it("'segue em anexo…' sem anexo reconhecido: vai à fila como possível orçamento", () => {
+      expect(c({ provavelOrcamento: true })).toEqual({ acao: "fila", motivo: "provavel_orcamento" });
+    });
+
+    it("pergunta do fornecedor: vai à fila como possível dúvida", () => {
+      expect(c({ provavelDuvida: true })).toEqual({ acao: "fila", motivo: "provavel_duvida" });
+    });
+
+    it("orçamento vence dúvida quando as duas aparecem", () => {
+      expect(c({ provavelOrcamento: true, provavelDuvida: true })).toEqual({
+        acao: "fila",
+        motivo: "provavel_orcamento",
+      });
+    });
+
+    it("recusa provável vence dúvida", () => {
+      expect(c({ provavelRecusa: true, provavelDuvida: true })).toEqual({
+        acao: "fila",
+        motivo: "provavel_recusa",
+      });
+    });
+
+    it("orçamento E recusa prováveis se contradizem: ninguém é sugerido", () => {
+      expect(c({ provavelRecusa: true, provavelOrcamento: true })).toEqual({
+        acao: "fila",
+        motivo: "sinais_ambiguos",
+      });
+    });
+
+    it("a lista fixa de recusa e o anexo continuam mandando mais que qualquer sugestão", () => {
+      expect(c({ contemRecusa: true, provavelDuvida: true })).toMatchObject({ acao: "aplicar", situacao: "recusa" });
+      expect(c({ temAnexoOrcamento: true, provavelDuvida: true })).toMatchObject({ acao: "aplicar", situacao: "orcamento" });
+    });
+
+    it("dúvida não é sugerida quando há sinal de orçamento e recusa que se contradizem", () => {
+      expect(c({ temAnexoOrcamento: true, contemRecusa: true, provavelDuvida: true })).toEqual({
+        acao: "fila",
+        motivo: "sinais_ambiguos",
+      });
+    });
+
+    it("script antigo (sem os campos) segue como antes", () => {
+      expect(c({ contemValor: true })).toEqual({ acao: "fila", motivo: "sinais_ambiguos" });
+    });
+  });
 });

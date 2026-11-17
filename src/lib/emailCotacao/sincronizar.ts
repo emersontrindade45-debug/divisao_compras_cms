@@ -294,12 +294,14 @@ export async function sincronizarRespostasEmail(
 
     // Pendente que já existia como "sem sinal claro" e agora tem recusa provável é reagrupada.
     // Guarda atômica (CLAUDE.md §9.14): só vira se ainda não foi resolvida nem reclassificada.
-    const reagrupar = pendentes.filter((p) => p.motivo === "provavel_recusa").map((p) => p.gmailMensagemId);
-    if (reagrupar.length > 0) {
-      await db.respostaEmailPendente.updateMany({
-        where: { gmailMensagemId: { in: reagrupar }, motivo: "sinais_ambiguos", resolvidaEm: null },
-        data: { motivo: "provavel_recusa" },
-      });
+    for (const motivo of ["provavel_recusa", "provavel_orcamento", "provavel_duvida"] as const) {
+      const reagrupar = pendentes.filter((p) => p.motivo === motivo).map((p) => p.gmailMensagemId);
+      if (reagrupar.length > 0) {
+        await db.respostaEmailPendente.updateMany({
+          where: { gmailMensagemId: { in: reagrupar }, motivo: "sinais_ambiguos", resolvidaEm: null },
+          data: { motivo },
+        });
+      }
     }
   }
 
@@ -358,8 +360,8 @@ interface LinhaAplicar {
  * em memória: um UPDATE ... FROM com duas linhas para a mesma consulta escolheria uma ao acaso).
  *
  * Passo 1: quem ainda estava `sem_resposta` recebe situação, data (a PRIMEIRA resposta) e regra.
- * Passo 2: quem estava `a_confirmar` e agora tem classificação segura é promovido, sem mexer na
- * data. Consulta que o analista já resolveu nunca é sobrescrita.
+ * Passo 2: quem estava `a_confirmar` (ou só com `duvida`: perguntar não encerra a consulta) e agora
+ * tem classificação segura é promovido, sem mexer na data. Consulta que o analista já resolveu nunca é sobrescrita.
  */
 async function aplicarEmLote(linhas: LinhaAplicar[]): Promise<void> {
   const envios = linhas.map((l) => l.envioId);
@@ -390,7 +392,7 @@ async function aplicarEmLote(linhas: LinhaAplicar[]): Promise<void> {
     FROM unnest(${envios}::text[], ${emails}::text[], ${situacoes}::text[],
                 ${mensagens}::text[], ${regras}::text[])
          AS v(envio, email, situacao, mensagem, regra)
-    WHERE c."envioId" = v.envio AND c."email" = v.email AND c."situacao" = 'a_confirmar'
+    WHERE c."envioId" = v.envio AND c."email" = v.email AND c."situacao" IN ('a_confirmar', 'duvida')
       AND v.situacao IN ('orcamento', 'recusa')`;
 }
 

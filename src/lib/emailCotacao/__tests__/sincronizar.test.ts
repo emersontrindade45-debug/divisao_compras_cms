@@ -223,7 +223,7 @@ describe("sincronizarRespostasEmail", () => {
         envios: [envio()],
         respostas: [resposta({ temAnexoOrcamento: true })],
       });
-      expect(sqlRaw(1)).toContain(`"situacao" = 'a_confirmar'`);
+      expect(sqlRaw(1)).toContain(`"situacao" IN ('a_confirmar', 'duvida')`);
       expect(sqlRaw(1)).toContain(`IN ('orcamento', 'recusa')`);
     });
 
@@ -268,6 +268,26 @@ describe("sincronizarRespostasEmail", () => {
       expect(mocks.db.respostaEmailPendente.updateMany).toHaveBeenCalledWith({
         where: { gmailMensagemId: { in: ["m1"] }, motivo: "sinais_ambiguos", resolvidaEm: null },
         data: { motivo: "provavel_recusa" },
+      });
+    });
+
+    it.each([
+      ["provavelOrcamento", "provavel_orcamento"],
+      ["provavelDuvida", "provavel_duvida"],
+    ] as const)("%s entra na fila com motivo próprio e reagrupa só o 'sem sinal claro' ainda não resolvido", async (campo, motivo) => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      await sincronizarRespostasEmail({
+        envios: [envio()],
+        respostas: [resposta({ [campo]: true })],
+      });
+      expect(mocks.db.respostaEmailPendente.createMany.mock.calls[0]![0].data[0]).toMatchObject({
+        gmailMensagemId: "m1",
+        motivo,
+        sugestaoConsultaId: "c0",
+      });
+      expect(mocks.db.respostaEmailPendente.updateMany).toHaveBeenCalledWith({
+        where: { gmailMensagemId: { in: ["m1"] }, motivo: "sinais_ambiguos", resolvidaEm: null },
+        data: { motivo },
       });
     });
 

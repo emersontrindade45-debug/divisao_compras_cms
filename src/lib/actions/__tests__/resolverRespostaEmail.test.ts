@@ -48,7 +48,7 @@ describe("resolverRespostaEmail", () => {
       data: { resolvidaEm: expect.any(Date) },
     });
     expect(mocks.db.consultaCotacao.updateMany).toHaveBeenCalledWith({
-      where: { id: "c1", situacao: { in: ["sem_resposta", "a_confirmar"] } },
+      where: { id: "c1", situacao: { in: ["sem_resposta", "a_confirmar", "duvida"] } },
       data: { situacao: "orcamento", regra: "manual", gmailRespostaId: "m1" },
     });
     // A data de resposta é a do e-mail, e só entra se a consulta ainda não tinha uma.
@@ -56,6 +56,28 @@ describe("resolverRespostaEmail", () => {
       where: { id: "c1", dataResposta: null },
       data: { dataResposta: DATA },
     });
+  });
+
+  it("dúvida: grava a situação 'duvida' (não encerra: orçamento ou recusa depois a substituem)", async () => {
+    const r = await resolverRespostaEmail({ id: ID, desfecho: "duvida" });
+
+    expect(r.data).toEqual({ consultaJaClassificada: false });
+    const chamada = mocks.db.consultaCotacao.updateMany.mock.calls.find(
+      (c) => (c[0] as { data?: { situacao?: string } }).data?.situacao === "duvida",
+    );
+    expect(chamada![0]).toEqual({
+      where: { id: "c1", situacao: { in: ["sem_resposta", "a_confirmar", "duvida"] } },
+      data: { situacao: "duvida", regra: "manual", gmailRespostaId: "m1" },
+    });
+  });
+
+  it("dúvida nunca sobrescreve orçamento/recusa já classificados: o filtro não os inclui", async () => {
+    await resolverRespostaEmail({ id: ID, desfecho: "duvida" });
+    const { where } = mocks.db.consultaCotacao.updateMany.mock.calls.find(
+      (c) => (c[0] as { data?: { situacao?: string } }).data?.situacao === "duvida",
+    )![0] as { where: { situacao: { in: string[] } } };
+    expect(where.situacao.in).not.toContain("orcamento");
+    expect(where.situacao.in).not.toContain("recusa");
   });
 
   it("sem sugestão, exige o e-mail ao qual a solicitação foi enviada", async () => {

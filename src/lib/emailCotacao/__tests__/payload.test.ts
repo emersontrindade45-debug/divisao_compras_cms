@@ -69,4 +69,14 @@ describe("payloadScriptSchema", () => {
     const ruim = { envios: [envio], respostas: [{ ...resposta, provavelRecusa: "sim" }] };
     expect(payloadScriptSchema.safeParse(ruim).success).toBe(false);
   });
+
+  it("aceita provavelOrcamento e provavelDuvida (opcionais, booleanos) e continua barrando campo desconhecido", () => {
+    const ok = { envios: [envio], respostas: [{ ...resposta, provavelOrcamento: true, provavelDuvida: false }] };
+    expect(payloadScriptSchema.safeParse(ok).success).toBe(true);
+    const ruim = { envios: [envio], respostas: [{ ...resposta, provavelDuvida: "sim" }] };
+    expect(payloadScriptSchema.safeParse(ruim).success).toBe(false);
+    // Trava de sigilo: qualquer campo fora da lista derruba o payload inteiro.
+    const extra = { envios: [envio], respostas: [{ ...resposta, textoDoEmail: "…" }] };
+    expect(payloadScriptSchema.safeParse(extra).success).toBe(false);
+  });
 });

@@ -15,6 +15,10 @@ export interface MarcadoresResposta {
   contemValor: boolean;
   /** Frase de recusa fora da lista fixa; ausente no payload do script antigo. */
   provavelRecusa?: boolean;
+  /** Texto que entrega ou confirma um orçamento ("segue em anexo…"); ausente no script antigo. */
+  provavelOrcamento?: boolean;
+  /** Pergunta do fornecedor; ausente no script antigo. */
+  provavelDuvida?: boolean;
 }
 
 export type RegraClassificacao = "anexo_orcamento" | "frase_recusa";
@@ -23,7 +27,10 @@ export type ResultadoClassificacao =
   | { acao: "devolucao" }
   | { acao: "ignorar"; motivo: "automatica" }
   | { acao: "aplicar"; situacao: "orcamento" | "recusa"; regra: RegraClassificacao }
-  | { acao: "fila"; motivo: "sinais_ambiguos" | "provavel_recusa" };
+  | {
+      acao: "fila";
+      motivo: "sinais_ambiguos" | "provavel_recusa" | "provavel_orcamento" | "provavel_duvida";
+    };
 
 export function classificarResposta(m: MarcadoresResposta): ResultadoClassificacao {
   if (m.devolucao) return { acao: "devolucao" };
@@ -40,10 +47,20 @@ export function classificarResposta(m: MarcadoresResposta): ResultadoClassificac
   if (sinalRecusa && !sinalOrcamento && !m.contemValor) {
     return { acao: "aplicar", situacao: "recusa", regra: "frase_recusa" };
   }
+  // Orçamento E recusa prováveis na mesma resposta se contradizem: ninguém é sugerido, decide um
+  // humano (é a mesma regra do anexo + frase de recusa acima).
+  if (m.provavelRecusa && m.provavelOrcamento) return { acao: "fila", motivo: "sinais_ambiguos" };
+
   // Recusa em frase que a lista fixa não conhece. Só SUGERE: a precisão foi medida numa amostra
   // pequena (30 respostas), então a decisão continua humana, mas agrupada para resolver em lote.
   if (m.provavelRecusa && !sinalOrcamento && !m.contemValor) {
     return { acao: "fila", motivo: "provavel_recusa" };
+  }
+  // Sugestões que só ajudam a triar a fila (nunca aplicam). Precedência: orçamento > recusa >
+  // dúvida — quem entrega orçamento e pergunta algo continua sendo orçamento.
+  if (m.provavelOrcamento && !sinalRecusa) return { acao: "fila", motivo: "provavel_orcamento" };
+  if (m.provavelDuvida && !sinalOrcamento && !sinalRecusa) {
+    return { acao: "fila", motivo: "provavel_duvida" };
   }
   return { acao: "fila", motivo: "sinais_ambiguos" };
 }
