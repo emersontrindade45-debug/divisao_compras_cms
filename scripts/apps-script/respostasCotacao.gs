@@ -315,6 +315,58 @@ function testeSemSinal() {
 }
 
 /**
+ * Amostra sorteada (reservatório) de até `n` itens: cada item visto tem a mesma chance de ficar,
+ * sem guardar a lista inteira. `estado` = { n: <tamanho>, vistos: 0, itens: [] }.
+ */
+function sortear_(estado, item) {
+  estado.vistos++;
+  if (estado.itens.length < estado.n) { estado.itens.push(item); return; }
+  var j = Math.floor(Math.random() * estado.vistos);
+  if (j < estado.n) estado.itens[j] = item;
+}
+
+/**
+ * RÉGUA: para conferir as regras com o Gemini do Gmail, sorteia respostas SEM SINAL por marcador e
+ * loga só o LINK de cada uma (o id da mensagem não é conteúdo). Quem confere abre o link, pergunta
+ * ao Gemini e anota a letra. Nenhum texto, assunto ou endereço sai do Google.
+ */
+function amostraParaConferir() {
+  Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
+  if (!contaCerta_()) return;
+  var N = 15;
+  var grupos = {};
+  ["semInteresse", "numeroDecimal", "pedeInformacao", "recebido", "mencionaProposta", "pergunta", "nenhum"].forEach(function (k) {
+    grupos[k] = { n: N, vistos: 0, itens: [] };
+  });
+  [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
+    var envios = buscarEnvios_(j[1], j[0]);
+    var porFio = {};
+    envios.forEach(function (e) { if (!porFio[e.fio]) porFio[e.fio] = e; });
+    Object.keys(porFio).forEach(function (fio) {
+      var envio = porFio[fio];
+      GmailApp.getThreadById(fio).getMessages().forEach(function (msg) {
+        if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
+        if (msg.getDate() < new Date(envio.data)) return;
+        var meta = metadadosDaMensagem_(msg, envio);
+        if (meta.automatica || meta.devolucao) return;
+        if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
+        var marc = marcadoresDoTexto_(semCitacao_(msg.getPlainBody()));
+        var algum = false;
+        Object.keys(grupos).forEach(function (k) {
+          if (k !== "nenhum" && marc[k]) { sortear_(grupos[k], msg.getId()); algum = true; }
+        });
+        if (!algum) sortear_(grupos.nenhum, msg.getId());
+      });
+    });
+  });
+  var base = "https://mail.google.com/mail/?authuser=" + CAIXA_ESPERADA + "#all/";
+  Object.keys(grupos).forEach(function (k) {
+    Logger.log("== " + k + " (" + grupos[k].itens.length + " de " + grupos[k].vistos + ") ==");
+    grupos[k].itens.forEach(function (id, i) { Logger.log((i + 1) + ". " + base + id); });
+  });
+}
+
+/**
  * Passo 2 do spike: Implantar → Nova implantação → App da Web
  * (Executar como: eu; Quem pode acessar: Qualquer pessoa). O sistema chama
  * com POST {"segredo": "...", "dias": 30, "desdeDias": 0}. Sem o segredo, nada é lido.

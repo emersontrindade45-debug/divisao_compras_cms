@@ -56,3 +56,26 @@ describe("marcadoresDoTexto_", () => {
     expect(Object.values(m).some(Boolean)).toBe(false);
   });
 });
+
+describe("sortear_", () => {
+  const sortear = carregar<(e: { n: number; vistos: number; itens: string[] }, i: string) => void>("sortear_");
+
+  it("guarda no máximo `n` itens e conta todos os vistos", () => {
+    const estado = { n: 3, vistos: 0, itens: [] as string[] };
+    for (let i = 0; i < 100; i++) sortear(estado, `m${i}`);
+    expect(estado.itens).toHaveLength(3);
+    expect(estado.vistos).toBe(100);
+  });
+
+  it("com menos itens que `n`, guarda todos", () => {
+    const estado = { n: 15, vistos: 0, itens: [] as string[] };
+    ["a", "b"].forEach((i) => sortear(estado, i));
+    expect(estado.itens).toEqual(["a", "b"]);
+  });
+
+  it("não favorece o começo: com muitos itens, sobram itens vindos do fim também", () => {
+    const estado = { n: 10, vistos: 0, itens: [] as string[] };
+    for (let i = 0; i < 1000; i++) sortear(estado, `m${i}`);
+    expect(estado.itens.some((id) => Number(id.slice(1)) >= 500)).toBe(true);
+  });
+});
