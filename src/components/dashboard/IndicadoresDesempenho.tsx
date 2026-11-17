@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, FileX, Landmark, Layers, Mail, MailX, Timer } from "lucide-react";
+import { Ban, CheckCircle2, HelpCircle, Clock, FileX, Landmark, Layers, Mail, MailX, Timer } from "lucide-react";
 import { MetricCard } from "@/components/common/MetricCard";
 import {
   textoCobertura,
@@ -46,11 +46,26 @@ export function IndicadoresDesempenho({ dados }: { dados: CamadaDesempenho }) {
         icon={Landmark}
       />
       <MetricCard
-        label="Taxa de resposta"
-        value={valor(dados.taxaResposta.atual, "%")}
-        delta={delta(dados.taxaResposta, "maior_melhor", " p.p.")}
-        hint={textoCobertura(dados.taxaResposta.atual, COTACOES, "e-mails devolvidos fora da conta")}
+        label="Dúvidas"
+        value="—"
+        hint="ainda não classificadas — hoje contam só orçamento e recusa"
+        icon={HelpCircle}
+        href="/cotacoes"
+      />
+      <MetricCard
+        label="Orçamentos entregues"
+        value={valor(dados.orcamentos.atual, "%")}
+        delta={delta(dados.orcamentos, "maior_melhor", " p.p.")}
+        hint={`${dados.contagem.orcamentos} de ${dados.contagem.consultadas} consultas · ${dados.contagem.aConfirmar} aguardando confirmação`}
         icon={Mail}
+        href="/cotacoes"
+      />
+      <MetricCard
+        label="Recusas"
+        value={valor(dados.recusas.atual, "%")}
+        delta={delta(dados.recusas, "menor_melhor", " p.p.")}
+        hint={`${dados.contagem.recusas} de ${dados.contagem.consultadas} consultas · e-mails devolvidos fora da conta`}
+        icon={Ban}
         href="/cotacoes"
       />
       <MetricCard

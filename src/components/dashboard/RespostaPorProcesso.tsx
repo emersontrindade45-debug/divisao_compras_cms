@@ -17,8 +17,8 @@ export function RespostaPorProcesso({ processos }: { processos: TaxaProcesso[] }
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Taxa de resposta por processo</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Fornecedores consultados por e-mail no período, por processo. Recusa conta como resposta;
-          e-mail devolvido fica fora.
+          Fornecedores consultados por e-mail no período, por processo. Contam orçamento e recusa;
+          resposta ainda não confirmada e e-mail devolvido ficam fora.
         </p>
       </CardHeader>
       <CardContent className="pb-4">

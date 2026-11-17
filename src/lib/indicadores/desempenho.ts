@@ -7,7 +7,9 @@ import {
   percentualPropostasInvalidas,
   consultasComoCotacoes,
   percentualEmailsInvalidos,
-  taxaRespostaConsultas,
+  contarConsultas,
+  percentualDaSituacao,
+  type ContagemConsultas,
   taxaRespostaPorProcesso,
   referenciaProcesso,
   tempoRespostaDias,
@@ -29,7 +31,9 @@ export interface CamadaDesempenho {
   tempoPrimeiraReferencia: ParIndicador;
   tempoSerieMinima: ParIndicador;
   fontePublica: ParIndicador;
-  taxaResposta: ParIndicador;
+  orcamentos: ParIndicador;
+  recusas: ParIndicador;
+  contagem: ContagemConsultas;
   tempoResposta: ParIndicador;
   emailsInvalidos: ParIndicador;
   propostasInvalidas: ParIndicador;
@@ -110,7 +114,9 @@ export async function carregarCamadaDesempenho(
     tempoPrimeiraReferencia: par((d, j) => tempoAteMarco(d, "primeiraReferenciaEm", j), processos),
     tempoSerieMinima: par((d, j) => tempoAteMarco(d, "serieMinimaEm", j), processos),
     fontePublica: par(percentualFontePublica, fontes),
-    taxaResposta: par(taxaRespostaConsultas, consultas),
+    orcamentos: par((d, j) => percentualDaSituacao(d, j, "orcamento"), consultas),
+    recusas: par((d, j) => percentualDaSituacao(d, j, "recusa"), consultas),
+    contagem: contarConsultas(consultas, atual),
     tempoResposta: par(tempoRespostaDias, consultas),
     emailsInvalidos: par(percentualEmailsInvalidos, consultas),
     propostasInvalidas: par(percentualPropostasInvalidas, propostas),

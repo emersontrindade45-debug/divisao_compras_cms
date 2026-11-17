@@ -3,6 +3,8 @@ import {
   consultasComoCotacoes,
   percentualEmailsInvalidos,
   taxaRespostaConsultas,
+  contarConsultas,
+  percentualDaSituacao,
   tempoRespostaDias,
   type ConsultaDesempenhoInput,
   janelas,
@@ -273,12 +275,53 @@ describe("indicadores das consultas por e-mail (M30.d)", () => {
     expect(r).toEqual({ valor: 50, base: 2, excluidos: 2 });
   });
 
-  it("'a confirmar' já é uma resposta (só não se sabe de que tipo)", () => {
+  it("'a confirmar' NÃO conta como resposta (pode ser só 'recebi'); só orçamento e recusa contam", () => {
     const r = taxaRespostaConsultas(
-      [cons({ situacao: "a_confirmar", dataResposta: d("2026-11-03") }), cons({ situacao: "sem_resposta" })],
+      [
+        cons({ situacao: "a_confirmar", dataResposta: d("2026-11-03") }),
+        cons({ situacao: "orcamento", dataResposta: d("2026-11-03") }),
+        cons({ situacao: "sem_resposta" }),
+        cons({ situacao: "sem_resposta" }),
+      ],
       J,
     );
-    expect(r.valor).toBe(50);
+    expect(r.valor).toBe(25);
+  });
+
+  it("contarConsultas separa orçamento, recusa e a confirmar, e tira o e-mail devolvido da base", () => {
+    const c = contarConsultas(
+      [
+        cons({ situacao: "orcamento" }),
+        cons({ situacao: "recusa" }),
+        cons({ situacao: "recusa" }),
+        cons({ situacao: "a_confirmar" }),
+        cons({ situacao: "sem_resposta" }),
+        cons({ situacao: "email_invalido" }),
+        cons({ situacao: "orcamento", dataEnvio: d("2026-01-01") }),
+      ],
+      J,
+    );
+    expect(c).toEqual({ consultadas: 5, orcamentos: 1, recusas: 2, aConfirmar: 1, invalidos: 1 });
+  });
+
+  it("percentualDaSituacao: recusas e orçamentos sobre as consultas válidas", () => {
+    const base = [
+      cons({ situacao: "orcamento" }),
+      cons({ situacao: "recusa" }),
+      cons({ situacao: "a_confirmar" }),
+      cons({ situacao: "sem_resposta" }),
+      cons({ situacao: "email_invalido" }),
+    ];
+    expect(percentualDaSituacao(base, J, "orcamento")).toEqual({ valor: 25, base: 4, excluidos: 1 });
+    expect(percentualDaSituacao(base, J, "recusa")).toEqual({ valor: 25, base: 4, excluidos: 1 });
+  });
+
+  it("tempo de resposta ignora 'a confirmar'", () => {
+    const r = tempoRespostaDias(
+      [cons({ situacao: "a_confirmar", dataResposta: d("2026-11-03") })],
+      J,
+    );
+    expect(r.base).toBe(0);
   });
 
   it("consultasComoCotacoes leva o processo e tira o e-mail devolvido da taxa por processo", () => {

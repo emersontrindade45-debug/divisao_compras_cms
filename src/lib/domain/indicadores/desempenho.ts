@@ -308,8 +308,9 @@ const STATUS_DA_SITUACAO: Record<
   CotacaoDesempenhoInput["status"]
 > = {
   sem_resposta: "silenciosa",
-  // Respondeu, mas ainda sem saber se é orçamento ou recusa: conta como RESPOSTA.
-  a_confirmar: "incompleta",
+  // Ainda sem saber se é dúvida, orçamento ou recusa (pode ser só "recebi"): NÃO conta como
+  // resposta até o analista confirmar — só dúvida, orçamento e recusa contam.
+  a_confirmar: "silenciosa",
   orcamento: "positiva",
   recusa: "negativa",
 };
@@ -338,10 +339,46 @@ export function taxaRespostaConsultas(consultas: ConsultaDesempenhoInput[], j: J
   };
 }
 
+export interface ContagemConsultas {
+  /** Consultas enviadas na janela, sem os e-mails devolvidos. */
+  consultadas: number;
+  orcamentos: number;
+  recusas: number;
+  /** Respondeu, mas o analista ainda não confirmou o tipo — fora das três contas. */
+  aConfirmar: number;
+  invalidos: number;
+}
+
+/** Quantas consultas da janela caíram em cada situação (base dos cards Orçamentos/Recusas). */
+export function contarConsultas(consultas: ConsultaDesempenhoInput[], j: Janela): ContagemConsultas {
+  const daJanela = consultas.filter((c) => dentro(c.dataEnvio, j));
+  const n = (s: SituacaoConsultaInput) => daJanela.filter((c) => c.situacao === s).length;
+  const invalidos = n("email_invalido");
+  return {
+    consultadas: daJanela.length - invalidos,
+    orcamentos: n("orcamento"),
+    recusas: n("recusa"),
+    aConfirmar: n("a_confirmar"),
+    invalidos,
+  };
+}
+
+/** % das consultas (sem e-mail devolvido) que terminaram na situação pedida. */
+export function percentualDaSituacao(
+  consultas: ConsultaDesempenhoInput[],
+  j: Janela,
+  situacao: "orcamento" | "recusa",
+): Indicador {
+  const c = contarConsultas(consultas, j);
+  const parte = situacao === "orcamento" ? c.orcamentos : c.recusas;
+  return { valor: percentual(parte, c.consultadas), base: c.consultadas, excluidos: c.invalidos };
+}
+
 /** Mediana, em dias, entre o envio e a resposta — pelos fornecedores que responderam NA janela. */
 export function tempoRespostaDias(consultas: ConsultaDesempenhoInput[], j: Janela): Indicador {
   const respondidas = consultas.filter(
-    (c) => c.situacao !== "email_invalido" && c.situacao !== "sem_resposta" && dentro(c.dataResposta, j),
+    (c) =>
+      (c.situacao === "orcamento" || c.situacao === "recusa") && dentro(c.dataResposta, j),
   );
   const dias = respondidas.map((c) =>
     Math.max(0, (c.dataResposta!.getTime() - c.dataEnvio.getTime()) / DIA_MS),
