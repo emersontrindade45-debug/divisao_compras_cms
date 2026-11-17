@@ -1,5 +1,5 @@
 /**
- * M30.d — Leitura das respostas de cotação na caixa divisaocompras@ (SPIKE).
+ * M30.d — Leitura das respostas de cotação na caixa compras@ (SPIKE).
  *
  * Duas leituras: os ENVIOS ("Solicitação de Orçamento Proc. N … / Entrega:
  * dd/mm/aaaa", na pasta Enviados) viram cotações no sistema; as RESPOSTAS
@@ -13,7 +13,7 @@
  *   - Anexos nunca são lidos: só se verifica tipo/extensão.
  *
  * Instalação (uma vez, sem TI):
- *   1. Entrar em script.google.com logado como divisaocompras@camarasantos.sp.gov.br
+ *   1. Entrar em script.google.com logado como compras@camarasantos.sp.gov.br
  *   2. Novo projeto → colar este arquivo → Salvar.
  *   3. Configurações do projeto → Propriedades do script → SEGREDO = <valor longo aleatório>.
  *   4. Rodar `testeLeitura` uma vez no editor e autorizar (escopo de leitura do Gmail).

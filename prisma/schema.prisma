@@ -1106,7 +1106,7 @@ model ItemCatalogoReferencia {
   @@map("itens_catalogo_referencia")
 }
 
-// ── M30.d — Cotação por e-mail (caixa divisaocompras@) ────────────────────
+// ── M30.d — Cotação por e-mail (caixa compras@) ────────────────────
 //
 // REGRA DE SIGILO (decidida com o usuário): nada de conteúdo de e-mail é
 // gravado — sem assunto, corpo, anexo. Só metadados: ids opacos do Gmail,

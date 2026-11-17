@@ -6,7 +6,7 @@
  * (foi exatamente isso que fez o primeiro teste do script rodar na conta errada).
  */
 
-export const CAIXA_DA_DIVISAO = "divisaocompras@camarasantos.sp.gov.br";
+export const CAIXA_DA_DIVISAO = "compras@camarasantos.sp.gov.br";
 
 export function linkDoGmail(idMensagem: string): string {
   return (
