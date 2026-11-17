@@ -1766,3 +1766,27 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      e-mail compartilhado (um contador atende milhares de CNPJs): distingue "um dono" de "vários"
      sem puxar tudo. Ao criar índice, o teste não é "o índice existe", é `EXPLAIN` da consulta
      real; e o predicado de um índice parcial precisa estar escrito na consulta.
+
+133. **Regra de classificação testada só no texto que o log mostra não vale para o texto que o código
+     lê — e corrigir duas vezes por hipótese é o sinal de que falta medida.** A recusa provável do
+     M30.d (2026-11-18) passava em todos os testes e deixava escapar respostas óbvias ("não
+     conseguiremos atender"): o log de revisão mostrava 400 caracteres anonimizados, mas a regra e a
+     **guarda** ("poderia", "possibilidade de"…) olhavam o corpo inteiro — rodapé de
+     confidencialidade e assinatura desligavam a recusa. Segunda causa independente: espaços
+     Unicode (fino, ideográfico) e caracteres invisíveis quebravam a frase. Duas rodadas foram
+     gastas corrigindo pela hipótese que melhor encaixava; a terceira foi uma função de
+     **diagnóstico que loga só números e palavras fixas da regra** (tamanho do corpo, onde está o
+     "?", qual palavra da guarda existe), sem texto de e-mail. Regras: (a) o teste da regra usa o
+     MESMO recorte que ela recebe em produção (aqui `semAssinatura_`, 800 caracteres); (b) a guarda
+     vale na janela da própria resposta, nunca no rodapé; (c) texto de e-mail passa por
+     normalização (NFC, qualquer espaço Unicode → espaço, invisíveis fora) antes de qualquer
+     comparação; (d) quando a segunda correção não resolve, mede-se — §9.24 aplicada a regra de
+     texto.
+     **Corolários desta etapa:** (1) piso de tamanho que serve a um marcador não serve a outro: o
+     `vazio` (< 20 caracteres) descartaria "Compra direta?", a dúvida mais típica — dúvida tem piso
+     próprio (8 caracteres úteis) e o `vazio` ignora sublinhados e traços; (2) acrescentar valor a um
+     enum do Prisma quebra o typecheck de todo tipo de domínio que o espelha — o `tsc` acusou
+     `'"duvida"' is not assignable` e o commit já havia saído; rodar `tsc` ANTES de commitar mudança
+     de schema; (3) valor de enum novo só pode ser citado em código (Server Action, SQL cru) depois
+     de a migration estar APLICADA em produção — por isso a migration foi para `main`, aplicada e
+     conferida no banco antes do código que a usa (§9.19, §9.46).
