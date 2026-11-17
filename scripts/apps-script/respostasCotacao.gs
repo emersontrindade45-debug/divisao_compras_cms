@@ -651,3 +651,6 @@ function amostraParte1() { amostraParte_(1, 90); }
 function amostraParte2() { amostraParte_(2, 90); }
 function amostraParte3() { amostraParte_(3, 90); }
 function amostraParte4() { amostraParte_(4, 90); }
+
+/** Fila inteira de uma vez (até 350). Se o log vier cortado, use amostraParte1..4. */
+function amostraTodas() { amostraParte_(1, 350); }
