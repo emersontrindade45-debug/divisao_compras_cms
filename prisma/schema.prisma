@@ -36,6 +36,10 @@ enum SituacaoConsulta {
   orcamento
   recusa
   email_invalido
+  /// Pediu esclarecimento (valor, prazo, local…). Conta como resposta no dashboard; um orçamento ou
+  /// recusa posterior do mesmo fornecedor a substitui. Fica por último: é a ordem em que o
+  /// Postgres a acrescenta (ADD VALUE).
+  duvida
 }
 
 enum StatusProcesso {

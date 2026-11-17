@@ -1,0 +1,11 @@
+-- Estado "dúvida" da consulta por e-mail (M30.d): o fornecedor respondeu pedindo esclarecimento.
+-- Com orçamento e recusa, é uma das três respostas que contam no dashboard; "só recebi" não conta.
+--
+-- Aditiva (expand): só acrescenta um valor ao enum. O código atual não conhece o valor e continua
+-- funcionando, então esta migration vai ANTES do código que passa a gravá-lo (CLAUDE.md §9.19):
+-- a Server Action que marca "É dúvida" e o SQL do sincronizador referenciam 'duvida', e isso falha
+-- em runtime ("invalid input value for enum") se o valor ainda não existir no banco.
+--
+-- PG 12+ aceita ADD VALUE dentro de transação desde que o valor novo não seja usado na mesma
+-- transação — não é (mesmo padrão de PeriodicidadeContrato 'meses_30').
+ALTER TYPE "SituacaoConsulta" ADD VALUE IF NOT EXISTS 'duvida';
