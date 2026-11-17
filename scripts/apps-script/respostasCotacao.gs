@@ -20,6 +20,20 @@
  *      O log mostra só CONTAGENS — confira que nenhum assunto/corpo aparece.
  */
 
+/**
+ * Caixa que este script DEVE ler. Se ele rodar em outra conta (o navegador costuma ter várias
+ * contas Google abertas), recusa em vez de ler a caixa errada e gravar dados de outra unidade.
+ */
+var CAIXA_ESPERADA = "compras@camarasantos.sp.gov.br";
+
+function contaEfetiva_() {
+  return Session.getEffectiveUser().getEmail().toLowerCase();
+}
+
+function contaCerta_() {
+  return contaEfetiva_() === CAIXA_ESPERADA;
+}
+
 /** Frases de recusa — conferidas no Google; só o booleano sai. */
 var FRASES_RECUSA = [
   "nao temos interesse", "não temos interesse", "nao atendemos", "não atendemos",
@@ -113,7 +127,7 @@ function buscarFios_(dias, desdeDias) {
 
 function buscarEnvios_(dias, desdeDias, fiosJaBuscados) {
   var threads = fiosJaBuscados || buscarFios_(dias, desdeDias || 0).fios;
-  var eu = Session.getEffectiveUser().getEmail().toLowerCase();
+  var eu = CAIXA_ESPERADA;
   var saida = [];
   threads.forEach(function (t) {
     t.getMessages().forEach(function (m) {
@@ -183,7 +197,7 @@ function metadadosDaMensagem_(msg, envio) {
  * processo no assunto (medido em 2026-11-16).
  */
 function buscarRespostas_(envios) {
-  var eu = Session.getEffectiveUser().getEmail().toLowerCase();
+  var eu = CAIXA_ESPERADA;
   var envioPorFio = {};
   envios.forEach(function (e) { if (!envioPorFio[e.fio]) envioPorFio[e.fio] = e; });
   var saida = [];
@@ -200,6 +214,8 @@ function buscarRespostas_(envios) {
 
 /** Passo 1 do spike: rode no editor. Loga SÓ contagens. */
 function testeLeitura() {
+  Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
+  if (!contaCerta_()) return;
   var envios = buscarEnvios_(30);
   var conta = function (lista, f) { return lista.filter(f).length; };
   var distintos = {};
@@ -245,6 +261,11 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ erro: "nao_autorizado" }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  // Conta errada: nada é lido. O sistema mostra só "formato inesperado"; a conta aparece no log.
+  if (!contaCerta_()) {
+    return ContentService.createTextOutput(JSON.stringify({ erro: "conta_errada", contaEfetiva: contaEfetiva_() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   var dias = Math.min(Math.max(Number(corpo.dias) || 30, 1), 90);
   // desdeDias: começa a janela N dias atrás (0 = hoje). O sistema percorre o histórico em
   // fatias ("hoje para trás"), porque uma leitura longa estoura o prazo da função dele.
@@ -254,7 +275,7 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify({
     // Diagnóstico sem conteúdo: só a conta que executa e contagens.
     diagnostico: {
-      versao: "corpo-1",
+      versao: "corpo-2",
       contaEfetiva: Session.getEffectiveUser().getEmail(),
       contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
       fiosEncontrados: busca.fios.length,
