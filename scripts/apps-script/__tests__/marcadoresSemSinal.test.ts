@@ -11,6 +11,10 @@ function carregar<T>(nome: string): T {
 }
 
 const semCitacao = carregar<(c: string) => string>("semCitacao_");
+// anonimizar_ depende de semCitacao_ (mesmo escopo do script): carrega as duas juntas.
+const anonimizar = new Function(
+  `${/function semCitacao_[\s\S]*?\n}\n/.exec(fonte)![0]}\n${/function anonimizar_[\s\S]*?\n}\n/.exec(fonte)![0]}; return anonimizar_;`,
+)() as (c: string) => string;
 const marcadores = carregar<(t: string) => Record<string, boolean>>("marcadoresDoTexto_");
 
 describe("semCitacao_", () => {
@@ -77,5 +81,36 @@ describe("sortear_", () => {
     const estado = { n: 10, vistos: 0, itens: [] as string[] };
     for (let i = 0; i < 1000; i++) sortear(estado, `m${i}`);
     expect(estado.itens.some((id) => Number(id.slice(1)) >= 500)).toBe(true);
+  });
+});
+
+describe("anonimizar_", () => {
+  it("tira valores, e-mail, telefone, CNPJ, link e qualquer número", () => {
+    const saida = anonimizar(
+      "Segue o valor de R$ 1.250,00 por unidade. Contato: joao@empresa.com.br, (13) 99876-5432, CNPJ 12.345.678/0001-90, https://empresa.com.br/proposta/778, item 3.",
+    );
+    expect(saida).not.toMatch(/\d/);
+    expect(saida).not.toMatch(/@|https?:|empresa\.com/);
+    expect(saida).toContain("[valor]");
+    expect(saida).toContain("[email]");
+    expect(saida).toContain("[tel]");
+    expect(saida).toContain("[doc]");
+    expect(saida).toContain("[link]");
+  });
+
+  it("descarta a parte citada e a assinatura", () => {
+    const corpo = "Não trabalhamos com esse segmento.\nAtenciosamente,\nMaria Souza\nGerente\n\nEm seg., 3 de nov. de 2026 10:00, Compras escreveu:\nPoderia enviar orçamento de R$ 500,00?";
+    const saida = anonimizar(corpo);
+    expect(saida).toBe("Não trabalhamos com esse segmento.");
+    expect(saida).not.toContain("Maria");
+    expect(saida).not.toContain("500");
+  });
+
+  it("mantém a frase do fornecedor, que é o que a classificação precisa", () => {
+    expect(anonimizar("Infelizmente não temos interesse neste item.")).toBe("Infelizmente não temos interesse neste item.");
+  });
+
+  it("limita o tamanho a 400 caracteres", () => {
+    expect(anonimizar("a".repeat(2000)).length).toBe(400);
   });
 });

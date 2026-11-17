@@ -367,6 +367,70 @@ function amostraParaConferir() {
 }
 
 /**
+ * Tira do texto o que identifica ou vale dinheiro, ANTES de qualquer cópia sair do Google:
+ * a parte citada, a assinatura, e-mails, links, CNPJ/CPF, telefones, valores e qualquer número.
+ * Fica a frase do fornecedor, que é o que a classificação precisa. É um filtro de melhor esforço:
+ * NOMES próprios escritos no texto não são removidos — confira o resultado antes de colar fora.
+ */
+function anonimizar_(corpo) {
+  var t = semCitacao_(corpo);
+  var corte = t.search(/\n\s*(att\.?|atenciosamente|cordialmente|abra[cç]os?|grato|grata|--)\s*[,.]?\s*(\n|$)/i);
+  if (corte !== -1) t = t.slice(0, corte);
+  return t
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "[email]")
+    .replace(/(https?:\/\/|www\.)\S+/gi, "[link]")
+    .replace(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g, "[doc]")
+    .replace(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g, "[doc]")
+    .replace(/\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}/g, "[tel]")
+    .replace(/r\$\s*[\d.,]+/gi, "[valor]")
+    .replace(/\d[\d.,]*/g, "[n]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 400);
+}
+
+/**
+ * RÉGUA com IA externa, por decisão do usuário (exceção SÓ para validar as regras): sorteia
+ * respostas sem sinal dos dois grupos que podem virar regra e loga o texto ANONIMIZADO, em blocos
+ * para colar no ChatGPT. O cabeçalho de cada item traz o grupo, o número e o fim do id, para as
+ * letras voltarem ao item certo. Não grava nada fora do log.
+ */
+function amostraAnonimizada() {
+  Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
+  if (!contaCerta_()) return;
+  var N = 15;
+  var grupos = { semInteresse: { n: N, vistos: 0, itens: [] }, numeroDecimal: { n: N, vistos: 0, itens: [] } };
+  [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
+    var envios = buscarEnvios_(j[1], j[0]);
+    var porFio = {};
+    envios.forEach(function (e) { if (!porFio[e.fio]) porFio[e.fio] = e; });
+    Object.keys(porFio).forEach(function (fio) {
+      var envio = porFio[fio];
+      GmailApp.getThreadById(fio).getMessages().forEach(function (msg) {
+        if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
+        if (msg.getDate() < new Date(envio.data)) return;
+        var meta = metadadosDaMensagem_(msg, envio);
+        if (meta.automatica || meta.devolucao) return;
+        if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
+        var corpo = msg.getPlainBody();
+        var marc = marcadoresDoTexto_(semCitacao_(corpo));
+        Object.keys(grupos).forEach(function (k) {
+          if (marc[k]) sortear_(grupos[k], { id: msg.getId(), texto: anonimizar_(corpo) });
+        });
+      });
+    });
+  });
+  Object.keys(grupos).forEach(function (k) {
+    Logger.log("=== GRUPO " + k + " (" + grupos[k].itens.length + " de " + grupos[k].vistos + ") ===");
+    var bloco = [];
+    grupos[k].itens.forEach(function (it, i) {
+      bloco.push("[" + k + " " + (i + 1) + " · " + it.id.slice(-6) + "] " + it.texto);
+      if (bloco.length === 5 || i === grupos[k].itens.length - 1) { Logger.log(bloco.join("\n")); bloco = []; }
+    });
+  });
+}
+
+/**
  * Passo 2 do spike: Implantar → Nova implantação → App da Web
  * (Executar como: eu; Quem pode acessar: Qualquer pessoa). O sistema chama
  * com POST {"segredo": "...", "dias": 30, "desdeDias": 0}. Sem o segredo, nada é lido.
