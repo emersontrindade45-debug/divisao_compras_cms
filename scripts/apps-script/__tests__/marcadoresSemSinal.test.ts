@@ -233,3 +233,35 @@ describe("grupoDuvida_", () => {
     expect(grupo(base)).toBeNull();
   });
 });
+
+describe("provavelRecusa_ — famílias de frase da amostra de dúvida", () => {
+  const recusas = [
+    "Após análise do Termo de Referência, decidimos não participar do certame.",
+    "Não desejamos participar do orçamento. Obrigada.",
+    "Informamos que não realizamos esse tipo de serviço. Qualquer dúvida estamos à disposição.",
+    "Agradecemos a solicitação, mas não imprimimos nesse tipo de material.",
+    "Agradecemos, mas não disponibilizamos o item solicitado no momento.",
+    "Não temos atendimento para o serviço solicitado no endereço do TR. Não será possível realizar o envio da proposta.",
+    "Esse tipo de solução não faz parte do nosso portfólio.",
+    "As funcionalidades do objeto não fazem parte integralmente do nosso portfólio.",
+    "Agradecemos o contato, mas sua região ainda não está na nossa área de atuação.",
+    "Nossas soluções não são compatíveis com sua solicitação.",
+    "A empresa atua exclusivamente com telefonia em nuvem, e não conseguiremos atender.",
+  ];
+  it.each(recusas)("reconhece: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(true);
+  });
+
+  const naoRecusas = [
+    "Gostaria de tirar uma dúvida: a manutenção é preventiva ou corretiva com direito a peças?",
+    "Consigo participar deste processo ainda? Fico no aguardo para enviar a proposta.",
+    "Confirmo o recebimento e vamos participar dentro do escopo enviado.",
+    "O e-mail foi direcionado ao departamento responsável para análise e em breve retornaremos.",
+    "Temos interesse em participar! Podemos agendar uma call na próxima semana?",
+    "Nossas medidas são um pouco diferentes do solicitado, segue foto. Só consigo atender se aprovar até amanhã.",
+    "Temos interesse sim, mas não será possível realizar o envio hoje; poderiam estender o prazo?",
+  ];
+  it.each(naoRecusas)("não confunde com recusa: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(false);
+  });
+});
