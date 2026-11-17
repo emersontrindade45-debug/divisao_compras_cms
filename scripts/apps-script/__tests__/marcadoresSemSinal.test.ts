@@ -212,3 +212,24 @@ describe("ehInterna_", () => {
     expect(ehInterna(de("x@camarasantos.sp.gov.br.fake.com"))).toBe(false);
   });
 });
+
+describe("grupoDuvida_", () => {
+  const grupo = carregar<(m: Record<string, boolean>) => string | null>("grupoDuvida_");
+  const base = { vazio: false, pergunta: false, pedeInformacao: false, provavelRecusa: false, mencionaProposta: false, recebido: false };
+
+  it("pede informação → pedeInformacao; só '?' → soPergunta; só recebimento → soRecebido", () => {
+    expect(grupo({ ...base, pedeInformacao: true })).toBe("pedeInformacao");
+    expect(grupo({ ...base, pergunta: true })).toBe("soPergunta");
+    expect(grupo({ ...base, recebido: true })).toBe("soRecebido");
+  });
+
+  it("recusa provável vence dúvida, e texto vazio não é candidata", () => {
+    expect(grupo({ ...base, pedeInformacao: true, provavelRecusa: true })).toBeNull();
+    expect(grupo({ ...base, pergunta: true, vazio: true })).toBeNull();
+  });
+
+  it("recebimento que menciona proposta não entra no controle; sem sinal nenhum → null", () => {
+    expect(grupo({ ...base, recebido: true, mencionaProposta: true })).toBeNull();
+    expect(grupo(base)).toBeNull();
+  });
+});

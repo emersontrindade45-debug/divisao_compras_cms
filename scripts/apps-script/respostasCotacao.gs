@@ -461,6 +461,62 @@ function amostraAnonimizada() {
 }
 
 /**
+ * Grupo de candidatas a DÚVIDA, a partir dos marcadores (já sem anexo/valor/recusa). Quem tem
+ * provável recusa fica de fora: recusa vence dúvida. null = não é candidata.
+ *  - pedeInformacao: pede/cita TR, especificação, quantidade, prazo, local…
+ *  - soPergunta: tem "?" mas sem as palavras acima;
+ *  - soRecebido: só confirma recebimento/promete retorno (controle: NÃO deve ser dúvida).
+ */
+function grupoDuvida_(marc) {
+  if (marc.vazio || marc.provavelRecusa) return null;
+  if (marc.pedeInformacao) return "pedeInformacao";
+  if (marc.pergunta) return "soPergunta";
+  if (marc.recebido && !marc.mencionaProposta) return "soRecebido";
+  return null;
+}
+
+/**
+ * RÉGUA de DÚVIDA (mesma exceção de amostraAnonimizada: texto anonimizado, só para validar a
+ * regra). Sorteia N respostas sem sinal por grupo de grupoDuvida_ e loga em blocos de 5.
+ */
+function amostraDuvida() {
+  Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
+  if (!contaCerta_()) return;
+  var N = 10;
+  var grupos = {
+    pedeInformacao: { n: N, vistos: 0, itens: [] },
+    soPergunta: { n: N, vistos: 0, itens: [] },
+    soRecebido: { n: N, vistos: 0, itens: [] },
+  };
+  [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
+    var envios = buscarEnvios_(j[1], j[0]);
+    var porFio = {};
+    envios.forEach(function (e) { if (!porFio[e.fio]) porFio[e.fio] = e; });
+    Object.keys(porFio).forEach(function (fio) {
+      var envio = porFio[fio];
+      GmailApp.getThreadById(fio).getMessages().forEach(function (msg) {
+        if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
+        if (msg.getDate() < new Date(envio.data)) return;
+        var meta = metadadosDaMensagem_(msg, envio);
+        if (meta.automatica || meta.devolucao || ehInterna_(msg)) return;
+        if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
+        var corpo = msg.getPlainBody();
+        var g = grupoDuvida_(marcadoresDoTexto_(semCitacao_(corpo)));
+        if (g) sortear_(grupos[g], { id: msg.getId(), texto: anonimizar_(corpo) });
+      });
+    });
+  });
+  Object.keys(grupos).forEach(function (k) {
+    Logger.log("=== GRUPO " + k + " (" + grupos[k].itens.length + " de " + grupos[k].vistos + ") ===");
+    var bloco = [];
+    grupos[k].itens.forEach(function (it, i) {
+      bloco.push("[" + k + " " + (i + 1) + " · " + it.id.slice(-6) + "] " + it.texto);
+      if (bloco.length === 5 || i === grupos[k].itens.length - 1) { Logger.log(bloco.join("\n")); bloco = []; }
+    });
+  });
+}
+
+/**
  * Passo 2 do spike: Implantar → Nova implantação → App da Web
  * (Executar como: eu; Quem pode acessar: Qualquer pessoa). O sistema chama
  * com POST {"segredo": "...", "dias": 30, "desdeDias": 0}. Sem o segredo, nada é lido.
