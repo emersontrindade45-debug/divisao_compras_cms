@@ -398,3 +398,14 @@ describe("período ano", () => {
     expect(tituloPeriodo("90d", new Date())).toBe("últimos 90 dias");
   });
 });
+
+describe("situação 'duvida' (M30.d)", () => {
+  it("dúvida conta como resposta nas contas por processo (só 'a confirmar' não conta)", () => {
+    const out = consultasComoCotacoes([
+      cons({ situacao: "duvida", processo: P1 }),
+      cons({ situacao: "a_confirmar", processo: P1 }),
+    ]);
+    expect(out.map((c) => c.status)).toEqual(["incompleta", "silenciosa"]);
+    expect(taxaRespostaPorProcesso(out, J).find((t) => t.chave === "p:1")).toMatchObject({ enviadas: 2, respondidas: 1 });
+  });
+});

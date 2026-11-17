@@ -294,6 +294,7 @@ export type SituacaoConsultaInput =
   | "a_confirmar"
   | "orcamento"
   | "recusa"
+  | "duvida"
   | "email_invalido";
 
 export interface ConsultaDesempenhoInput {
@@ -313,6 +314,8 @@ const STATUS_DA_SITUACAO: Record<
   a_confirmar: "silenciosa",
   orcamento: "positiva",
   recusa: "negativa",
+  // Pediu esclarecimento: é resposta (só a confirmação de recebimento não é).
+  duvida: "incompleta",
 };
 
 /**
