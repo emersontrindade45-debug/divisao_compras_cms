@@ -52,6 +52,8 @@ const diagnosticoSchema = z
     contaEfetiva: z.string().max(320),
     contaAtiva: z.string().max(320),
     fiosEncontrados: z.number().int().nonnegative(),
+    /** Havia mais fios que o teto da leitura: a fatia precisa ser menor. */
+    fiosTruncados: z.boolean().optional(),
   })
   .strict();
 

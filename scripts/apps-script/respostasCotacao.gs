@@ -35,6 +35,26 @@ function numeroProcessoDoAssunto_(assunto) {
   return m ? String(Number(m[1])) : null; // Number() tira zeros à esquerda
 }
 
+/**
+ * Número do processo no TEXTO do e-mail ("Processo Administrativo nº 382/2026", "Proc. 382"). O
+ * assunto não é padronizado na Divisão, mas o corpo sempre cita o processo. Só o número sai.
+ *
+ * Aceita "382", "382/2026" e "2026/382" (ano na frente). O texto de uma resposta cita o envio
+ * original, então o mesmo número se repete — isso é normal. Se o texto citar NÚMEROS DIFERENTES,
+ * devolve null: ligar ao processo errado não é recuperável, ficar sem ligação é (CLAUDE.md §9.93).
+ */
+function numeroProcessoDoCorpo_(corpo) {
+  var re = /\bproc(?:esso)?\.?\s*(?:administrativo\s*)?(?:n[ºo°.]?\s*)?:?\s*(\d{1,6})(?:\s*\/\s*(\d{1,6}))?/gi;
+  var achados = {};
+  var m;
+  while ((m = re.exec(corpo || "")) !== null) {
+    var numero = m[2] && /^(19|20)\d\d$/.test(m[1]) ? m[2] : m[1];
+    achados[String(Number(numero))] = 1;
+  }
+  var chaves = Object.keys(achados);
+  return chaves.length === 1 ? chaves[0] : null;
+}
+
 /** "Entrega: 16/10/2026" no assunto → "2026-10-16" (ou null). */
 function prazoDoAssunto_(assunto) {
   var m = /entrega\s*:?\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i.exec(assunto || "");
@@ -68,8 +88,31 @@ function enderecos_(campo) {
  */
 // getEffectiveUser, NÃO getActiveUser: chamado como app da web por anônimo, o
 // usuário ativo é vazio e todo envio seria descartado (medido em 2026-11-16).
-function buscarEnvios_(dias) {
-  var threads = GmailApp.search('in:sent subject:("Solicitação de Orçamento") newer_than:' + dias + "d", 0, 200);
+/** Teto de fios por leitura — o sistema rejeita payload acima de 1000 envios. */
+var MAX_FIOS = 800;
+
+/** Consulta do Gmail para a janela [desdeDias + dias, desdeDias] dias atrás. */
+function consultaEnvios_(dias, desdeDias) {
+  var q = 'in:sent subject:("Solicitação de Orçamento") newer_than:' + (dias + desdeDias) + "d";
+  return desdeDias > 0 ? q + " older_than:" + desdeDias + "d" : q;
+}
+
+/** Busca paginada (o Gmail devolve até 500 por chamada). `truncado` = havia mais que MAX_FIOS. */
+function buscarFios_(dias, desdeDias) {
+  var fios = [];
+  var inicio = 0;
+  while (fios.length < MAX_FIOS) {
+    var lote = GmailApp.search(consultaEnvios_(dias, desdeDias), inicio, Math.min(100, MAX_FIOS - fios.length));
+    fios = fios.concat(lote);
+    if (lote.length < 100) return { fios: fios, truncado: false };
+    inicio += lote.length;
+  }
+  var resto = GmailApp.search(consultaEnvios_(dias, desdeDias), inicio, 1);
+  return { fios: fios, truncado: resto.length > 0 };
+}
+
+function buscarEnvios_(dias, desdeDias, fiosJaBuscados) {
+  var threads = fiosJaBuscados || buscarFios_(dias, desdeDias || 0).fios;
   var eu = Session.getEffectiveUser().getEmail().toLowerCase();
   var saida = [];
   threads.forEach(function (t) {
@@ -78,13 +121,15 @@ function buscarEnvios_(dias) {
       var assunto = m.getSubject();
       if (/^\s*(re|res|enc|fwd?)\s*:/i.test(assunto)) return; // resposta/encaminhamento não é solicitação
       var prazoAssunto = prazoDoAssunto_(assunto);
+      var corpoEnvio = m.getPlainBody();
       saida.push({
         id: m.getId(),
         fio: t.getId(),
         data: m.getDate().toISOString(),
         destinatarios: enderecos_([m.getTo(), m.getCc(), m.getBcc()].join(",")),
-        processo: numeroProcessoDoAssunto_(assunto),
-        prazo: prazoAssunto || prazoDoCorpo_(m.getPlainBody()),
+        // Assunto primeiro (mais específico); o corpo cobre os envios sem número no assunto.
+        processo: numeroProcessoDoAssunto_(assunto) || numeroProcessoDoCorpo_(corpoEnvio),
+        prazo: prazoAssunto || prazoDoCorpo_(corpoEnvio),
         prazoOrigem: prazoAssunto ? "assunto" : null,
       });
       var ultimo = saida[saida.length - 1];
@@ -118,7 +163,7 @@ function metadadosDaMensagem_(msg, envio) {
     data: msg.getDate().toISOString(),
     remetente: remetente,
     // O número do processo vem do ENVIO do mesmo fio; o assunto da resposta é só reserva.
-    processo: (envio && envio.processo) || numeroProcessoDoAssunto_(assunto),
+    processo: (envio && envio.processo) || numeroProcessoDoAssunto_(assunto) || numeroProcessoDoCorpo_(corpo),
     remetenteEraDestinatario: envio ? envio.destinatarios.indexOf(remetente) !== -1 : false,
     devolucao: REMETENTE_DEVOLUCAO.test(remetente),
     // Endereço que voltou: cabeçalho técnico do servidor, sem ler o texto da devolução.
@@ -189,7 +234,7 @@ function testeLeitura() {
 /**
  * Passo 2 do spike: Implantar → Nova implantação → App da Web
  * (Executar como: eu; Quem pode acessar: Qualquer pessoa). O sistema chama
- * com POST {"segredo": "...", "dias": 30}. Sem o segredo, nada é lido.
+ * com POST {"segredo": "...", "dias": 30, "desdeDias": 0}. Sem o segredo, nada é lido.
  */
 function doPost(e) {
   var segredo = PropertiesService.getScriptProperties().getProperty("SEGREDO");
@@ -200,15 +245,20 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ erro: "nao_autorizado" }))
       .setMimeType(ContentService.MimeType.JSON);
   }
-  var dias = Math.min(Math.max(Number(corpo.dias) || 30, 1), 180);
-  var env = buscarEnvios_(dias);
+  var dias = Math.min(Math.max(Number(corpo.dias) || 30, 1), 90);
+  // desdeDias: começa a janela N dias atrás (0 = hoje). O sistema percorre o histórico em
+  // fatias ("hoje para trás"), porque uma leitura longa estoura o prazo da função dele.
+  var desdeDias = Math.min(Math.max(Number(corpo.desdeDias) || 0, 0), 1500);
+  var busca = buscarFios_(dias, desdeDias);
+  var env = buscarEnvios_(dias, desdeDias, busca.fios);
   return ContentService.createTextOutput(JSON.stringify({
     // Diagnóstico sem conteúdo: só a conta que executa e contagens.
     diagnostico: {
-      versao: "efetivo-1",
+      versao: "corpo-1",
       contaEfetiva: Session.getEffectiveUser().getEmail(),
       contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
-      fiosEncontrados: GmailApp.search('in:sent subject:("Solicitação de Orçamento") newer_than:' + dias + "d", 0, 200).length,
+      fiosEncontrados: busca.fios.length,
+      fiosTruncados: busca.truncado,
     },
     envios: env,
     respostas: buscarRespostas_(env),

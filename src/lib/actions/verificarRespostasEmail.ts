@@ -15,6 +15,16 @@ import type { ActionResult } from "./processos";
 const TIMEOUT_SCRIPT_MS = 40_000;
 const JANELA_DIAS = 30;
 
+/** Fatia do histórico: começa `desdeDias` atrás e cobre `dias` (limites espelham o script). */
+const janelaSchema = z.object({
+  desdeDias: z.number().int().min(0).max(1500),
+  dias: z.number().int().min(1).max(90),
+});
+export type JanelaLeitura = z.infer<typeof janelaSchema>;
+
+/** `fiosTruncados`: a fatia tinha mais fios que o teto da leitura — falta ler parte dela. */
+export type ResumoLeitura = ResumoSincronizacao & { fiosTruncados?: boolean };
+
 /**
  * Lê a caixa da Divisão pelo script do Google e atualiza as cotações por e-mail (M30.d).
  *
@@ -29,11 +39,16 @@ const JANELA_DIAS = 30;
  */
 export async function verificarRespostasEmail(
   processoId?: string,
-): Promise<ActionResult<ResumoSincronizacao>> {
+  janela?: JanelaLeitura,
+): Promise<ActionResult<ResumoLeitura>> {
   const user = await requireRole("pesquisa");
 
   const idValido = processoId === undefined || z.string().cuid().safeParse(processoId).success;
   if (!idValido) return { error: "Processo inválido." };
+
+  if (janela !== undefined && !janelaSchema.safeParse(janela).success) {
+    return { error: "Janela de leitura inválida." };
+  }
 
   const url = process.env.APPS_SCRIPT_URL;
   const segredo = process.env.APPS_SCRIPT_SEGREDO;
@@ -46,7 +61,11 @@ export async function verificarRespostasEmail(
     const resposta = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ segredo, dias: JANELA_DIAS }),
+      body: JSON.stringify(
+        janela
+          ? { segredo, dias: janela.dias, desdeDias: janela.desdeDias }
+          : { segredo, dias: JANELA_DIAS },
+      ),
       signal: AbortSignal.timeout(TIMEOUT_SCRIPT_MS),
       cache: "no-store",
     });
@@ -77,7 +96,8 @@ export async function verificarRespostasEmail(
     revalidatePath("/dashboard");
     if (processoId) revalidatePath(`/processos/${processoId}`);
 
-    return { data: resumo };
+    const truncado = payload.data.diagnostico?.fiosTruncados === true;
+    return { data: truncado ? { ...resumo, fiosTruncados: true } : resumo };
   } catch {
     return { error: "As respostas foram lidas, mas não foi possível gravá-las. Tente novamente." };
   }

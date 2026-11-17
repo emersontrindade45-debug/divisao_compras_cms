@@ -123,4 +123,30 @@ describe("verificarRespostasEmail", () => {
     await verificarRespostasEmail();
     expect(JSON.stringify(mocks.registrarAuditoria.mock.calls)).not.toContain(SEGREDO);
   });
+
+  it("com janela, repassa desdeDias/dias ao script (histórico em fatias)", async () => {
+    const f = responder(PAYLOAD_OK);
+    vi.stubGlobal("fetch", f);
+    await verificarRespostasEmail(undefined, { desdeDias: 60, dias: 30 });
+    expect(JSON.parse(f.mock.calls[0]![1].body)).toEqual({ segredo: SEGREDO, dias: 30, desdeDias: 60 });
+  });
+
+  it.each([{ desdeDias: -1, dias: 30 }, { desdeDias: 0, dias: 400 }, { desdeDias: 1.5, dias: 5 }])(
+    "recusa janela inválida %j sem chamar o Google",
+    async (janela) => {
+      const f = responder(PAYLOAD_OK);
+      vi.stubGlobal("fetch", f);
+      expect((await verificarRespostasEmail(undefined, janela)).error).toBe("Janela de leitura inválida.");
+      expect(f).not.toHaveBeenCalled();
+    },
+  );
+
+  it("avisa quando o script diz que a fatia foi truncada", async () => {
+    vi.stubGlobal("fetch", responder({
+      ...PAYLOAD_OK,
+      diagnostico: { versao: "v", contaEfetiva: "a@b.com", contaAtiva: "a@b.com", fiosEncontrados: 800, fiosTruncados: true },
+    }));
+    const r = await verificarRespostasEmail(undefined, { desdeDias: 0, dias: 30 });
+    expect(r.data).toEqual({ ...RESUMO, fiosTruncados: true });
+  });
 });

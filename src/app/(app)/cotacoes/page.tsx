@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CotacoesTableReal } from "@/components/cotacoes/CotacoesTableReal";
 import { SelecaoFornecedoresForm } from "@/components/cotacoes/SelecaoFornecedoresForm";
 import { VerificarRespostasButton } from "@/components/cotacoes/VerificarRespostasButton";
+import { HistoricoRespostasButton } from "@/components/cotacoes/HistoricoRespostasButton";
 import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cotacoes/RespostasAConfirmar";
 import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
 import { ChecklistProposta } from "@/components/cotacoes/ChecklistProposta";
@@ -101,7 +102,12 @@ export default async function CotacoesPage({
       <PageHeader
         title="Cotações"
         description="Registro de consultas a fornecedores, controle de SLA e checklist de propostas."
-        actions={<VerificarRespostasButton />}
+        actions={
+          <div className="flex items-center gap-2">
+            <HistoricoRespostasButton />
+            <VerificarRespostasButton />
+          </div>
+        }
       />
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
