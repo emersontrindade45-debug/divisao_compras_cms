@@ -167,7 +167,7 @@ function ehAutomatica_(msg) {
 
 function metadadosDaMensagem_(msg, envio) {
   var assunto = msg.getSubject();
-  var corpo = (msg.getPlainBody() || "").toLowerCase();
+  var corpo = normalizar_(msg.getPlainBody());
   var anexos = msg.getAttachments({ includeInlineImages: false });
   var remetente = (/<([^>]+)>/.exec(msg.getFrom()) || [null, msg.getFrom()])[1].trim().toLowerCase();
   return {
@@ -250,6 +250,15 @@ function testeLeitura() {
 }
 
 /**
+ * Texto em minúsculas, com acentos recompostos (NFC) e espaços "estranhos" trocados por espaço
+ * comum. E-mail de celular/Outlook costuma trazer o "ã" decomposto (a + til) ou espaço sem quebra;
+ * sem isto "não temos interesse" não casa com a lista de frases (visto na fila de 2026-11-18).
+ */
+function normalizar_(texto) {
+  return String(texto || "").normalize("NFC").replace(/[\u00a0\u200b\u202f\u2007]/g, " ").toLowerCase();
+}
+
+/**
  * Texto da resposta SEM a parte citada (o e-mail original que vem embaixo). Sem isso, o "?" ou o
  * "orçamento" do nosso próprio pedido contariam como sinal do fornecedor.
  */
@@ -273,9 +282,40 @@ function semCitacao_(corpo) {
  * 0 falsos positivos. Amostra pequena: por isso só SUGERE, nunca aplica sozinha.
  */
 function provavelRecusa_(texto) {
-  var t = String(texto || "").toLowerCase();
-  var guarda = /(temos interesse|estamos providenciando|extens[aã]o (do )?prazo|possibilidade de|gostaria de (saber|validar)|poderia)/;
-  var recusa = /(n[aã]o (conseguimos|conseguiremos|consigo|podemos|produzimos|fornece|fornecemos|atendo|atendemos|trabalhamos|comercializamos|participamos|dispomos|temos (como|condi[cç][oõ]es|esses|esse|interesse|atendimento)|estamos (participando|assumindo|fornecendo|fazendo|conseguindo (repassar|cotar|atender|participar|fornecer))|realizamos|prestamos|imprimimos|disponibilizamos|ofertamos|vendemos|possu[ií]mos|executamos|atuamos|desejamos participar|pretendemos participar|iremos participar|vamos participar|s[aã]o compat[ií]veis)|n[aã]o participar|n[aã]o [eé] compat[ií]vel|n[aã]o [eé] o (meu|nosso) ramo|fora d[oe] (nosso )?(ramo|segmento|escopo|perfil)|n[aã]o faz(em)? parte[^.]{0,40}(escopo|portf[oó]lio|portif[oó]lio|cat[aá]logo|linha)|(sua|essa|esta) regi[aã]o[^.]{0,50}n[aã]o|(localiza[cç][aã]o|endere[cç]o|local)[^.]{0,40}(distante|fora d[aeo] (nossa |nosso )?(rede|[aá]rea|regi[aã]o|cobertura))|declin(ar|amos|ando|ou|aremos)|optou por n[aã]o|optamos por n[aã]o|atua(mos)? (apenas|somente|exclusivamente)|n[aã]o (ser[aá]|[eé]) poss[ií]vel (encaminhar|enviar|atender|participar|realizar|apresentar))/;
+  var t = normalizar_(texto);
+  // "temos interesse" só protege quando NÃO vem depois de "não" ("não temos interesse" é recusa).
+  var guarda = /((?<!n[aã]o )temos interesse|estamos providenciando|extens[aã]o (do )?prazo|possibilidade de|gostaria de (saber|validar)|poderia)/;
+  var recusa = new RegExp("(" + [
+    // "não" + verbo de atender/fornecer/participar (singular, plural e futuro)
+    "n[aã]o (conseguimos|conseguiremos|consigo|vamos conseguir|vou conseguir) (atender|participar|cotar|enviar|fornecer|ofertar|apresentar|fazer|contribuir|ajudar|prosseguir|orçar|responder)",
+    "n[aã]o (podemos|poderemos|produzimos|fornece|fornecemos|atendo|atendemos|atende|atendem|trabalhamos|trabalha|comercializamos|comercializa|revende|revendemos|participamos|dispomos|realizamos|prestamos|imprimimos|disponibilizamos|ofertamos|vendemos|possu[ií]mos|executamos|atuamos|atuo|fazemos|fa[cç]o|operamos|cotamos|cotado)",
+    "n[aã]o (iremos|vamos|vou|poderemos|teremos|desejamos|pretendemos|queremos) (participar|prosseguir|apresentar|cotar|atender|enviar|seguir|orçar)",
+    "n[aã]o (seguiremos|prosseguiremos|apresentaremos|participaremos|cotaremos)",
+    "n[aã]o (temos|tem|tenho|teremos|terei) (como|condi[cç](ão|ões)|esses|esse|este|estes|interesse|o interesse|atendimento|disponibilidade|viabilidade|itens)",
+    "n[aã]o h[aá] (interesse|tempo h[aá]bil)",
+    "n[aã]o (estamos|estou) (mais |participando|assumindo|fornecendo|fazendo|trabalhando|atuando|atendendo|operando|conseguindo (repassar|cotar|atender|participar|fornecer))",
+    "n[aã]o participar",
+    "n[aã]o [eé] (compat[ií]vel|o (meu|nosso) ramo)",
+    "n[aã]o s[aã]o compat[ií]veis",
+    "n[aã]o se (aplica|encaixa)",
+    "n[aã]o (est[aá]|est[aã]o) (na|no|em)[^.]{0,20}(linha|escopo|portf[oó]lio|portif[oó]lio|cat[aá]logo|ramo)",
+    "n[aã]o faz(em)? parte[^.]{0,40}(escopo|portf[oó]lio|portif[oó]lio|cat[aá]logo|linha)",
+    "n[aã]o (ser[aá]|[eé]) poss[ií]vel (encaminhar|enviar|o envio|atend|participar|realizar|apresentar)",
+    "fora d[oe] (nosso )?(ramo|segmento|escopo|perfil)",
+    "(sua|essa|esta) regi[aã]o[^.]{0,50}n[aã]o",
+    "(localiza[cç][aã]o|endere[cç]o|local)[^.]{0,40}(distante|fora d[aeo] (nossa |nosso )?(rede|[aá]rea|regi[aã]o|cobertura))",
+    "declin(ar|amos|ando|ou|aremos)",
+    "optou por n[aã]o|optamos por n[aã]o|optei por n[aã]o",
+    "deixa(mos|m)? de (cotar|atender|participar)",
+    "desist[eê]ncia|desistimos|sem condi[cç](ão|ões) de",
+    "(nossa|ol[aá],?) negativa|negativa em participa",
+    "fica invi[aá]vel|invi[aá]vel o atendimento|impossibilitad",
+    "se restringe",
+    "atua(mos)? (apenas|somente|exclusivamente)",
+    "s[oó] (estamos )?trabalh",
+    "(trabalh|comercializ|vend|atend)\\w*[^.]{0,25}(somente|apenas|exclusivamente)",
+    "(numa|em uma|para uma) (pr[oó]xima|outra) oportunidade",
+  ].join("|") + ")");
   return recusa.test(t) && !guarda.test(t);
 }
 
@@ -285,7 +325,7 @@ function provavelRecusa_(texto) {
  * (`numeroDecimal` foi retirado: acendia por telefone, CEP e CNPJ — 0 de 15 eram valor.)
  */
 function marcadoresDoTexto_(texto) {
-  var t = String(texto || "").toLowerCase();
+  var t = normalizar_(texto);
   return {
     vazio: t.replace(/\s+/g, " ").trim().length < 20,
     pergunta: t.indexOf("?") !== -1,

@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 
 /** Funções REAIS do script (não cópias): o teste quebra se o script mudar. */
 const fonte = readFileSync(join(__dirname, "..", "respostasCotacao.gs"), "utf-8");
+// normalizar_ é usada por várias funções do script (mesmo escopo): vai junto em todo carregamento.
+const normalizarSrc = /function normalizar_[\s\S]*?\n}\n/.exec(fonte)![0];
 function carregar<T>(nome: string): T {
   const trecho = new RegExp(`function ${nome}[\\s\\S]*?\\n}\\n`).exec(fonte)?.[0];
   if (!trecho) throw new Error(`${nome} não encontrada no script`);
-  return new Function(`${trecho}; return ${nome};`)() as T;
+  return new Function(`${normalizarSrc}\n${trecho}; return ${nome};`)() as T;
 }
 
 const semCitacao = carregar<(c: string) => string>("semCitacao_");
@@ -18,7 +20,7 @@ const anonimizar = new Function(
 )() as (c: string) => string;
 // marcadoresDoTexto_ chama provavelRecusa_ (mesmo escopo do script): carrega as duas juntas.
 const marcadores = new Function(
-  `${/function provavelRecusa_[\s\S]*?\n}\n/.exec(fonte)![0]}\n${/function marcadoresDoTexto_[\s\S]*?\n}\n/.exec(fonte)![0]}; return marcadoresDoTexto_;`,
+  `${normalizarSrc}\n${/function provavelRecusa_[\s\S]*?\n}\n/.exec(fonte)![0]}\n${/function marcadoresDoTexto_[\s\S]*?\n}\n/.exec(fonte)![0]}; return marcadoresDoTexto_;`,
 )() as (t: string) => Record<string, boolean>;
 
 describe("semCitacao_", () => {
@@ -301,5 +303,73 @@ describe("anonimizar_ — nomes próprios", () => {
     expect(out).not.toMatch(/Maria|Souza|Lima/);
     expect(out).toContain("[nome]");
     expect(out).toContain("não participará deste orçamento");
+  });
+});
+
+describe("provavelRecusa_ — 3ª rodada (fila inteira de 2026-11-18)", () => {
+  const recusas = [
+    "Infelizmente não vamos conseguir atender essa solicitação neste momento.",
+    "Informamos que não poderemos participar deste processo.",
+    "No momento não estamos mais trabalhando com licitação.",
+    "Obrigado, não tenho interesse em participar.",
+    "Não há interesse em participar. Obrigado.",
+    "Agradecemos, mas não iremos prosseguir no processo.",
+    "Não seguiremos com o atendimento dessa demanda.",
+    "Neste momento não apresentaremos proposta para o escopo descrito.",
+    "Boa tarde, não há tempo hábil para entrega.",
+    "Não teremos condição de atender neste momento.",
+    "Informamos a desistência em participar dessa licitação.",
+    "Sobre a cotação, fica inviável o atendimento em outra cidade.",
+    "Nossa empresa se restringe a trabalhar só na cidade de Guarujá.",
+    "Trabalhamos apenas com locação de purificador.",
+    "Só trabalho com impresso em papel.",
+    "Não fazemos locação, apenas venda.",
+    "Deixa de atender à solicitação porque o produto não está em seu escopo de fornecimento.",
+    "Os itens não fazem parte do nosso catálogo.",
+    "Agradecemos, mas a solicitação não se aplica ao meu ramo de atendimento.",
+    "NÃO COTADO.",
+    "Olá, negativa.",
+    "Informamos nossa negativa.",
+    "Não terei como enviar o orçamento.",
+    "Não faço manutenção nesse equipamento e não vou enviar proposta.",
+    "Infelizmente não vou conseguir fazer este tipo de trabalho.",
+    "Optei por não apresentar proposta comercial nesta oportunidade.",
+    "Não temos disponibilidade na data informada, conte conosco em outro momento.",
+    "Não operamos com o modelo de reembolso estabelecido no termo.",
+    "A gente não trabalha com orçamento, veja os preços no site.",
+    "Vou avaliar para uma próxima oportunidade.",
+    "No momento não temos viabilidade para atender o escopo do TR.",
+  ];
+  it.each(recusas)("reconhece: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(true);
+  });
+
+  const naoRecusas = [
+    "Não entendi nada. Do que se trata?",
+    "Estamos tentando agendar a visita mas não estamos conseguindo falar com ninguém.",
+    "Tentamos contato por telefone, mas não conseguimos falar com vocês. Seria só por e-mail?",
+    "No edital não ficou claro o critério de amostragem. Esse entendimento está correto?",
+    "Não recebi a quantidade das cadeiras giratórias e fixas do projeto.",
+    "Certidão negativa de débitos precisa ser apresentada na habilitação?",
+    "Gostaria de confirmar se já analisaram a proposta que encaminhamos.",
+    "Temos interesse e estamos providenciando, mas não será possível concluir hoje: há extensão do prazo?",
+    "Podemos trabalhar com o modelo MDP no lugar do MDF?",
+    "Atendemos com visita técnica agendada e orçamento no mesmo dia.",
+  ];
+  it.each(naoRecusas)("não confunde com recusa: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(false);
+  });
+
+  it("'não temos interesse' é recusa, mesmo com a guarda de 'temos interesse'", () => {
+    expect(provavelRecusa("Afirmo que não temos interesse em participar.")).toBe(true);
+    expect(provavelRecusa("Temos interesse em participar, mas poderia enviar o TR?")).toBe(false);
+  });
+
+  it("acento decomposto (a + til) e espaço sem quebra não escondem a recusa", () => {
+    const nfd = "Afirmo que não temos interesse em participar.";
+    const nbsp = "Afirmo que não temos interesse em participar.";
+    expect(nfd).not.toBe(nfd.normalize("NFC"));
+    expect(provavelRecusa(nfd)).toBe(true);
+    expect(provavelRecusa(nbsp)).toBe(true);
   });
 });
