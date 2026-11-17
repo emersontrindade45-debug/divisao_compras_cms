@@ -8,14 +8,15 @@ import {
   consultasComoCotacoes,
   percentualEmailsInvalidos,
   taxaRespostaConsultas,
-  taxaRespostaPorCategoria,
+  taxaRespostaPorProcesso,
+  referenciaProcesso,
   tempoRespostaDias,
   type ConsultaDesempenhoInput,
   temTempoConfiavel,
   tempoAteMarco,
   type Indicador,
   type Periodo,
-  type TaxaCategoria,
+  type TaxaProcesso,
 } from "@/lib/domain/indicadores/desempenho";
 import type { Escopo } from "./camadaAcao";
 
@@ -33,7 +34,7 @@ export interface CamadaDesempenho {
   emailsInvalidos: ParIndicador;
   propostasInvalidas: ParIndicador;
   fontesAteSuficiencia: ParIndicador;
-  porCategoria: TaxaCategoria[];
+  porProcesso: TaxaProcesso[];
   /** Primeiro processo com tempo confiável; null = ainda nenhum. */
   dadosTempoDesde: Date | null;
 }
@@ -114,7 +115,7 @@ export async function carregarCamadaDesempenho(
     emailsInvalidos: par(percentualEmailsInvalidos, consultas),
     propostasInvalidas: par(percentualPropostasInvalidas, propostas),
     fontesAteSuficiencia: par(mediaFontesAteSuficiencia, itens),
-    porCategoria: taxaRespostaPorCategoria(consultasComoCotacoes(consultas), atual),
+    porProcesso: taxaRespostaPorProcesso(consultasComoCotacoes(consultas), atual),
     dadosTempoDesde: confiaveis.length > 0 ? new Date(Math.min(...confiaveis)) : null,
   };
 }
@@ -138,15 +139,25 @@ async function carregarConsultas(
       select: {
         situacao: true,
         dataResposta: true,
-        cnaeDescricao: true,
-        envio: { select: { dataEnvio: true } },
+        envio: {
+          select: {
+            dataEnvio: true,
+            processoId: true,
+            numeroProcessoAssunto: true,
+            processo: { select: { numero: true } },
+          },
+        },
       },
     });
     return linhas.map((l) => ({
       dataEnvio: l.envio.dataEnvio,
       dataResposta: l.dataResposta,
       situacao: l.situacao,
-      categoria: l.cnaeDescricao,
+      processo: referenciaProcesso({
+        processoId: l.envio.processoId,
+        processoNumero: l.envio.processo?.numero ?? null,
+        numeroProcessoAssunto: l.envio.numeroProcessoAssunto,
+      }),
     }));
   } catch {
     return [];

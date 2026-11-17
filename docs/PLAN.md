@@ -3076,6 +3076,16 @@ e nunca é gravado. Sem IA externa. Sem TI envolvida.
       deploy→migration, §9.19). Verificação: 1.688 testes, tsc, ESLint, 6 mutações (3 na ação de
       resolver, 3 nos indicadores) detectadas; Playwright contra banco local: aba, fail-closed
       sem variáveis, caixa de inválidos, botão no processo.
+- [x] **Produção (2026-11-17):** migration `m30d` aplicada via `/api/admin/migrate` e conferida no
+      banco; 1º clique em "Verificar respostas" gravou 23 envios, 2.330 consultas, 323 e-mails
+      devolvidos e 66 respostas (55 classificadas), com auditoria só de contagens.
+- [x] **Taxa de resposta POR PROCESSO (pedido do usuário, 2026-11-17)** no lugar da taxa por CNAE:
+      `taxaRespostaPorProcesso` + `referenciaProcesso` em `lib/domain/indicadores/desempenho.ts`.
+      Envio sem processo vinculado aparece com o número do assunto ("Nº 1418 · não cadastrado") em
+      vez de sumir — em produção 7 dos 11 grupos são assim, e os 7 números de fato não existem
+      entre os 17 processos cadastrados (conferido normalizando zeros à esquerda). Verificação:
+      1.694 testes, tsc, ESLint; 2 mutações detectadas (não buscar `processo.numero`; contar
+      e-mail devolvido na taxa).
 - [ ] **FALTA:** espelho na planilha de fornecedores ("Processos Cotação", e-mail inválido,
       "Respondeu?"/"Enviou orçamento?") — só para quem já está na planilha (5% dos consultados).
       **Dependem de ação do usuário:** `APPS_SCRIPT_URL` e `APPS_SCRIPT_SEGREDO` no `.env` e

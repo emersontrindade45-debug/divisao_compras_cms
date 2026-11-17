@@ -131,10 +131,38 @@ export function percentualFontePublica(processos: ProcessoFonteInput[], j: Janel
 
 // ── Cotações e propostas ──────────────────────────────────────────────────
 
+/** A que processo uma cotação/consulta pertence, para agrupar a taxa de resposta. */
+export interface ProcessoRef {
+  /** Identidade do grupo: duas consultas do mesmo processo têm a mesma chave. */
+  chave: string;
+  /** Texto exibido. */
+  rotulo: string;
+}
+
+export const SEM_PROCESSO: ProcessoRef = { chave: "sem-processo", rotulo: "Sem processo no assunto" };
+
+/**
+ * Processo de um envio. Vinculado: o número cadastrado. Sem vínculo mas com número no assunto:
+ * o número como veio, marcado "não cadastrado" — o analista vê onde falta cadastrar em vez de
+ * o envio sumir. Sem nenhum dos dois: um grupo só.
+ */
+export function referenciaProcesso(envio: {
+  processoId: string | null;
+  processoNumero: string | null;
+  numeroProcessoAssunto: string | null;
+}): ProcessoRef {
+  if (envio.processoId && envio.processoNumero) {
+    return { chave: `p:${envio.processoId}`, rotulo: envio.processoNumero };
+  }
+  const assunto = envio.numeroProcessoAssunto?.trim();
+  if (assunto) return { chave: `a:${assunto}`, rotulo: `Nº ${assunto} · não cadastrado` };
+  return SEM_PROCESSO;
+}
+
 export interface CotacaoDesempenhoInput {
   dataEnvio: Date;
   status: "positiva" | "negativa" | "incompleta" | "silenciosa";
-  categorias: string[];
+  processo: ProcessoRef;
 }
 
 export function respondeu(c: Pick<CotacaoDesempenhoInput, "status">): boolean {
@@ -150,57 +178,36 @@ export function taxaResposta(cotacoes: CotacaoDesempenhoInput[], j: Janela): Ind
   };
 }
 
-/** Sem acento, sem diferença de caixa e espaços colapsados (decisão Q17). */
-export function normalizarCategoria(c: string): string {
-  return c
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export const SEM_CATEGORIA = "Sem categoria";
-
-export interface TaxaCategoria {
-  categoria: string;
+export interface TaxaProcesso {
+  chave: string;
+  processo: string;
   enviadas: number;
   respondidas: number;
   taxa: number;
 }
 
 /**
- * Taxa de resposta por categoria do fornecedor. Uma cotação conta em cada
- * categoria do seu fornecedor (grafias equivalentes somam juntas; o rótulo
- * exibido é a primeira grafia vista). Ordenado por volume enviado.
+ * Taxa de resposta por processo: de quantos fornecedores consultados naquele processo, quantos
+ * responderam (recusa conta como resposta). Ordenado por volume enviado, depois pelo rótulo.
  */
-export function taxaRespostaPorCategoria(
-  cotacoes: CotacaoDesempenhoInput[],
-  j: Janela,
-): TaxaCategoria[] {
+export function taxaRespostaPorProcesso(cotacoes: CotacaoDesempenhoInput[], j: Janela): TaxaProcesso[] {
   const grupos = new Map<string, { rotulo: string; enviadas: number; respondidas: number }>();
   for (const c of cotacoes) {
     if (!dentro(c.dataEnvio, j)) continue;
-    const brutas = c.categorias.map((x) => x.trim()).filter(Boolean);
-    const vistas = new Set<string>();
-    for (const rotulo of brutas.length > 0 ? brutas : [SEM_CATEGORIA]) {
-      const chave = normalizarCategoria(rotulo);
-      if (vistas.has(chave)) continue; // mesma categoria repetida no fornecedor
-      vistas.add(chave);
-      const g = grupos.get(chave) ?? { rotulo, enviadas: 0, respondidas: 0 };
-      g.enviadas += 1;
-      if (respondeu(c)) g.respondidas += 1;
-      grupos.set(chave, g);
-    }
+    const g = grupos.get(c.processo.chave) ?? { rotulo: c.processo.rotulo, enviadas: 0, respondidas: 0 };
+    g.enviadas += 1;
+    if (respondeu(c)) g.respondidas += 1;
+    grupos.set(c.processo.chave, g);
   }
-  return [...grupos.values()]
-    .map((g) => ({
-      categoria: g.rotulo,
+  return [...grupos.entries()]
+    .map(([chave, g]) => ({
+      chave,
+      processo: g.rotulo,
       enviadas: g.enviadas,
       respondidas: g.respondidas,
       taxa: Math.round((g.respondidas / g.enviadas) * 100),
     }))
-    .sort((a, b) => b.enviadas - a.enviadas || a.categoria.localeCompare(b.categoria));
+    .sort((a, b) => b.enviadas - a.enviadas || a.processo.localeCompare(b.processo));
 }
 
 export interface PropostaInput {
@@ -276,8 +283,7 @@ export interface ConsultaDesempenhoInput {
   dataEnvio: Date;
   dataResposta: Date | null;
   situacao: SituacaoConsultaInput;
-  /** Descrição do CNAE da empresa (base da Receita); null = e-mail sem dono conhecido. */
-  categoria: string | null;
+  processo: ProcessoRef;
 }
 
 const STATUS_DA_SITUACAO: Record<
@@ -302,7 +308,7 @@ export function consultasComoCotacoes(consultas: ConsultaDesempenhoInput[]): Cot
     .map((c) => ({
       dataEnvio: c.dataEnvio,
       status: STATUS_DA_SITUACAO[c.situacao as keyof typeof STATUS_DA_SITUACAO],
-      categorias: c.categoria ? [c.categoria] : [],
+      processo: c.processo,
     }));
 }
 

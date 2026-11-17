@@ -6,7 +6,7 @@ import { AlertasBanner } from "@/components/common/AlertasBanner";
 import { WorkQueueCard } from "@/components/dashboard/WorkQueueCard";
 import { AtribuirResponsavelSelect } from "@/components/dashboard/AtribuirResponsavelSelect";
 import { IndicadoresDesempenho } from "@/components/dashboard/IndicadoresDesempenho";
-import { RespostaPorCategoria } from "@/components/dashboard/RespostaPorCategoria";
+import { RespostaPorProcesso } from "@/components/dashboard/RespostaPorProcesso";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAuth } from "@/lib/auth/rbac";
 import { buscarAlertas } from "@/lib/actions/alertas";
@@ -261,7 +261,7 @@ export default async function DashboardPage({
         </div>
 
         <IndicadoresDesempenho dados={desempenho} />
-        <RespostaPorCategoria categorias={desempenho.porCategoria} />
+        <RespostaPorProcesso processos={desempenho.porProcesso} />
       </section>
     </div>
   );

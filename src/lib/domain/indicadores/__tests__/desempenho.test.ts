@@ -8,11 +8,13 @@ import {
   janelas,
   lerPeriodo,
   mediaFontesAteSuficiencia,
-  normalizarCategoria,
+  referenciaProcesso,
+  SEM_PROCESSO,
+  type ProcessoRef,
   percentualFontePublica,
   percentualPropostasInvalidas,
   taxaResposta,
-  taxaRespostaPorCategoria,
+  taxaRespostaPorProcesso,
   tempoAteMarco,
   textoCobertura,
   variacao,
@@ -110,8 +112,11 @@ describe("percentualFontePublica", () => {
   });
 });
 
+const P1: ProcessoRef = { chave: "p:1", rotulo: "0736/2025" };
+const P2: ProcessoRef = { chave: "p:2", rotulo: "1829/2024" };
+
 function cot(over: Partial<CotacaoDesempenhoInput> = {}): CotacaoDesempenhoInput {
-  return { dataEnvio: d("2026-11-01"), status: "silenciosa", categorias: [], ...over };
+  return { dataEnvio: d("2026-11-01"), status: "silenciosa", processo: P1, ...over };
 }
 
 describe("taxaResposta", () => {
@@ -130,32 +135,60 @@ describe("taxaResposta", () => {
   });
 });
 
-describe("taxaRespostaPorCategoria", () => {
-  it("grafias equivalentes somam juntas; sem categoria tem grupo próprio", () => {
-    const r = taxaRespostaPorCategoria(
+describe("taxaRespostaPorProcesso", () => {
+  it("agrupa por processo, recusa conta como resposta, ordena por volume enviado", () => {
+    const r = taxaRespostaPorProcesso(
       [
-        cot({ categorias: ["Informática"], status: "positiva" }),
-        cot({ categorias: [" informatica "], status: "silenciosa" }),
-        cot({ categorias: ["INFORMÁTICA", "Papelaria"], status: "negativa" }),
-        cot({ categorias: [], status: "silenciosa" }),
+        cot({ processo: P1, status: "positiva" }),
+        cot({ processo: P1, status: "negativa" }),
+        cot({ processo: P1, status: "silenciosa" }),
+        cot({ processo: P2, status: "silenciosa" }),
       ],
       J,
     );
     expect(r).toEqual([
-      { categoria: "Informática", enviadas: 3, respondidas: 2, taxa: 67 },
-      { categoria: "Papelaria", enviadas: 1, respondidas: 1, taxa: 100 },
-      { categoria: "Sem categoria", enviadas: 1, respondidas: 0, taxa: 0 },
+      { chave: "p:1", processo: "0736/2025", enviadas: 3, respondidas: 2, taxa: 67 },
+      { chave: "p:2", processo: "1829/2024", enviadas: 1, respondidas: 0, taxa: 0 },
     ]);
   });
 
-  it("categoria repetida no mesmo fornecedor conta uma vez", () => {
-    const r = taxaRespostaPorCategoria([cot({ categorias: ["TI", "ti"], status: "positiva" })], J);
-    expect(r).toEqual([{ categoria: "TI", enviadas: 1, respondidas: 1, taxa: 100 }]);
+  it("só conta o que foi enviado na janela", () => {
+    const r = taxaRespostaPorProcesso(
+      [cot({ status: "positiva" }), cot({ status: "positiva", dataEnvio: d("2026-01-01") })],
+      J,
+    );
+    expect(r).toEqual([{ chave: "p:1", processo: "0736/2025", enviadas: 1, respondidas: 1, taxa: 100 }]);
   });
 
-  it("normalizarCategoria tira acento, caixa e espaço extra", () => {
-    expect(normalizarCategoria("  Material   de  Limpeza  ")).toBe("material de limpeza");
-    expect(normalizarCategoria("Construção")).toBe("construcao");
+  it("a chave decide o grupo, não o rótulo: dois processos com o mesmo texto ficam separados", () => {
+    const r = taxaRespostaPorProcesso(
+      [
+        cot({ processo: { chave: "p:1", rotulo: "X" } }),
+        cot({ processo: { chave: "p:2", rotulo: "X" } }),
+      ],
+      J,
+    );
+    expect(r).toHaveLength(2);
+  });
+});
+
+describe("referenciaProcesso", () => {
+  it("vinculado usa o número cadastrado", () => {
+    expect(
+      referenciaProcesso({ processoId: "abc", processoNumero: "0736/2025", numeroProcessoAssunto: "736" }),
+    ).toEqual({ chave: "p:abc", rotulo: "0736/2025" });
+  });
+
+  it("sem vínculo mas com número no assunto: mostra o número e marca como não cadastrado", () => {
+    expect(
+      referenciaProcesso({ processoId: null, processoNumero: null, numeroProcessoAssunto: " 382 " }),
+    ).toEqual({ chave: "a:382", rotulo: "Nº 382 · não cadastrado" });
+  });
+
+  it("sem nada, um grupo único", () => {
+    expect(
+      referenciaProcesso({ processoId: null, processoNumero: null, numeroProcessoAssunto: null }),
+    ).toBe(SEM_PROCESSO);
   });
 });
 
@@ -221,7 +254,7 @@ describe("textoCobertura", () => {
 });
 
 function cons(over: Partial<ConsultaDesempenhoInput> = {}): ConsultaDesempenhoInput {
-  return { dataEnvio: d("2026-11-01"), dataResposta: null, situacao: "sem_resposta", categoria: null, ...over };
+  return { dataEnvio: d("2026-11-01"), dataResposta: null, situacao: "sem_resposta", processo: P1, ...over };
 }
 
 describe("indicadores das consultas por e-mail (M30.d)", () => {
@@ -247,15 +280,18 @@ describe("indicadores das consultas por e-mail (M30.d)", () => {
     expect(r.valor).toBe(50);
   });
 
-  it("consultasComoCotacoes leva o CNAE como categoria e deixa o sem dono sem categoria", () => {
+  it("consultasComoCotacoes leva o processo e tira o e-mail devolvido da taxa por processo", () => {
     const out = consultasComoCotacoes([
-      cons({ situacao: "recusa", categoria: "Papelaria" }),
-      cons({ situacao: "orcamento", categoria: null }),
+      cons({ situacao: "recusa", processo: P1 }),
+      cons({ situacao: "orcamento", processo: P2 }),
+      cons({ situacao: "email_invalido", processo: P2 }),
     ]);
-    expect(out.map((c) => [c.status, c.categorias])).toEqual([
-      ["negativa", ["Papelaria"]],
-      ["positiva", []],
+    expect(out.map((c) => [c.status, c.processo.chave])).toEqual([
+      ["negativa", "p:1"],
+      ["positiva", "p:2"],
     ]);
+    // P2 tem 1 consulta válida respondida + 1 devolvida: a devolução não derruba a taxa para 50%.
+    expect(taxaRespostaPorProcesso(out, J).find((t) => t.chave === "p:2")?.taxa).toBe(100);
   });
 
   it("tempo de resposta: mediana em dias, só de quem respondeu na janela", () => {

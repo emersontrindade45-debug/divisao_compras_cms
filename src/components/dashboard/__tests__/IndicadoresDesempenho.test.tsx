@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { IndicadoresDesempenho } from "../IndicadoresDesempenho";
-import { RespostaPorCategoria } from "../RespostaPorCategoria";
+import { RespostaPorProcesso } from "../RespostaPorProcesso";
 import type { CamadaDesempenho } from "@/lib/indicadores/desempenho";
 import type { Indicador } from "@/lib/domain/indicadores/desempenho";
 
@@ -18,7 +18,7 @@ function dados(over: Partial<CamadaDesempenho> = {}): CamadaDesempenho {
     emailsInvalidos: par(),
     propostasInvalidas: par(),
     fontesAteSuficiencia: par(),
-    porCategoria: [],
+    porProcesso: [],
     dadosTempoDesde: null,
     ...over,
   };
@@ -48,31 +48,32 @@ describe("IndicadoresDesempenho", () => {
   });
 });
 
-describe("RespostaPorCategoria", () => {
+describe("RespostaPorProcesso", () => {
   it("escreve taxa e contagem em texto ao lado de cada barra", () => {
     render(
-      <RespostaPorCategoria
-        categorias={[{ categoria: "Informática", enviadas: 3, respondidas: 2, taxa: 67 }]}
+      <RespostaPorProcesso
+        processos={[{ chave: "p:1", processo: "0736/2025", enviadas: 3, respondidas: 2, taxa: 67 }]}
       />,
     );
-    expect(screen.getByText("Informática")).toBeInTheDocument();
+    expect(screen.getByText("0736/2025")).toBeInTheDocument();
     expect(screen.getByText("67%")).toBeInTheDocument();
   });
 
-  it("dobra o excedente de 8 categorias numa linha de texto", () => {
-    const cats = Array.from({ length: 10 }, (_, i) => ({
-      categoria: `Cat ${i}`,
-      enviadas: 10 - i,
+  it("dobra o excedente de 12 processos numa linha de texto", () => {
+    const procs = Array.from({ length: 14 }, (_, i) => ({
+      chave: `p:${i}`,
+      processo: `Proc ${i}`,
+      enviadas: 20 - i,
       respondidas: 1,
-      taxa: 10,
+      taxa: 5,
     }));
-    render(<RespostaPorCategoria categorias={cats} />);
-    expect(screen.getAllByRole("listitem")).toHaveLength(8);
-    expect(screen.getByText(/e mais 2 categorias/)).toBeInTheDocument();
+    render(<RespostaPorProcesso processos={procs} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(12);
+    expect(screen.getByText(/e mais 2 processos/)).toBeInTheDocument();
   });
 
   it("período sem cotação diz isso", () => {
-    render(<RespostaPorCategoria categorias={[]} />);
+    render(<RespostaPorProcesso processos={[]} />);
     expect(screen.getByText(/nenhuma cotação enviada/i)).toBeInTheDocument();
   });
 });
