@@ -194,7 +194,7 @@ describe("semCitacao_ — cabeçalhos longos e quebrados (2026-11-18)", () => {
 describe("anonimizar_ — saudação e assinatura (2026-11-18)", () => {
   it("tira a saudação com nome e o bloco de contato da assinatura", () => {
     const saida = anonimizar("Olá Ana, boa tarde. Infelizmente não conseguimos atender. Maria Souza Fone/fax: 13 3202-1234 WhatsApp 13 99876-5432 Site: www.x.com.br");
-    expect(saida).toBe("Infelizmente não conseguimos atender. Maria Souza");
+    expect(saida).toBe("Infelizmente não conseguimos atender. [nome]");
     expect(saida).not.toContain("Ana");
     expect(saida).not.toMatch(/\d/);
   });
@@ -292,5 +292,14 @@ describe("provavelRecusa_ — 2ª rodada (cauda longa)", () => {
   ];
   it.each(naoRecusas)("não confunde com recusa: %s", (texto) => {
     expect(provavelRecusa(texto)).toBe(false);
+  });
+});
+
+describe("anonimizar_ — nomes próprios", () => {
+  it("troca sequência de palavras capitalizadas por [nome], mas preserva o resto da frase", () => {
+    const out = anonimizar("Prezados, informamos que Maria Souza Lima não participará deste orçamento.");
+    expect(out).not.toMatch(/Maria|Souza|Lima/);
+    expect(out).toContain("[nome]");
+    expect(out).toContain("não participará deste orçamento");
   });
 });

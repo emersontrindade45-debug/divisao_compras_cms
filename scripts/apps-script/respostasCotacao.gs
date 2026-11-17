@@ -417,6 +417,9 @@ function anonimizar_(corpo) {
     .replace(/\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}/g, "[tel]")
     .replace(/r\$\s*[\d.,]+/gi, "[valor]")
     .replace(/\d[\d.,]*/g, "[n]")
+    // Nome de pessoa/empresa: 2 ou mais palavras capitalizadas seguidas (nome de uma palavra só
+    // continua passando — melhor esforço).
+    .replace(/\b[A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç]+(\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç]+)+/g, "[nome]")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 400);
@@ -516,6 +519,45 @@ function amostraDuvida() {
       bloco.push("[" + k + " " + (i + 1) + " · " + it.id.slice(-6) + "] " + it.texto);
       if (bloco.length === 5 || i === grupos[k].itens.length - 1) { Logger.log(bloco.join("\n")); bloco = []; }
     });
+  });
+}
+
+/**
+ * RÉGUA EM LOTE: sorteia N (padrão 100) respostas SEM SINAL de qualquer grupo — as que sobraram
+ * depois das regras de anexo, valor e recusa — e loga o texto ANONIMIZADO em blocos de 10, para
+ * rotular de uma vez. O cabeçalho traz o número, o fim do id e os marcadores (P pergunta, I pede
+ * informação, R recebido) para medir cada regra depois. Mesma exceção de sigilo de amostraDuvida.
+ */
+function amostraLote() {
+  Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
+  if (!contaCerta_()) return;
+  var N = 100;
+  var amostra = { n: N, vistos: 0, itens: [] };
+  [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
+    var envios = buscarEnvios_(j[1], j[0]);
+    var porFio = {};
+    envios.forEach(function (e) { if (!porFio[e.fio]) porFio[e.fio] = e; });
+    Object.keys(porFio).forEach(function (fio) {
+      var envio = porFio[fio];
+      GmailApp.getThreadById(fio).getMessages().forEach(function (msg) {
+        if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
+        if (msg.getDate() < new Date(envio.data)) return;
+        var meta = metadadosDaMensagem_(msg, envio);
+        if (meta.automatica || meta.devolucao || ehInterna_(msg)) return;
+        if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
+        var corpo = msg.getPlainBody();
+        var marc = marcadoresDoTexto_(semCitacao_(corpo));
+        if (marc.vazio || marc.provavelRecusa) return; // já tratados: vazio não tem o que ler; recusa vai à fila
+        var tags = (marc.pergunta ? "P" : "") + (marc.pedeInformacao ? "I" : "") + (marc.recebido ? "R" : "");
+        sortear_(amostra, { id: msg.getId(), tags: tags || "-", texto: anonimizar_(corpo) });
+      });
+    });
+  });
+  Logger.log("=== LOTE: " + amostra.itens.length + " de " + amostra.vistos + " sem sinal ===");
+  var bloco = [];
+  amostra.itens.forEach(function (it, i) {
+    bloco.push("[" + (i + 1) + " · " + it.id.slice(-6) + " · " + it.tags + "] " + it.texto);
+    if (bloco.length === 10 || i === amostra.itens.length - 1) { Logger.log(bloco.join("\n")); bloco = []; }
   });
 }
 
