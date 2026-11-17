@@ -248,6 +248,73 @@ function testeLeitura() {
 }
 
 /**
+ * Texto da resposta SEM a parte citada (o e-mail original que vem embaixo). Sem isso, o "?" ou o
+ * "orçamento" do nosso próprio pedido contariam como sinal do fornecedor.
+ */
+function semCitacao_(corpo) {
+  var t = String(corpo || "");
+  var corte = t.search(/\n\s*(em .{5,90} escreveu|on .{5,90} wrote|-{2,}\s*(mensagem|original|forwarded)|de:\s|from:\s|>)/i);
+  return corte === -1 ? t : t.slice(0, corte);
+}
+
+/**
+ * Marcadores candidatos para as respostas que hoje não têm sinal nenhum. Só booleanos: o texto
+ * nunca sai. Servem para MEDIR (testeSemSinal) antes de virar regra de classificação.
+ */
+function marcadoresDoTexto_(texto) {
+  var t = String(texto || "").toLowerCase();
+  return {
+    vazio: t.replace(/\s+/g, " ").trim().length < 20,
+    pergunta: t.indexOf("?") !== -1,
+    pedeInformacao: /(termo de refer|\btr\b|especifica|detalh|mais informa|poderia (enviar|informar)|gostaria de saber|qual (a|o) |quantidade|prazo de entrega|local de entrega)/.test(t),
+    semInteresse: /(n[aã]o (temos|possu[ií]mos|trabalh|fornec|atend|realiz|vend|produz|prestamos)|fora d[oe] (nosso )?(ramo|segmento|escopo|perfil)|infelizmente|n[aã]o ser[aá] poss[ií]vel|n[aã]o (conseguimos|podemos))/.test(t),
+    mencionaProposta: /(segue|em anexo|anexo|proposta|or[cç]amento|cota[cç][aã]o)/.test(t),
+    numeroDecimal: /\d+[.,]\d{2}/.test(t),
+    recebido: /(recebemos|recebido|obrigad|agradec|aguard|encaminh|repass|setor|respons[aá]vel|retornar|retorno)/.test(t),
+  };
+}
+
+/**
+ * SPIKE de classificação: entre as respostas humanas SEM nenhum sinal (a maior parte da fila "a
+ * confirmar"), conta quantas trazem cada marcador candidato. Roda em 3 janelas de 90 dias e loga
+ * SÓ CONTAGENS — nenhum texto, assunto ou endereço. Rode no editor e cole o log.
+ */
+function testeSemSinal() {
+  Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
+  if (!contaCerta_()) return;
+  var c = { humanas: 0, semSinal: 0, anexoQualquer: 0, anexoImagem: 0, anexoOutro: 0 };
+  var m = { vazio: 0, pergunta: 0, pedeInformacao: 0, semInteresse: 0, mencionaProposta: 0, numeroDecimal: 0, recebido: 0, nenhum: 0 };
+  [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
+    var envios = buscarEnvios_(j[1], j[0]);
+    var porFio = {};
+    envios.forEach(function (e) { if (!porFio[e.fio]) porFio[e.fio] = e; });
+    Object.keys(porFio).forEach(function (fio) {
+      var envio = porFio[fio];
+      GmailApp.getThreadById(fio).getMessages().forEach(function (msg) {
+        if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
+        if (msg.getDate() < new Date(envio.data)) return;
+        var meta = metadadosDaMensagem_(msg, envio);
+        if (meta.automatica || meta.devolucao) return;
+        c.humanas++;
+        if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
+        c.semSinal++;
+        var anexos = msg.getAttachments({ includeInlineImages: false });
+        if (anexos.length > 0) c.anexoQualquer++;
+        if (anexos.some(function (a) { return /\.(jpe?g|png|gif|heic|webp)$/i.test(a.getName()); })) c.anexoImagem++;
+        if (anexos.some(function (a) { return !/\.(jpe?g|png|gif|heic|webp)$/i.test(a.getName()) && !EXTENSOES_ORCAMENTO.test(a.getName()); })) c.anexoOutro++;
+        var marc = marcadoresDoTexto_(semCitacao_(msg.getPlainBody()));
+        var algum = false;
+        Object.keys(marc).forEach(function (k) { if (marc[k]) { m[k]++; algum = true; } });
+        if (!algum) m.nenhum++;
+      });
+    });
+  });
+  Logger.log("SEM SINAL: " + c.semSinal + " de " + c.humanas + " humanas | com anexo qualquer: " + c.anexoQualquer +
+    " | anexo imagem: " + c.anexoImagem + " | anexo de outro tipo: " + c.anexoOutro);
+  Logger.log("MARCADORES entre os sem sinal: " + Object.keys(m).map(function (k) { return k + " " + m[k]; }).join(" | "));
+}
+
+/**
  * Passo 2 do spike: Implantar → Nova implantação → App da Web
  * (Executar como: eu; Quem pode acessar: Qualquer pessoa). O sistema chama
  * com POST {"segredo": "...", "dias": 30, "desdeDias": 0}. Sem o segredo, nada é lido.
