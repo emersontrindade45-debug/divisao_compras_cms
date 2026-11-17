@@ -265,3 +265,32 @@ describe("provavelRecusa_ — famílias de frase da amostra de dúvida", () => {
     expect(provavelRecusa(texto)).toBe(false);
   });
 });
+
+describe("provavelRecusa_ — 2ª rodada (cauda longa)", () => {
+  const recusas = [
+    "Iremos declinar da cotação, pois não faz parte do nosso portifólio.",
+    "Teremos que declinar por indisponibilidade operacional.",
+    "No momento não dispomos de uma solução que atenda integralmente ao objeto.",
+    "A seguradora optou por não apresentar a cotação devido ao risco.",
+    "No momento não é possível participar, o valor está muito alto.",
+    "Agradecemos, porém a localização fica distante da nossa rede.",
+    "Não estamos conseguindo repassar cotações no momento.",
+    "Os itens não fazem parte do nosso catálogo.",
+    "Neste momento não será possível apresentar proposta estimativa.",
+  ];
+  it.each(recusas)("reconhece: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(true);
+  });
+
+  const naoRecusas = [
+    "Não estamos conseguindo abrir o anexo, favor reenviar.",
+    "Acuso o recebimento; nossa equipe está analisando o Termo de Referência e retornaremos.",
+    "Compra direta ou abertura de licitação?",
+    "Estaremos em férias coletivas, com retorno das atividades na próxima semana.",
+    "Não sou mais responsável pela área de contratos; a colega dará seguimento.",
+    "Podemos declinar parte dos itens? Temos interesse nos demais.",
+  ];
+  it.each(naoRecusas)("não confunde com recusa: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(false);
+  });
+});

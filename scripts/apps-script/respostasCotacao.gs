@@ -268,13 +268,14 @@ function semCitacao_(corpo) {
  * demonstra interesse ou pede prazo: "temos interesse… não será possível concluir hoje" não é
  * recusa. Ampliada em 2026-11-18 com as famílias de frase vistas na amostra de dúvida ("não
  * realizamos/imprimimos/disponibilizamos…", "não participar", "não faz parte do portfólio", "região fora
- * da atuação"). Validada em 2026-11-18 numa amostra rotulada de 30 respostas: 24 de 24 recusas casadas,
+ * da atuação") e, numa 2ª rodada, "declinar", "não dispomos", "optou por não", "não é possível
+ * participar/apresentar", "localização distante da rede" e "não faz parte do catálogo". Validada em 2026-11-18 numa amostra rotulada de 30 respostas: 24 de 24 recusas casadas,
  * 0 falsos positivos. Amostra pequena: por isso só SUGERE, nunca aplica sozinha.
  */
 function provavelRecusa_(texto) {
   var t = String(texto || "").toLowerCase();
   var guarda = /(temos interesse|estamos providenciando|extens[aã]o (do )?prazo|possibilidade de|gostaria de (saber|validar)|poderia)/;
-  var recusa = /(n[aã]o (conseguimos|conseguiremos|consigo|podemos|produzimos|fornece|fornecemos|atendo|atendemos|trabalhamos|comercializamos|participamos|temos (como|condi[cç][oõ]es|esses|esse|interesse|atendimento)|estamos (participando|assumindo|fornecendo|fazendo)|realizamos|prestamos|imprimimos|disponibilizamos|ofertamos|vendemos|possu[ií]mos|executamos|atuamos|desejamos participar|pretendemos participar|iremos participar|vamos participar|s[aã]o compat[ií]veis)|n[aã]o participar|n[aã]o [eé] compat[ií]vel|n[aã]o [eé] o (meu|nosso) ramo|fora d[oe] (nosso )?(ramo|segmento|escopo|perfil)|n[aã]o faz(em)? parte[^.]{0,40}(escopo|portf[oó]lio|linha)|(sua|essa|esta) regi[aã]o[^.]{0,50}n[aã]o|declinando|declinamos|atua(mos)? (apenas|somente|exclusivamente)|n[aã]o ser[aá] poss[ií]vel (encaminhar|enviar|atender|participar|realizar))/;
+  var recusa = /(n[aã]o (conseguimos|conseguiremos|consigo|podemos|produzimos|fornece|fornecemos|atendo|atendemos|trabalhamos|comercializamos|participamos|dispomos|temos (como|condi[cç][oõ]es|esses|esse|interesse|atendimento)|estamos (participando|assumindo|fornecendo|fazendo|conseguindo (repassar|cotar|atender|participar|fornecer))|realizamos|prestamos|imprimimos|disponibilizamos|ofertamos|vendemos|possu[ií]mos|executamos|atuamos|desejamos participar|pretendemos participar|iremos participar|vamos participar|s[aã]o compat[ií]veis)|n[aã]o participar|n[aã]o [eé] compat[ií]vel|n[aã]o [eé] o (meu|nosso) ramo|fora d[oe] (nosso )?(ramo|segmento|escopo|perfil)|n[aã]o faz(em)? parte[^.]{0,40}(escopo|portf[oó]lio|portif[oó]lio|cat[aá]logo|linha)|(sua|essa|esta) regi[aã]o[^.]{0,50}n[aã]o|(localiza[cç][aã]o|endere[cç]o|local)[^.]{0,40}(distante|fora d[aeo] (nossa |nosso )?(rede|[aá]rea|regi[aã]o|cobertura))|declin(ar|amos|ando|ou|aremos)|optou por n[aã]o|optamos por n[aã]o|atua(mos)? (apenas|somente|exclusivamente)|n[aã]o (ser[aá]|[eé]) poss[ií]vel (encaminhar|enviar|atender|participar|realizar|apresentar))/;
   return recusa.test(t) && !guarda.test(t);
 }
 
