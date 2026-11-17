@@ -599,3 +599,55 @@ function doPost(e) {
     respostas: buscarRespostas_(env),
   })).setMimeType(ContentService.MimeType.JSON);
 }
+
+/**
+ * RÉGUA COMPLETA: varre TODAS as respostas sem sinal (sem repetir a mesma mensagem, que aparece em
+ * duas janelas quando o fio cruza os 90 dias), em ordem FIXA (por id), e loga a `parte` pedida, de
+ * `tamanho` em `tamanho`, anonimizada, em blocos de 10. Rode amostraParte1, 2, 3 e 4 e cole os logs:
+ * juntas cobrem a fila inteira, sem sorteio e sem sobreposição. Mesma exceção de sigilo de
+ * amostraDuvida (texto anonimizado, só para validar as regras).
+ */
+function amostraParte_(parte, tamanho) {
+  Logger.log("CONTA: " + contaEfetiva_() + (contaCerta_() ? " (correta)" : " — ERRADA, esperado " + CAIXA_ESPERADA));
+  if (!contaCerta_()) return;
+  var vistos = {};
+  var todas = [];
+  [[0, 90], [90, 90], [180, 90]].forEach(function (j) {
+    var envios = buscarEnvios_(j[1], j[0]);
+    var porFio = {};
+    envios.forEach(function (e) { if (!porFio[e.fio]) porFio[e.fio] = e; });
+    Object.keys(porFio).forEach(function (fio) {
+      var envio = porFio[fio];
+      GmailApp.getThreadById(fio).getMessages().forEach(function (msg) {
+        if (enderecos_(msg.getFrom())[0] === CAIXA_ESPERADA) return;
+        if (msg.getDate() < new Date(envio.data)) return;
+        var id = msg.getId();
+        if (vistos[id]) return;
+        var meta = metadadosDaMensagem_(msg, envio);
+        if (meta.automatica || meta.devolucao || ehInterna_(msg)) return;
+        if (meta.temAnexoOrcamento || meta.contemRecusa || meta.contemValor) return;
+        var corpo = msg.getPlainBody();
+        var marc = marcadoresDoTexto_(semCitacao_(corpo));
+        if (marc.vazio || marc.provavelRecusa) return;
+        vistos[id] = true;
+        var tags = (marc.pergunta ? "P" : "") + (marc.pedeInformacao ? "I" : "") + (marc.recebido ? "R" : "");
+        todas.push({ id: id, tags: tags || "-", corpo: corpo });
+      });
+    });
+  });
+  todas.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  var ini = (parte - 1) * tamanho;
+  var fatia = todas.slice(ini, ini + tamanho);
+  Logger.log("=== PARTE " + parte + " de " + Math.ceil(todas.length / tamanho) + ": itens " + (ini + 1) + " a " +
+    (ini + fatia.length) + " de " + todas.length + " sem sinal ===");
+  var bloco = [];
+  fatia.forEach(function (it, i) {
+    bloco.push("[" + (ini + i + 1) + " · " + it.id.slice(-6) + " · " + it.tags + "] " + anonimizar_(it.corpo));
+    if (bloco.length === 10 || i === fatia.length - 1) { Logger.log(bloco.join("\n")); bloco = []; }
+  });
+}
+
+function amostraParte1() { amostraParte_(1, 90); }
+function amostraParte2() { amostraParte_(2, 90); }
+function amostraParte3() { amostraParte_(3, 90); }
+function amostraParte4() { amostraParte_(4, 90); }
