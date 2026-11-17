@@ -167,6 +167,9 @@ function ehAutomatica_(msg) {
 
 function metadadosDaMensagem_(msg, envio) {
   var assunto = msg.getSubject();
+  var semCit = semCitacao_(msg.getPlainBody());
+  var ehRecusa = provavelRecusa_(semCit);
+  var sugestoes = sugestoesDoTexto_(semCit, ehRecusa);
   var corpo = normalizar_(msg.getPlainBody());
   var anexos = msg.getAttachments({ includeInlineImages: false });
   var remetente = (/<([^>]+)>/.exec(msg.getFrom()) || [null, msg.getFrom()])[1].trim().toLowerCase();
@@ -189,7 +192,11 @@ function metadadosDaMensagem_(msg, envio) {
     contemRecusa: FRASES_RECUSA.some(function (f) { return corpo.indexOf(f) !== -1; }),
     contemValor: /r\$\s*\d/.test(corpo),
     // Recusa em frase mais ampla que a lista fixa, sem a parte citada. Só SUGERE (vai à fila).
-    provavelRecusa: provavelRecusa_(semCitacao_(msg.getPlainBody())),
+    provavelRecusa: ehRecusa,
+    // Possível orçamento / possível dúvida (também só sugerem). O sistema precisa aceitar estes
+    // campos ANTES da versão do script que os envia: o payload é estrito.
+    provavelOrcamento: sugestoes.provavelOrcamento,
+    provavelDuvida: sugestoes.provavelDuvida,
   };
 }
 
@@ -339,6 +346,43 @@ function provavelRecusa_(texto) {
 }
 
 /**
+ * Texto que ENTREGA ou CONFIRMA um orçamento sem anexo reconhecido: "segue o orçamento/proposta/
+ * cotação (em anexo)", "valores mantidos", "os valores estão corretos", "a proposta … permanece
+ * válida". Só SUGERE (vai à fila). Não casa "segue em anexo foto…" (sem orçamento/proposta por
+ * perto) nem cobrança de retorno ("já analisou a proposta?").
+ */
+function provavelOrcamento_(texto) {
+  var t = normalizar_(semAssinatura_(texto));
+  return /(segue|seguem|em anexo)[^.]{0,40}(or[cç]amento|proposta|cota[cç][aã]o)|(or[cç]amento|proposta|cota[cç][aã]o)[^.]{0,40}(em anexo|anexa|anexo)|valores mantidos|valores? (est[aã]o|ficam) corretos?|proposta[\s\S]{0,120}permanece v[aá]lida/.test(t);
+}
+
+/**
+ * Pergunta que NÃO é dúvida sobre o objeto: cobrança de retorno ("alguma posição?", "previsão da
+ * resposta?"), pesquisa de satisfação e canal automático ("este canal é exclusivo para suporte").
+ * Sem isto, o "?" dessas respostas as faria passar por dúvida.
+ */
+function perguntaSemDuvida_(t) {
+  return /(alguma (posi[cç][aã]o|novidade|atualiza[cç][aã]o)|previs[aã]o d[ae] (resposta|publica[cç][aã]o)|(informar|saber)[^.?]{0,30}andamento|verificar (se h[aá] )?(algum )?retorno|ter um retorno|passando para saber|se temos (alguma )?novidade|compartilhe conosco sua experi|satisfeito com o atendimento|canal [eé] exclusivo para)/.test(t);
+}
+
+/**
+ * Sugestões para a fila, só booleanos: POSSÍVEL ORÇAMENTO e POSSÍVEL DÚVIDA (o fornecedor pergunta
+ * algo). Precedência orçamento > recusa > dúvida: com recusa provável, nenhuma das duas sai.
+ * Medida em 2026-11-18 numa fila de 324 respostas lidas à mão: o "?" sozinho acerta ~78% das
+ * dúvidas depois de tirar recusa e cobrança — por isso só SUGERE, nunca aplica.
+ */
+function sugestoesDoTexto_(texto, ehRecusa) {
+  var t = normalizar_(semAssinatura_(texto));
+  var marc = marcadoresDoTexto_(t);
+  var orcamento = !ehRecusa && provavelOrcamento_(texto);
+  // Pergunta curta também é dúvida ("Compra direta?"): por isso o piso é de 8 caracteres úteis, não
+  // os 20 do marcador `vazio`.
+  var util = t.replace(/[\s_\-=*.]+/g, " ").trim();
+  var duvida = !ehRecusa && !orcamento && marc.pergunta && util.length >= 8 && !perguntaSemDuvida_(t);
+  return { provavelOrcamento: orcamento, provavelDuvida: duvida };
+}
+
+/**
  * Marcadores candidatos para as respostas que hoje não têm sinal nenhum. Só booleanos: o texto
  * nunca sai. Servem para MEDIR (testeSemSinal) antes de virar regra de classificação.
  * (`numeroDecimal` foi retirado: acendia por telefone, CEP e CNPJ — 0 de 15 eram valor.)
@@ -346,7 +390,7 @@ function provavelRecusa_(texto) {
 function marcadoresDoTexto_(texto) {
   var t = normalizar_(texto);
   return {
-    vazio: t.replace(/\s+/g, " ").trim().length < 20,
+    vazio: t.replace(/[\s_\-=*.]+/g, " ").trim().length < 20, // só "______" ou "---" não é resposta
     pergunta: t.indexOf("?") !== -1,
     pedeInformacao: /(termo de refer|\btr\b|especifica|detalh|mais informa|poderia (enviar|informar)|gostaria de saber|qual (a|o) |quantidade|prazo de entrega|local de entrega)/.test(t),
     provavelRecusa: provavelRecusa_(t),
@@ -648,7 +692,7 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify({
     // Diagnóstico sem conteúdo: só a conta que executa e contagens.
     diagnostico: {
-      versao: "corpo-3",
+      versao: "sugestoes-1",
       contaEfetiva: Session.getEffectiveUser().getEmail(),
       contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
       fiosEncontrados: busca.fios.length,

@@ -416,3 +416,90 @@ describe("provavelRecusa_ — rodapé, espaços estranhos e frases da 4ª rodada
     expect(provavelRecusa(longo)).toBe(false);
   });
 });
+
+// ── Sugestões de orçamento e dúvida ────────────────────────────────────────────
+const dependencias = ["provavelRecusa_", "marcadoresDoTexto_", "provavelOrcamento_", "perguntaSemDuvida_", "sugestoesDoTexto_"]
+  .map((n) => new RegExp(`function ${n}[\\s\\S]*?\\n}\\n`).exec(fonte)![0])
+  .join("\n");
+const sugestoes = new Function(`${normalizarSrc}\n${dependencias}; return sugestoesDoTexto_;`)() as (
+  texto: string,
+  ehRecusa: boolean,
+) => { provavelOrcamento: boolean; provavelDuvida: boolean };
+const orcamento = (t: string) => sugestoes(t, false).provavelOrcamento;
+const duvida = (t: string) => sugestoes(t, false).provavelDuvida;
+
+describe("provavelOrcamento_", () => {
+  it.each([
+    "Segue orçamento. Qualquer dúvida pode me chamar.",
+    "Olá, bom dia, segue cotação em anexo.",
+    "Segue proposta em anexo.",
+    "Segue em anexo o orçamento solicitado. Estamos à disposição.",
+    "Segue a proposta anexa. Fico no aguardo do resultado.",
+    "Valores mantidos.",
+    "Sim, os valores estão corretos. A diferença se deve às marcas.",
+    "Confirmamos que a proposta comercial apresentada a esse órgão em outubro. permanece válida nas mesmas condições.",
+  ])("reconhece: %s", (texto) => {
+    expect(orcamento(texto)).toBe(true);
+  });
+
+  it.each([
+    "Segue em anexo foto exatamente como é, incluindo o estojo. Você já tem a arte pronta?",
+    "Segue conforme solicitado o detalhamento do item do termo de referência.",
+    "Segue para conhecimento.",
+    "Gostaria de confirmar se você já analisou a proposta que encaminhamos.",
+    "Encaminhei um orçamento e gostaria de verificar uma posição sobre o mesmo.",
+    "Segue em anexo a nota fiscal solicitada.",
+  ])("não confunde com orçamento: %s", (texto) => {
+    expect(orcamento(texto)).toBe(false);
+  });
+
+  it("com recusa provável, nenhuma sugestão sai (recusa vence)", () => {
+    const r = sugestoes("Segue proposta em anexo? não temos interesse", true);
+    expect(r).toEqual({ provavelOrcamento: false, provavelDuvida: false });
+  });
+});
+
+describe("provavelDuvida (via sugestoesDoTexto_)", () => {
+  it.each([
+    "Compra direta ou abertura de processo licitatório?",
+    "Compra direta?",
+    "Pregão eletrônico?",
+    "O que seria o material a ser orçado?",
+    "Tem alguma faixa de horário que irá operar?",
+    "Poderiam esclarecer o item 3 do termo de referência, é para instalação completa?",
+    "Esse orçamento seria para formar preço de licitação ou é uma compra direta?",
+  ])("reconhece: %s", (texto) => {
+    expect(duvida(texto)).toBe(true);
+  });
+
+  it.each([
+    ["cobrança de retorno", "Boa tarde! Alguma posição sobre o orçamento?"],
+    ["cobrança de retorno (previsão)", "Você teria uma previsão da resposta da licitação?"],
+    ["cobrança de retorno (andamento)", "Pode me informar o andamento do processo?"],
+    ["pesquisa de satisfação", "Compartilhe conosco sua experiência. Você está satisfeito com o atendimento?"],
+    ["canal automático", "Este canal é exclusivo para suporte técnico. Quer falar de vendas?"],
+    ["sem pergunta", "Obrigado, vamos analisar e retornamos."],
+    ["só sublinhados", "________________________________?"],
+    ["pergunta sem conteúdo", "ok ?"],
+  ])("não é dúvida: %s", (_nome, texto) => {
+    expect(duvida(texto)).toBe(false);
+  });
+
+  it("orçamento vence dúvida: quem entrega a proposta e pergunta algo continua sendo orçamento", () => {
+    const r = sugestoes("Segue proposta em anexo. Qualquer ajuste, precisa de mais alguma coisa?", false);
+    expect(r).toEqual({ provavelOrcamento: true, provavelDuvida: false });
+  });
+
+  it("com recusa provável, não é dúvida", () => {
+    expect(sugestoes("Infelizmente não conseguimos atender. Posso ajudar em outra coisa?", true).provavelDuvida).toBe(false);
+  });
+});
+
+describe("marcadoresDoTexto_.vazio", () => {
+  it("só sublinhados, traços, asteriscos e pontos contam como vazio", () => {
+    expect(marcadores("________________________________").vazio).toBe(true);
+    expect(marcadores("-----  *****  .....  =====").vazio).toBe(true);
+    expect(marcadores("Compra direta?").vazio).toBe(true); // < 20 caracteres úteis, como antes
+    expect(marcadores("Qual é o prazo de entrega previsto?").vazio).toBe(false);
+  });
+});
