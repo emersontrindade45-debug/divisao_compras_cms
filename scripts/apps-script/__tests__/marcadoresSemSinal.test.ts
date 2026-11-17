@@ -156,6 +156,16 @@ describe("provavelRecusa_ — amostra rotulada", () => {
     expect(provavelRecusa(texto)).toBe(false);
   });
 
+  // Estes CASARIAM a lista de recusa ("não conseguimos", "não podemos"): só a exceção os segura.
+  // Sem eles a exceção ficava sem teste (a mutação que a removia não derrubava nada).
+  it.each([
+    "Temos interesse, mas não conseguimos enviar hoje. Existe a possibilidade de extensão do prazo?",
+    "Estamos providenciando a cotação, só que não podemos concluir até amanhã.",
+    "Gostaria de saber mais: não conseguimos definir o valor sem a quantidade de entrevistas.",
+  ])("a exceção segura quem demonstra interesse ou pede prazo: %s", (texto) => {
+    expect(provavelRecusa(texto)).toBe(false);
+  });
+
   it.each([
     "Gostaria de validar dois pontos antes de enviar a proposta: será dispensa de licitação?",
     "Por nada, eu fico à disposição!",
