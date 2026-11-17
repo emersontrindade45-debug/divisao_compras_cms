@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
     },
     consultaCotacao: { groupBy: vi.fn(), createMany: vi.fn(), findMany: vi.fn() },
     fornecedor: { findMany: vi.fn() },
-    respostaEmailPendente: { createMany: vi.fn() },
+    respostaEmailPendente: { createMany: vi.fn(), updateMany: vi.fn() },
     emailInvalido: { createMany: vi.fn() },
     $executeRaw: vi.fn(),
   },
@@ -251,6 +251,30 @@ describe("sincronizarRespostasEmail", () => {
         motivo: "sinais_ambiguos",
       });
       expect(valoresRaw(0)[2]).toEqual(["a_confirmar"]);
+    });
+
+    it("recusa provável entra na fila com motivo próprio e reagrupa o que já estava como 'sem sinal claro'", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      await sincronizarRespostasEmail({
+        envios: [envio()],
+        respostas: [resposta({ provavelRecusa: true })],
+      });
+      expect(mocks.db.respostaEmailPendente.createMany.mock.calls[0]![0].data[0]).toMatchObject({
+        gmailMensagemId: "m1",
+        motivo: "provavel_recusa",
+        sugestaoConsultaId: "c0",
+      });
+      // Guarda atômica: só reagrupa a que ainda é "sem sinal claro" e não foi resolvida.
+      expect(mocks.db.respostaEmailPendente.updateMany).toHaveBeenCalledWith({
+        where: { gmailMensagemId: { in: ["m1"] }, motivo: "sinais_ambiguos", resolvidaEm: null },
+        data: { motivo: "provavel_recusa" },
+      });
+    });
+
+    it("sem recusa provável, nada é reagrupado", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta()] });
+      expect(mocks.db.respostaEmailPendente.updateMany).not.toHaveBeenCalled();
     });
 
     it("remetente de domínio genérico entra na fila sem consulta sugerida", async () => {

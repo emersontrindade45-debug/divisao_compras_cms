@@ -291,6 +291,16 @@ export async function sincronizarRespostasEmail(
   // ── 4. Gravação ─────────────────────────────────────────────────────────
   if (pendentes.length > 0) {
     await db.respostaEmailPendente.createMany({ data: pendentes, skipDuplicates: true });
+
+    // Pendente que já existia como "sem sinal claro" e agora tem recusa provável é reagrupada.
+    // Guarda atômica (CLAUDE.md §9.14): só vira se ainda não foi resolvida nem reclassificada.
+    const reagrupar = pendentes.filter((p) => p.motivo === "provavel_recusa").map((p) => p.gmailMensagemId);
+    if (reagrupar.length > 0) {
+      await db.respostaEmailPendente.updateMany({
+        where: { gmailMensagemId: { in: reagrupar }, motivo: "sinais_ambiguos", resolvidaEm: null },
+        data: { motivo: "provavel_recusa" },
+      });
+    }
   }
 
   const finais = [...desfechos.values()].map((d) => ({ d, ...desfechoFinal(d) }));

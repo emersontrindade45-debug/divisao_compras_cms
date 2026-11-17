@@ -171,25 +171,37 @@ export default async function CotacoesPage({
  */
 async function carregarRespostasPendentes(): Promise<RespostaPendenteItem[]> {
   try {
-    const pendentes = await db.respostaEmailPendente.findMany({
-      where: { resolvidaEm: null },
-      orderBy: { dataResposta: "desc" },
-      take: 200,
-      select: {
-        id: true,
-        gmailMensagemId: true,
-        dataResposta: true,
-        remetenteDominio: true,
-        motivo: true,
-        temAnexoOrcamento: true,
-        contemRecusa: true,
-        contemValor: true,
-        sugestaoConsultaId: true,
-        envio: {
-          select: { numeroProcessoAssunto: true, processo: { select: { numero: true } } },
-        },
+    const selecao = {
+      id: true,
+      gmailMensagemId: true,
+      dataResposta: true,
+      remetenteDominio: true,
+      motivo: true,
+      temAnexoOrcamento: true,
+      contemRecusa: true,
+      contemValor: true,
+      sugestaoConsultaId: true,
+      envio: {
+        select: { numeroProcessoAssunto: true, processo: { select: { numero: true } } },
       },
-    });
+    } as const;
+    // A recusa provável vem INTEIRA (o lote age sobre todas, e o teto de 200 as cortaria); o resto
+    // segue limitado, como antes.
+    const [recusaProvavel, demais] = await Promise.all([
+      db.respostaEmailPendente.findMany({
+        where: { resolvidaEm: null, motivo: "provavel_recusa" },
+        orderBy: { dataResposta: "desc" },
+        take: 500,
+        select: selecao,
+      }),
+      db.respostaEmailPendente.findMany({
+        where: { resolvidaEm: null, motivo: { not: "provavel_recusa" } },
+        orderBy: { dataResposta: "desc" },
+        take: 200,
+        select: selecao,
+      }),
+    ]);
+    const pendentes = [...recusaProvavel, ...demais];
     const ids = pendentes.map((p) => p.sugestaoConsultaId).filter((x): x is string => x !== null);
     const sugestoes = ids.length
       ? await db.consultaCotacao.findMany({

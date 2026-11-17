@@ -43,6 +43,8 @@ const respostaSchema = z
     temAnexoOrcamento: z.boolean(),
     contemRecusa: z.boolean(),
     contemValor: z.boolean(),
+    /** Frase de recusa fora da lista fixa (script `corpo-3`). Opcional: o script antigo não manda. */
+    provavelRecusa: z.boolean().optional(),
   })
   .strict();
 

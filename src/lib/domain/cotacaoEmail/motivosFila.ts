@@ -2,6 +2,7 @@
 
 export const MOTIVO_FILA_LABEL: Record<string, string> = {
   sinais_ambiguos: "Sem sinal claro (nem anexo nem recusa)",
+  provavel_recusa: "Provável recusa (frase de recusa fora da lista fixa)",
   sinais_conflitantes: "Anexo e recusa na mesma resposta",
   dominio_generico: "Veio de e-mail pessoal (Gmail, Hotmail…)",
   dominio_ambiguo: "Mais de um fornecedor com esse domínio",

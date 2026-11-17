@@ -13,6 +13,8 @@ export interface MarcadoresResposta {
   temAnexoOrcamento: boolean;
   contemRecusa: boolean;
   contemValor: boolean;
+  /** Frase de recusa fora da lista fixa; ausente no payload do script antigo. */
+  provavelRecusa?: boolean;
 }
 
 export type RegraClassificacao = "anexo_orcamento" | "frase_recusa";
@@ -21,7 +23,7 @@ export type ResultadoClassificacao =
   | { acao: "devolucao" }
   | { acao: "ignorar"; motivo: "automatica" }
   | { acao: "aplicar"; situacao: "orcamento" | "recusa"; regra: RegraClassificacao }
-  | { acao: "fila"; motivo: "sinais_ambiguos" };
+  | { acao: "fila"; motivo: "sinais_ambiguos" | "provavel_recusa" };
 
 export function classificarResposta(m: MarcadoresResposta): ResultadoClassificacao {
   if (m.devolucao) return { acao: "devolucao" };
@@ -37,6 +39,11 @@ export function classificarResposta(m: MarcadoresResposta): ResultadoClassificac
   }
   if (sinalRecusa && !sinalOrcamento && !m.contemValor) {
     return { acao: "aplicar", situacao: "recusa", regra: "frase_recusa" };
+  }
+  // Recusa em frase que a lista fixa não conhece. Só SUGERE: a precisão foi medida numa amostra
+  // pequena (30 respostas), então a decisão continua humana, mas agrupada para resolver em lote.
+  if (m.provavelRecusa && !sinalOrcamento && !m.contemValor) {
+    return { acao: "fila", motivo: "provavel_recusa" };
   }
   return { acao: "fila", motivo: "sinais_ambiguos" };
 }

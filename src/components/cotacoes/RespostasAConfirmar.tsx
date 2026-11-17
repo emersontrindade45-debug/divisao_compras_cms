@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { resolverRespostaEmail, type DesfechoResposta } from "@/lib/actions/resolverRespostaEmail";
 import { rotuloDoMotivo } from "@/lib/domain/cotacaoEmail/motivosFila";
+import { RecusaProvavelEmLote } from "@/components/cotacoes/RecusaProvavelEmLote";
 
 export interface RespostaPendenteItem {
   id: string;
@@ -129,11 +130,18 @@ export function RespostasAConfirmar({ itens }: { itens: RespostaPendenteItem[] }
       </p>
     );
   }
+  // O lote só vale para quem já tem fornecedor ligado: sem ele, "é recusa" pede o e-mail à mão.
+  const idsRecusaProvavel = itens
+    .filter((i) => i.motivo === "provavel_recusa" && i.sugestao !== null)
+    .map((i) => i.id);
   return (
-    <ul className="space-y-2" aria-label="Respostas a confirmar">
-      {itens.map((i) => (
-        <Linha key={i.id} item={i} />
-      ))}
-    </ul>
+    <div className="space-y-3">
+      {idsRecusaProvavel.length > 0 && <RecusaProvavelEmLote ids={idsRecusaProvavel} />}
+      <ul className="space-y-2" aria-label="Respostas a confirmar">
+        {itens.map((i) => (
+          <Linha key={i.id} item={i} />
+        ))}
+      </ul>
+    </div>
   );
 }

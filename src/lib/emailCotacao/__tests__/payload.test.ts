@@ -62,4 +62,11 @@ describe("payloadScriptSchema", () => {
     });
     expect(r.success).toBe(true);
   });
+
+  it("aceita o campo opcional provavelRecusa e recusa um valor que não é booleano", () => {
+    const base = { envios: [envio], respostas: [{ ...resposta, provavelRecusa: true }] };
+    expect(payloadScriptSchema.safeParse(base).success).toBe(true);
+    const ruim = { envios: [envio], respostas: [{ ...resposta, provavelRecusa: "sim" }] };
+    expect(payloadScriptSchema.safeParse(ruim).success).toBe(false);
+  });
 });

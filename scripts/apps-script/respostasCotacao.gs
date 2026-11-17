@@ -188,6 +188,8 @@ function metadadosDaMensagem_(msg, envio) {
     temAnexoOrcamento: anexos.some(function (a) { return EXTENSOES_ORCAMENTO.test(a.getName()); }),
     contemRecusa: FRASES_RECUSA.some(function (f) { return corpo.indexOf(f) !== -1; }),
     contemValor: /r\$\s*\d/.test(corpo),
+    // Recusa em frase mais ampla que a lista fixa, sem a parte citada. Só SUGERE (vai à fila).
+    provavelRecusa: provavelRecusa_(semCitacao_(msg.getPlainBody())),
   };
 }
 
@@ -486,7 +488,7 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify({
     // Diagnóstico sem conteúdo: só a conta que executa e contagens.
     diagnostico: {
-      versao: "corpo-2",
+      versao: "corpo-3",
       contaEfetiva: Session.getEffectiveUser().getEmail(),
       contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
       fiosEncontrados: busca.fios.length,

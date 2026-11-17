@@ -53,4 +53,37 @@ describe("classificarResposta", () => {
       motivo: "automatica",
     });
   });
+
+  describe("recusa provável (script corpo-3)", () => {
+    it("sem sinal claro mas com frase de recusa ampla: vai à fila com motivo próprio, nunca é aplicada", () => {
+      expect(c({ provavelRecusa: true })).toEqual({ acao: "fila", motivo: "provavel_recusa" });
+    });
+
+    it("com anexo de orçamento, vale o anexo: a recusa provável não muda o resultado", () => {
+      expect(c({ provavelRecusa: true, temAnexoOrcamento: true })).toEqual({
+        acao: "aplicar",
+        situacao: "orcamento",
+        regra: "anexo_orcamento",
+      });
+    });
+
+    it("com R$ no texto, não é recusa provável (pode ser proposta)", () => {
+      expect(c({ provavelRecusa: true, contemValor: true })).toEqual({
+        acao: "fila",
+        motivo: "sinais_ambiguos",
+      });
+    });
+
+    it("a frase de recusa da lista fixa continua sendo aplicada, não só sugerida", () => {
+      expect(c({ contemRecusa: true, provavelRecusa: true })).toEqual({
+        acao: "aplicar",
+        situacao: "recusa",
+        regra: "frase_recusa",
+      });
+    });
+
+    it("payload do script antigo (sem o campo) segue como antes", () => {
+      expect(c({})).toEqual({ acao: "fila", motivo: "sinais_ambiguos" });
+    });
+  });
 });
