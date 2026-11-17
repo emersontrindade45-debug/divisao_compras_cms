@@ -347,6 +347,7 @@ export interface ContagemConsultas {
   consultadas: number;
   orcamentos: number;
   recusas: number;
+  duvidas: number;
   /** Respondeu, mas o analista ainda não confirmou o tipo — fora das três contas. */
   aConfirmar: number;
   invalidos: number;
@@ -361,6 +362,7 @@ export function contarConsultas(consultas: ConsultaDesempenhoInput[], j: Janela)
     consultadas: daJanela.length - invalidos,
     orcamentos: n("orcamento"),
     recusas: n("recusa"),
+    duvidas: n("duvida"),
     aConfirmar: n("a_confirmar"),
     invalidos,
   };
@@ -370,10 +372,10 @@ export function contarConsultas(consultas: ConsultaDesempenhoInput[], j: Janela)
 export function percentualDaSituacao(
   consultas: ConsultaDesempenhoInput[],
   j: Janela,
-  situacao: "orcamento" | "recusa",
+  situacao: "orcamento" | "recusa" | "duvida",
 ): Indicador {
   const c = contarConsultas(consultas, j);
-  const parte = situacao === "orcamento" ? c.orcamentos : c.recusas;
+  const parte = { orcamento: c.orcamentos, recusa: c.recusas, duvida: c.duvidas }[situacao];
   return { valor: percentual(parte, c.consultadas), base: c.consultadas, excluidos: c.invalidos };
 }
 
@@ -381,7 +383,8 @@ export function percentualDaSituacao(
 export function tempoRespostaDias(consultas: ConsultaDesempenhoInput[], j: Janela): Indicador {
   const respondidas = consultas.filter(
     (c) =>
-      (c.situacao === "orcamento" || c.situacao === "recusa") && dentro(c.dataResposta, j),
+      (c.situacao === "orcamento" || c.situacao === "recusa" || c.situacao === "duvida") &&
+      dentro(c.dataResposta, j),
   );
   const dias = respondidas.map((c) =>
     Math.max(0, (c.dataResposta!.getTime() - c.dataEnvio.getTime()) / DIA_MS),

@@ -301,7 +301,7 @@ describe("indicadores das consultas por e-mail (M30.d)", () => {
       ],
       J,
     );
-    expect(c).toEqual({ consultadas: 5, orcamentos: 1, recusas: 2, aConfirmar: 1, invalidos: 1 });
+    expect(c).toEqual({ consultadas: 5, orcamentos: 1, recusas: 2, duvidas: 0, aConfirmar: 1, invalidos: 1 });
   });
 
   it("percentualDaSituacao: recusas e orçamentos sobre as consultas válidas", () => {
@@ -407,5 +407,30 @@ describe("situação 'duvida' (M30.d)", () => {
     ]);
     expect(out.map((c) => c.status)).toEqual(["incompleta", "silenciosa"]);
     expect(taxaRespostaPorProcesso(out, J).find((t) => t.chave === "p:1")).toMatchObject({ enviadas: 2, respondidas: 1 });
+  });
+});
+
+describe("dúvida nos indicadores (M30.d)", () => {
+  it("contarConsultas e percentualDaSituacao contam a dúvida sobre as consultas válidas", () => {
+    const base = [
+      cons({ situacao: "duvida" }),
+      cons({ situacao: "duvida" }),
+      cons({ situacao: "orcamento" }),
+      cons({ situacao: "a_confirmar" }),
+      cons({ situacao: "email_invalido" }),
+    ];
+    expect(contarConsultas(base, J).duvidas).toBe(2);
+    expect(percentualDaSituacao(base, J, "duvida")).toEqual({ valor: 50, base: 4, excluidos: 1 });
+  });
+
+  it("a dúvida entra no tempo de resposta (pediu esclarecimento = respondeu); 'a confirmar' continua fora", () => {
+    const r = tempoRespostaDias(
+      [
+        cons({ situacao: "duvida", dataResposta: d("2026-11-03") }),
+        cons({ situacao: "a_confirmar", dataResposta: d("2026-11-03") }),
+      ],
+      J,
+    );
+    expect(r.base).toBe(1);
   });
 });

@@ -33,6 +33,7 @@ export interface CamadaDesempenho {
   fontePublica: ParIndicador;
   orcamentos: ParIndicador;
   recusas: ParIndicador;
+  duvidas: ParIndicador;
   contagem: ContagemConsultas;
   tempoResposta: ParIndicador;
   emailsInvalidos: ParIndicador;
@@ -116,6 +117,7 @@ export async function carregarCamadaDesempenho(
     fontePublica: par(percentualFontePublica, fontes),
     orcamentos: par((d, j) => percentualDaSituacao(d, j, "orcamento"), consultas),
     recusas: par((d, j) => percentualDaSituacao(d, j, "recusa"), consultas),
+    duvidas: par((d, j) => percentualDaSituacao(d, j, "duvida"), consultas),
     contagem: contarConsultas(consultas, atual),
     tempoResposta: par(tempoRespostaDias, consultas),
     emailsInvalidos: par(percentualEmailsInvalidos, consultas),

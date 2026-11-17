@@ -15,7 +15,8 @@ function dados(over: Partial<CamadaDesempenho> = {}): CamadaDesempenho {
     fontePublica: par(),
     orcamentos: par(),
     recusas: par(),
-    contagem: { consultadas: 0, orcamentos: 0, recusas: 0, aConfirmar: 0, invalidos: 0 },
+    duvidas: par(),
+    contagem: { consultadas: 0, orcamentos: 0, recusas: 0, duvidas: 0, aConfirmar: 0, invalidos: 0 },
     tempoResposta: par(),
     emailsInvalidos: par(),
     propostasInvalidas: par(),
@@ -31,6 +32,19 @@ describe("IndicadoresDesempenho", () => {
     render(<IndicadoresDesempenho dados={dados()} />);
     expect(screen.getAllByText("—")).toHaveLength(10);
     expect(screen.queryByText("0%")).toBeNull();
+  });
+
+  it("o cartão Dúvidas mostra o percentual e a contagem sobre as consultas (não mais travessão fixo)", () => {
+    render(
+      <IndicadoresDesempenho
+        dados={dados({
+          duvidas: par({ valor: 30, base: 10, excluidos: 0 }),
+          contagem: { consultadas: 10, orcamentos: 2, recusas: 1, duvidas: 3, aConfirmar: 4, invalidos: 0 },
+        })}
+      />,
+    );
+    expect(screen.getByText("30%")).toBeInTheDocument();
+    expect(screen.getByText(/3 de 10 consultas · pediram esclarecimento/)).toBeInTheDocument();
   });
 
   it("mostra valor, cobertura com excluídos e a comparação com o período anterior", () => {

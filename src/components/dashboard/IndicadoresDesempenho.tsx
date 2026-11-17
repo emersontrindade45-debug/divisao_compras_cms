@@ -47,8 +47,9 @@ export function IndicadoresDesempenho({ dados }: { dados: CamadaDesempenho }) {
       />
       <MetricCard
         label="Dúvidas"
-        value="—"
-        hint="ainda não classificadas — hoje contam só orçamento e recusa"
+        value={valor(dados.duvidas.atual, "%")}
+        delta={delta(dados.duvidas, "maior_melhor", " p.p.")}
+        hint={`${dados.contagem.duvidas} de ${dados.contagem.consultadas} consultas · pediram esclarecimento`}
         icon={HelpCircle}
         href="/cotacoes"
       />
