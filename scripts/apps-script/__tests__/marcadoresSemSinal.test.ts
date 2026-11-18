@@ -591,6 +591,17 @@ describe("contextoDoFio_ e autorDoFio_", () => {
     ]);
   });
 
+  it("lê só as mensagens de que precisa: fio longo não é relido inteiro (custo de tempo no Google)", () => {
+    let leituras = 0;
+    const longo = Array.from({ length: 40 }, (_, i) => ({
+      getFrom: () => "a@forn.com.br",
+      getPlainBody: () => { leituras++; return `mensagem ${i}`; },
+    }));
+    const r = fioSrc.contexto(longo);
+    expect(r.map((x) => x.texto)).toEqual(["mensagem 37", "mensagem 38", "mensagem 39"]);
+    expect(leituras).toBe(3);
+  });
+
   it("pula mensagem sem texto e aceita fio sem anteriores", () => {
     expect(fioSrc.contexto([msg("a@forn.com.br", "   "), msg("compras@camarasantos.sp.gov.br", "pergunta")])).toEqual([
       { autor: "camara", texto: "pergunta" },

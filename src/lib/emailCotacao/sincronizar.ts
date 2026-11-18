@@ -45,6 +45,14 @@ export const MAX_IA_POR_LEITURA = 120;
  * em curso termina em ~10 s, então 26 s mantém a soma abaixo do limite no caso típico (~12 s de leitura).
  */
 export const PRAZO_IA_MS = 26_000;
+/**
+ * Limite da função serverless (maxDuration = 60) com folga. A leitura do Google pode levar até
+ * ~40 s; o que sobrar depois dela e do banco é o que a IA pode usar (CLAUDE.md §9.100: teto de
+ * tempo conferido como "já passei?" autoriza começar o que não cabe).
+ */
+export const LIMITE_FUNCAO_MS = 55_000;
+/** Um lote da IA em curso leva até ~10 s depois de o prazo ser conferido; reserva para ele. */
+const RESERVA_LOTE_IA_MS = 10_000;
 /** Quem ainda está na fila por falta de decisão: só estes ganham SUGESTÃO na tela. */
 const MOTIVOS_PARA_IA = ["sinais_ambiguos", "provavel_recusa", "provavel_orcamento", "provavel_duvida"];
 
@@ -94,7 +102,7 @@ function desfechoFinal(d: DesfechoConsulta): {
 
 export async function sincronizarRespostasEmail(
   payload: PayloadScript,
-  opcoes: { processoId?: string } = {},
+  opcoes: { processoId?: string; inicioEm?: number } = {},
 ): Promise<ResumoSincronizacao> {
   const processos = await db.processo.findMany({ select: { id: true, numero: true } });
 
@@ -334,9 +342,14 @@ export async function sincronizarRespostasEmail(
     }
   }
 
+  // Quanto da função já foi gasto (leitura do Google + banco) define quanto a IA pode usar. Sem
+  // `inicioEm` (chamador que não mede), vale o prazo fixo.
+  const gasto = opcoes.inicioEm === undefined ? 0 : Date.now() - opcoes.inicioEm;
+  const prazoIa = Math.min(PRAZO_IA_MS, LIMITE_FUNCAO_MS - gasto - RESERVA_LOTE_IA_MS);
   await classificarEmSombra(
     paraIa,
     new Set(pendentes.filter((p) => MOTIVOS_PARA_IA.includes(p.motivo)).map((p) => p.gmailMensagemId)),
+    prazoIa,
   );
 
   const finais = [...desfechos.values()].map((d) => ({ d, ...desfechoFinal(d) }));
@@ -392,9 +405,11 @@ export async function sincronizarRespostasEmail(
 async function classificarEmSombra(
   itens: Array<TrechoParaClassificar & { consultaId: string | null; regra: string }>,
   naFila: Set<string>,
+  prazoMs: number,
 ): Promise<void> {
   try {
-    if (itens.length === 0) return;
+    // Sem tempo para um lote inteiro: as respostas ficam para a leitura seguinte, não são perdidas.
+    if (itens.length === 0 || prazoMs <= 0) return;
     const feitas = await db.classificacaoIaResposta.findMany({
       where: { gmailMensagemId: { in: itens.map((i) => i.id) } },
       select: { gmailMensagemId: true },
@@ -403,7 +418,7 @@ async function classificarEmSombra(
     const alvo = itens.filter((i) => !jaFeitas.has(i.id)).slice(0, MAX_IA_POR_LEITURA);
     if (alvo.length === 0) return;
 
-    const { vereditos } = await classificarComIa(alvo, { prazoMs: PRAZO_IA_MS });
+    const { vereditos } = await classificarComIa(alvo, { prazoMs });
     if (vereditos.length === 0) return;
     const porId = new Map(alvo.map((a) => [a.id, a]));
 

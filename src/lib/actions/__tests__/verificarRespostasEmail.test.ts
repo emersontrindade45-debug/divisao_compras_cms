@@ -66,8 +66,20 @@ describe("verificarRespostasEmail", () => {
   it("passa o processo pedido ao núcleo (botão da página do processo)", async () => {
     vi.stubGlobal("fetch", responder(PAYLOAD_OK));
     await verificarRespostasEmail("ckqut11d0000abcdefghijklm");
-    expect(mocks.sincronizar).toHaveBeenCalledWith(PAYLOAD_OK, { processoId: "ckqut11d0000abcdefghijklm" });
+    expect(mocks.sincronizar).toHaveBeenCalledWith(PAYLOAD_OK, {
+      processoId: "ckqut11d0000abcdefghijklm",
+      inicioEm: expect.any(Number),
+    });
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/processos/ckqut11d0000abcdefghijklm");
+  });
+
+  it("repassa o instante de início da ação (o prazo da IA depende dele) e ele é de ANTES da leitura do Google", async () => {
+    const antes = Date.now();
+    vi.stubGlobal("fetch", responder(PAYLOAD_OK));
+    await verificarRespostasEmail();
+    const { inicioEm } = mocks.sincronizar.mock.calls[0]![1] as { inicioEm: number };
+    expect(inicioEm).toBeGreaterThanOrEqual(antes);
+    expect(inicioEm).toBeLessThanOrEqual(Date.now());
   });
 
   it("recusa id de processo que não é um cuid", async () => {

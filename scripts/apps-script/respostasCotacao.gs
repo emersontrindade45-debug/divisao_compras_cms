@@ -172,10 +172,12 @@ function ehAutomatica_(msg) {
 
 function metadadosDaMensagem_(msg, envio, anteriores) {
   var assunto = msg.getSubject();
-  var semCit = semCitacao_(msg.getPlainBody());
+  // O corpo é lido UMA vez: cada getPlainBody() é uma chamada ao serviço do Gmail.
+  var bruto = msg.getPlainBody();
+  var semCit = semCitacao_(bruto);
   var ehRecusa = provavelRecusa_(semCit);
   var sugestoes = sugestoesDoTexto_(semCit, ehRecusa);
-  var corpo = normalizar_(msg.getPlainBody());
+  var corpo = normalizar_(bruto);
   var anexos = msg.getAttachments({ includeInlineImages: false });
   var remetente = (/<([^>]+)>/.exec(msg.getFrom()) || [null, msg.getFrom()])[1].trim().toLowerCase();
   var ehDevolucao = REMETENTE_DEVOLUCAO.test(remetente);
@@ -186,8 +188,9 @@ function metadadosDaMensagem_(msg, envio, anteriores) {
   // até a que as regras já decidem, para o sistema poder comparar a IA com as regras. Devolução e
   // resposta automática ficam de fora (têm desfecho técnico). Sai ANONIMIZADO (anonimizarParaIa_:
   // sem e-mail, telefone, CNPJ/CPF, links e valores em R$) e o sistema não o grava.
-  var humana = !(ehDevolucao || ehAutomatica_(msg));
-  var trecho = humana ? anonimizarParaIa_(msg.getPlainBody(), LIMITE_TRECHO_IA) : "";
+  var automatica = ehAutomatica_(msg);
+  var humana = !(ehDevolucao || automatica);
+  var trecho = humana ? anonimizarParaIa_(bruto, LIMITE_TRECHO_IA) : "";
   var contexto = humana ? contextoDoFio_(anteriores) : [];
   var meta = {
     id: msg.getId(),
@@ -203,7 +206,7 @@ function metadadosDaMensagem_(msg, envio, anteriores) {
     enderecosDevolvidos: ehDevolucao
       ? enderecos_(msg.getHeader("X-Failed-Recipients"))
       : [],
-    automatica: ehAutomatica_(msg),
+    automatica: automatica,
     temAnexoOrcamento: temAnexo,
     anexosPdf: anexosPdf,
     anexosOutros: anexos.length - anexosPdf,
@@ -564,11 +567,15 @@ function autorDoFio_(msg) {
  */
 function contextoDoFio_(anteriores) {
   var saida = [];
-  (anteriores || []).forEach(function (m) {
-    var texto = anonimizarParaIa_(m.getPlainBody(), LIMITE_CONTEXTO_IA);
-    if (texto) saida.push({ autor: autorDoFio_(m), texto: texto });
-  });
-  return saida.slice(-3);
+  var lista = anteriores || [];
+  // De trás para frente, parando nas 3 primeiras COM texto. A versão que lia e anonimizava o fio
+  // inteiro para depois descartar quase tudo levou a leitura de 30 dias de ~12 s para 39,5 s (medido
+  // em 2026-11-18), no limite dos 40 s do sistema.
+  for (var i = lista.length - 1; i >= 0 && saida.length < 3; i--) {
+    var texto = anonimizarParaIa_(lista[i].getPlainBody(), LIMITE_CONTEXTO_IA);
+    if (texto) saida.unshift({ autor: autorDoFio_(lista[i]), texto: texto });
+  }
+  return saida;
 }
 
 /**

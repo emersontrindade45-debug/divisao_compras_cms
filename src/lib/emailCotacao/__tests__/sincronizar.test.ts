@@ -580,6 +580,31 @@ describe("sincronizarRespostasEmail", () => {
       expect(r.respostasNaFila).toBe(1);
     });
 
+    it("o prazo da IA é o que sobra dos 60 s da função depois da leitura do Google", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      ia([]);
+      // 30 s já gastos: 55 s de limite − 30 s − 10 s de reserva de lote = 15 s para a IA.
+      await sincronizarRespostasEmail(
+        { envios: [envio()], respostas: [resposta({ trecho: TRECHO })] },
+        { inicioEm: Date.now() - 30_000 },
+      );
+      const prazo = (mocks.classificarComIa.mock.calls[0]![1] as { prazoMs: number }).prazoMs;
+      expect(prazo).toBeGreaterThan(14_000);
+      expect(prazo).toBeLessThanOrEqual(15_000);
+    });
+
+    it("sem tempo para um lote inteiro, a IA nem é chamada e as respostas ficam para a leitura seguinte", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      // 48 s gastos: 55 − 48 − 10 < 0.
+      const r = await sincronizarRespostasEmail(
+        { envios: [envio()], respostas: [resposta({ trecho: TRECHO })] },
+        { inicioEm: Date.now() - 48_000 },
+      );
+      expect(mocks.classificarComIa).not.toHaveBeenCalled();
+      expect(r.respostasNaFila).toBe(1);
+      expect(mocks.db.classificacaoIaResposta.createMany).not.toHaveBeenCalled();
+    });
+
     it("respeita o teto por leitura e o prazo de tempo", async () => {
       armar({ existentes: ["g1"], jaTem: 3 });
       ia([]);

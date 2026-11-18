@@ -11,8 +11,11 @@ import {
 } from "@/lib/emailCotacao/sincronizar";
 import type { ActionResult } from "./processos";
 
-/** A leitura de 30 dias leva ~12 s no Google; o resto cabe folgado nos 60 s da função. */
-const TIMEOUT_SCRIPT_MS = 40_000;
+/**
+ * A leitura de 30 dias levava ~12 s no Google e, com o texto e o contexto para a IA, 39,5 s (medido
+ * em 2026-11-18). O que passar disso reduz o tempo da IA (ver `LIMITE_FUNCAO_MS`), não derruba a função.
+ */
+const TIMEOUT_SCRIPT_MS = 48_000;
 const JANELA_DIAS = 30;
 
 /** Fatia do histórico: começa `desdeDias` atrás e cobre `dias` (limites espelham o script). */
@@ -41,6 +44,8 @@ export async function verificarRespostasEmail(
   processoId?: string,
   janela?: JanelaLeitura,
 ): Promise<ActionResult<ResumoLeitura>> {
+  // Marca o início ANTES de qualquer espera: a IA usa só o que sobrar dos 60 s da função.
+  const inicioEm = Date.now();
   const user = await requireRole("pesquisa");
 
   const idValido = processoId === undefined || z.string().cuid().safeParse(processoId).success;
@@ -82,7 +87,7 @@ export async function verificarRespostasEmail(
   }
 
   try {
-    const resumo = await sincronizarRespostasEmail(payload.data, { processoId });
+    const resumo = await sincronizarRespostasEmail(payload.data, { processoId, inicioEm });
 
     await registrarAuditoria({
       userId: user.id,
