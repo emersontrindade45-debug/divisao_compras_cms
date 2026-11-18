@@ -23,6 +23,8 @@ function item(over: Partial<RespostaPendenteItem>): RespostaPendenteItem {
     processoNumero: "0382/2026",
     numeroNoAssunto: "382",
     sugestao: { email: "vendas@acme.com.br", razaoSocial: "ACME" },
+    sugestaoIa: null,
+    justificativaIa: null,
     linkGmail: "https://mail.google.com/x",
     ...over,
   };
@@ -81,5 +83,30 @@ describe("RespostasAConfirmar — sugestões de orçamento e dúvida", () => {
   it("mostra o rótulo do motivo para o analista", () => {
     render(<RespostasAConfirmar itens={[item({})]} />);
     expect(screen.getByText(/Possível dúvida/)).toBeInTheDocument();
+  });
+
+  describe("sugestão da IA", () => {
+    it("mostra o veredito e a justificativa da IA", () => {
+      render(<RespostasAConfirmar itens={[item({ sugestaoIa: "recusa", justificativaIa: "diz que não atende esse item" })]} />);
+      expect(screen.getByText("IA sugere: recusa")).toBeInTheDocument();
+      expect(screen.getByText("diz que não atende esse item")).toBeInTheDocument();
+    });
+
+    it("o veredito da IA manda no destaque: vale mais que o motivo da regra", () => {
+      render(<RespostasAConfirmar itens={[item({ motivo: "provavel_orcamento", sugestaoIa: "recusa", justificativaIa: "x" })]} />);
+      expect(destacado(/É recusa/)).toBe(true);
+      expect(destacado(/É orçamento/)).toBe(false);
+    });
+
+    it("sem veredito da IA, nada de selo e o destaque segue o motivo", () => {
+      render(<RespostasAConfirmar itens={[item({ motivo: "provavel_duvida" })]} />);
+      expect(screen.queryByText(/IA sugere/)).toBeNull();
+      expect(destacado(/É dúvida/)).toBe(true);
+    });
+
+    it("a IA ainda só sugere: nada é gravado até o analista clicar", () => {
+      render(<RespostasAConfirmar itens={[item({ sugestaoIa: "orcamento", justificativaIa: "x" })]} />);
+      expect(resolverMock).not.toHaveBeenCalled();
+    });
   });
 });

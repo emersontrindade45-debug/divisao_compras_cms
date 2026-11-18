@@ -5,6 +5,7 @@ import { ligarProcesso } from "@/lib/domain/cotacaoEmail/ligarProcesso";
 import { dominioDe, ligarRemetente } from "@/lib/domain/cotacaoEmail/ligarResposta";
 import { classificarResposta } from "@/lib/domain/cotacaoEmail/classificarResposta";
 import { buscarCandidatosPorEmail } from "./candidatos";
+import { classificarComIa } from "./classificarComIa";
 import type { PayloadScript, RespostaScript } from "./payload";
 
 /**
@@ -30,6 +31,14 @@ export interface ResumoSincronizacao {
 }
 
 const HORA_MS = 60 * 60 * 1000;
+/**
+ * Teto de mensagens enviadas à IA por leitura: 6 lotes de 8 em 4 paralelos cabem com folga no
+ * `maxDuration` (CLAUDE.md §9.92). O que passar do teto é lido na leitura seguinte — o filtro
+ * `sugestaoIa: null` torna isso retomável, sem repetir o que já foi classificado.
+ */
+export const MAX_IA_POR_LEITURA = 48;
+/** Quem ainda está na fila por falta de decisão: só estes valem a leitura da IA. */
+const MOTIVOS_PARA_IA = ["sinais_ambiguos", "provavel_recusa", "provavel_orcamento", "provavel_duvida"];
 const LOTE_CRIACAO = 1000;
 
 /** Ano do dia civil em Santos (UTC−3) — o ano que o assunto "382" costuma querer dizer. */
@@ -305,6 +314,11 @@ export async function sincronizarRespostasEmail(
     }
   }
 
+  await sugerirComIa(
+    pendentes.filter((p) => MOTIVOS_PARA_IA.includes(p.motivo)).map((p) => p.gmailMensagemId),
+    new Map(payload.respostas.flatMap((r) => (r.trecho ? [[r.id, r.trecho] as const] : []))),
+  );
+
   const finais = [...desfechos.values()].map((d) => ({ d, ...desfechoFinal(d) }));
   if (finais.length > 0) {
     await aplicarEmLote(
@@ -344,6 +358,34 @@ export async function sincronizarRespostasEmail(
     emailsInvalidos,
     enviosSemProcesso,
   };
+}
+
+/**
+ * Pede à IA o veredito das mensagens ainda sem sugestão e grava SÓ o veredito e a frase curta.
+ * Nunca derruba a leitura: qualquer falha deixa a fila como estava. O trecho não é guardado.
+ * Guarda atômica (§9.14): só escreve onde ainda não há sugestão e a resposta segue aberta.
+ */
+async function sugerirComIa(ids: string[], trechoPorId: Map<string, string>): Promise<void> {
+  try {
+    const comTrecho = ids.filter((id) => trechoPorId.has(id));
+    if (comTrecho.length === 0) return;
+    const abertas = await db.respostaEmailPendente.findMany({
+      where: { gmailMensagemId: { in: comTrecho }, sugestaoIa: null, resolvidaEm: null },
+      select: { gmailMensagemId: true },
+    });
+    const alvo = abertas.slice(0, MAX_IA_POR_LEITURA).map((a) => a.gmailMensagemId);
+    if (alvo.length === 0) return;
+
+    const { vereditos } = await classificarComIa(alvo.map((id) => ({ id, trecho: trechoPorId.get(id)! })));
+    for (const v of vereditos) {
+      await db.respostaEmailPendente.updateMany({
+        where: { gmailMensagemId: v.id, sugestaoIa: null, resolvidaEm: null },
+        data: { sugestaoIa: v.classe, justificativaIa: v.justificativa },
+      });
+    }
+  } catch {
+    // Sem log: a mensagem de erro de SDK/banco pode carregar o corpo da requisição (o trecho).
+  }
 }
 
 interface LinhaAplicar {

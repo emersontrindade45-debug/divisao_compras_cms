@@ -173,7 +173,15 @@ function metadadosDaMensagem_(msg, envio) {
   var corpo = normalizar_(msg.getPlainBody());
   var anexos = msg.getAttachments({ includeInlineImages: false });
   var remetente = (/<([^>]+)>/.exec(msg.getFrom()) || [null, msg.getFrom()])[1].trim().toLowerCase();
-  return {
+  var ehDevolucao = REMETENTE_DEVOLUCAO.test(remetente);
+  var temAnexo = anexos.some(function (a) { return EXTENSOES_ORCAMENTO.test(a.getName()); });
+  var frase = FRASES_RECUSA.some(function (f) { return corpo.indexOf(f) !== -1; });
+  // Trecho para a IA classificar (liberado pelo usuário em 2026-11-18): só das respostas que as
+  // regras NÃO decidem sozinhas — devolução, resposta automática, frase de recusa fixa e anexo de
+  // orçamento já têm desfecho. Sai ANONIMIZADO (anonimizar_: sem citação, assinatura, e-mail, link,
+  // CNPJ/CPF, telefone, valores e números; até 400 caracteres). O sistema não o grava.
+  var trecho = (ehDevolucao || ehAutomatica_(msg) || frase || temAnexo) ? "" : anonimizar_(msg.getPlainBody());
+  var meta = {
     id: msg.getId(),
     fio: msg.getThread().getId(),
     envioId: envio ? envio.id : null,
@@ -182,14 +190,14 @@ function metadadosDaMensagem_(msg, envio) {
     // O número do processo vem do ENVIO do mesmo fio; o assunto da resposta é só reserva.
     processo: (envio && envio.processo) || numeroProcessoDoAssunto_(assunto) || numeroProcessoDoCorpo_(corpo),
     remetenteEraDestinatario: envio ? envio.destinatarios.indexOf(remetente) !== -1 : false,
-    devolucao: REMETENTE_DEVOLUCAO.test(remetente),
+    devolucao: ehDevolucao,
     // Endereço que voltou: cabeçalho técnico do servidor, sem ler o texto da devolução.
-    enderecosDevolvidos: REMETENTE_DEVOLUCAO.test(remetente)
+    enderecosDevolvidos: ehDevolucao
       ? enderecos_(msg.getHeader("X-Failed-Recipients"))
       : [],
     automatica: ehAutomatica_(msg),
-    temAnexoOrcamento: anexos.some(function (a) { return EXTENSOES_ORCAMENTO.test(a.getName()); }),
-    contemRecusa: FRASES_RECUSA.some(function (f) { return corpo.indexOf(f) !== -1; }),
+    temAnexoOrcamento: temAnexo,
+    contemRecusa: frase,
     contemValor: /r\$\s*\d/.test(corpo),
     // Recusa em frase mais ampla que a lista fixa, sem a parte citada. Só SUGERE (vai à fila).
     provavelRecusa: ehRecusa,
@@ -198,6 +206,8 @@ function metadadosDaMensagem_(msg, envio) {
     provavelOrcamento: sugestoes.provavelOrcamento,
     provavelDuvida: sugestoes.provavelDuvida,
   };
+  if (trecho) meta.trecho = trecho;
+  return meta;
 }
 
 /**
@@ -692,7 +702,7 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify({
     // Diagnóstico sem conteúdo: só a conta que executa e contagens.
     diagnostico: {
-      versao: "sugestoes-1",
+      versao: "ia-1",
       contaEfetiva: Session.getEffectiveUser().getEmail(),
       contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
       fiosEncontrados: busca.fios.length,

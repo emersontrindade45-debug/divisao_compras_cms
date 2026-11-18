@@ -23,6 +23,9 @@ export interface RespostaPendenteItem {
   processoNumero: string | null;
   numeroNoAssunto: string | null;
   sugestao: { email: string; razaoSocial: string | null } | null;
+  /** Veredito da IA sobre o texto anonimizado. Só sugere; null = a IA não leu ou não teve certeza. */
+  sugestaoIa: string | null;
+  justificativaIa: string | null;
   linkGmail: string;
 }
 
@@ -32,6 +35,15 @@ const DESFECHO_SUGERIDO: Record<string, DesfechoResposta | undefined> = {
   provavel_recusa: "recusa",
   provavel_duvida: "duvida",
 };
+
+const ROTULO_IA: Record<string, string> = {
+  orcamento: "orçamento",
+  recusa: "recusa",
+  duvida: "dúvida",
+  nao_e_resposta: "não é resposta",
+};
+
+const DESFECHOS: readonly string[] = ["orcamento", "recusa", "duvida", "nao_e_resposta"];
 
 function Linha({ item }: { item: RespostaPendenteItem }) {
   const [pending, startTransition] = useTransition();
@@ -60,7 +72,9 @@ function Linha({ item }: { item: RespostaPendenteItem }) {
 
   const precisaEmail = !item.sugestao;
   const semFornecedor = pending || (precisaEmail && !emailConsulta.trim());
-  const sugerido = DESFECHO_SUGERIDO[item.motivo];
+  // A leitura da IA vale mais que a regra de palavras: ela viu a frase inteira.
+  const sugeridoIa = item.sugestaoIa && DESFECHOS.includes(item.sugestaoIa) ? (item.sugestaoIa as DesfechoResposta) : undefined;
+  const sugerido = sugeridoIa ?? DESFECHO_SUGERIDO[item.motivo];
 
   return (
     <li className="space-y-2 rounded-md border p-3">
@@ -80,6 +94,13 @@ function Linha({ item }: { item: RespostaPendenteItem }) {
         {item.contemRecusa && <Badge variant="secondary" className="text-xs">frase de recusa</Badge>}
         {item.contemValor && <Badge variant="secondary" className="text-xs">R$ no texto</Badge>}
       </div>
+
+      {sugeridoIa && (
+        <p className="text-sm">
+          <Badge variant="secondary" className="mr-2 text-xs">IA sugere: {ROTULO_IA[sugeridoIa]}</Badge>
+          {item.justificativaIa && <span className="text-muted-foreground">{item.justificativaIa}</span>}
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {item.sugestao ? (
@@ -113,7 +134,7 @@ function Linha({ item }: { item: RespostaPendenteItem }) {
           <Button size="sm" variant={sugerido === "duvida" ? "default" : "outline"} disabled={semFornecedor} onClick={() => resolver("duvida")}>
             É dúvida
           </Button>
-          <Button size="sm" variant="ghost" disabled={pending} onClick={() => resolver("nao_e_resposta")}>
+          <Button size="sm" variant={sugeridoIa === "nao_e_resposta" ? "outline" : "ghost"} disabled={pending} onClick={() => resolver("nao_e_resposta")}>
             Não é resposta
           </Button>
           <a

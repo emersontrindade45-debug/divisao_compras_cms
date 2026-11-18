@@ -38,6 +38,15 @@ describe("payloadScriptSchema", () => {
     expect(payloadScriptSchema.safeParse(comCorpo).success).toBe(false);
   });
 
+  it("aceita o 'trecho' anonimizado, mas continua recusando 'corpo' e trecho acima do teto", () => {
+    const ok = payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, trecho: "não atendemos" }] });
+    expect(ok.success).toBe(true);
+    const longo = payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, trecho: "x".repeat(601) }] });
+    expect(longo.success).toBe(false);
+    const corpo = payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, trecho: "x", corpo: "y" }] });
+    expect(corpo.success).toBe(false);
+  });
+
   it("o campo 'processo' não carrega texto livre", () => {
     const r = payloadScriptSchema.safeParse({
       envios: [{ ...envio, processo: "382 - Manutenção Predial" }],

@@ -4,6 +4,9 @@ import { z } from "zod";
  * Contrato do que o script do Google (scripts/apps-script/respostasCotacao.gs) devolve ao
  * sistema (M30.d). Validado com Zod ANTES de qualquer uso (CLAUDE.md §9.12).
  *
+ * Atualização 2026-11-18: o usuário liberou IA sobre o corpo das respostas (os e-mails não trazem
+ * valor de proposta), por isso existe o campo `trecho` — único texto livre aceito, anonimizado.
+ *
  * `.strict()` em todos os objetos é uma trava de SIGILO, não só de formato: se o script um dia
  * passar a devolver assunto, corpo ou qualquer campo fora da lista combinada, a leitura inteira
  * é rejeitada em vez de o dado entrar no sistema. Os tamanhos máximos servem ao mesmo fim — o
@@ -49,6 +52,12 @@ const respostaSchema = z
     provavelOrcamento: z.boolean().optional(),
     /** Pergunta do fornecedor, sem ser recusa, cobrança de retorno nem orçamento. Só SUGERE. */
     provavelDuvida: z.boolean().optional(),
+    /**
+     * Trecho do corpo JÁ ANONIMIZADO pelo script (sem valores, CNPJ, e-mail, telefone, links; até
+     * 400 caracteres), só para a IA classificar. Vive em memória durante a leitura: o sistema nunca
+     * o grava (a `sincronizar` o descarta depois da chamada) e o Sentry ignora o módulo.
+     */
+    trecho: z.string().max(600).optional(),
   })
   .strict();
 

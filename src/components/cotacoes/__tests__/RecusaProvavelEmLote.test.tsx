@@ -23,6 +23,8 @@ function item(over: Partial<RespostaPendenteItem>): RespostaPendenteItem {
     processoNumero: "0382/2026",
     numeroNoAssunto: "382",
     sugestao: { email: "vendas@acme.com.br", razaoSocial: "ACME" },
+    sugestaoIa: null,
+    justificativaIa: null,
     linkGmail: "https://mail.google.com/x",
     ...over,
   };

@@ -181,6 +181,8 @@ async function carregarRespostasPendentes(): Promise<RespostaPendenteItem[]> {
       contemRecusa: true,
       contemValor: true,
       sugestaoConsultaId: true,
+      sugestaoIa: true,
+      justificativaIa: true,
       envio: {
         select: { numeroProcessoAssunto: true, processo: { select: { numero: true } } },
       },
@@ -230,6 +232,8 @@ async function carregarRespostasPendentes(): Promise<RespostaPendenteItem[]> {
         processoNumero: p.envio.processo?.numero ?? null,
         numeroNoAssunto: p.envio.numeroProcessoAssunto,
         sugestao: s ? { email: s.email, razaoSocial: s.razaoSocial } : null,
+        sugestaoIa: p.sugestaoIa,
+        justificativaIa: p.justificativaIa,
         linkGmail: linkDoGmail(p.gmailMensagemId),
       };
     });
