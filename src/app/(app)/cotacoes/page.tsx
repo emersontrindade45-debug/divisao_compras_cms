@@ -8,6 +8,7 @@ import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cot
 import { AplicadasPelaIa, type AplicadaPelaIaItem } from "@/components/cotacoes/AplicadasPelaIa";
 import { OrcamentosPorPdfARevisar, type OrcamentoPdfRevisarItem } from "@/components/cotacoes/OrcamentosPorPdfARevisar";
 import { REGRAS_ORCAMENTO_POR_ANEXO } from "@/lib/domain/cotacaoEmail/regrasOrcamentoPorAnexo";
+import { listarEncerraveisNaoResposta } from "@/lib/emailCotacao/encerrarNaoResposta";
 import { aplicacaoIaLigada, listarAprovadasAplicaveis } from "@/lib/emailCotacao/aplicarIa";
 import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
 import { ChecklistProposta } from "@/components/cotacoes/ChecklistProposta";
@@ -33,7 +34,7 @@ export default async function CotacoesPage({
   await requireAuth();
   const { aba } = await searchParams;
 
-  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes] = await Promise.all([
+  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes, encerraveis] = await Promise.all([
     listarCotacoes(),
     buscarAlertas(),
     db.processo.findMany({
@@ -68,6 +69,7 @@ export default async function CotacoesPage({
     carregarAplicadasPelaIa(),
     carregarOrcamentosPdfARevisar(),
     contarAprovadasPendentes(),
+    contarEncerraveis(),
   ]);
 
   const cotacoes = cotacoesRaw.map((c) => ({
@@ -167,7 +169,7 @@ export default async function CotacoesPage({
         </TabsContent>
 
         <TabsContent value="confirmar">
-          <RespostasAConfirmar itens={respostasPendentes} />
+          <RespostasAConfirmar itens={respostasPendentes} encerraveis={encerraveis} />
         </TabsContent>
 
         <TabsContent value="revisar-pdf">
@@ -364,6 +366,15 @@ async function contarAprovadasPendentes(): Promise<number> {
   if (!aplicacaoIaLigada()) return 0;
   try {
     return (await listarAprovadasAplicaveis()).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Respostas sem fornecedor ligado que a IA leu como "não é resposta" com confiança alta. */
+async function contarEncerraveis(): Promise<number> {
+  try {
+    return (await listarEncerraveisNaoResposta()).length;
   } catch {
     return 0;
   }

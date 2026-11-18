@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { resolverRespostaEmail, type DesfechoResposta } from "@/lib/actions/resolverRespostaEmail";
 import { rotuloDoMotivo } from "@/lib/domain/cotacaoEmail/motivosFila";
 import { RecusaProvavelEmLote } from "@/components/cotacoes/RecusaProvavelEmLote";
+import { EncerrarNaoRespostaEmLote } from "@/components/cotacoes/EncerrarNaoRespostaEmLote";
 
 export interface RespostaPendenteItem {
   id: string;
@@ -156,7 +157,7 @@ function Linha({ item }: { item: RespostaPendenteItem }) {
  * processo, data e o link para abrir o e-mail NO Gmail — nunca o corpo do e-mail, que não é
  * guardado. O valor do orçamento não entra aqui: a proposta segue pelo checklist de validade.
  */
-export function RespostasAConfirmar({ itens }: { itens: RespostaPendenteItem[] }) {
+export function RespostasAConfirmar({ itens, encerraveis = 0 }: { itens: RespostaPendenteItem[]; encerraveis?: number }) {
   if (itens.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -170,6 +171,7 @@ export function RespostasAConfirmar({ itens }: { itens: RespostaPendenteItem[] }
     .map((i) => i.id);
   return (
     <div className="space-y-3">
+      <EncerrarNaoRespostaEmLote quantas={encerraveis} />
       {idsRecusaProvavel.length > 0 && <RecusaProvavelEmLote ids={idsRecusaProvavel} />}
       <ul className="space-y-2" aria-label="Respostas a confirmar">
         {itens.map((i) => (
