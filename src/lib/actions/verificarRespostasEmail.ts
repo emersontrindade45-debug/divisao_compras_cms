@@ -90,7 +90,7 @@ export async function verificarRespostasEmail(
   const googleMs = Date.now() - googleIniciou;
   try {
     const sincronizarIniciou = Date.now();
-    const resumo = await sincronizarRespostasEmail(payload.data, { processoId, inicioEm });
+    const resumo = await sincronizarRespostasEmail(payload.data, { processoId, inicioEm, userId: user.id });
     const sincronizarMs = Date.now() - sincronizarIniciou;
 
     await registrarAuditoria({

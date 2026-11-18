@@ -133,4 +133,26 @@ describe("classificarResposta", () => {
       expect(c({ contemValor: true })).toEqual({ acao: "fila", motivo: "sinais_ambiguos" });
     });
   });
+
+  describe("PDF deixa de decidir sozinho (pdfDecideSozinho: false) — conferido pelo analista em 2026-11-18", () => {
+    const sem = (o: Partial<MarcadoresResposta>) => classificarResposta({ ...base, ...o }, { pdfDecideSozinho: false });
+
+    it("anexo em PDF sozinho vai à fila com motivo próprio, em vez de aplicar 'orçamento'", () => {
+      expect(sem({ temAnexoOrcamento: true })).toEqual({ acao: "fila", motivo: "anexo_pdf" });
+    });
+
+    it("sem a opção, o comportamento histórico se mantém (PDF aplica orçamento)", () => {
+      expect(c({ temAnexoOrcamento: true })).toEqual({ acao: "aplicar", situacao: "orcamento", regra: "anexo_orcamento" });
+      expect(classificarResposta({ ...base, temAnexoOrcamento: true }, {})).toEqual({ acao: "aplicar", situacao: "orcamento", regra: "anexo_orcamento" });
+    });
+
+    it("a frase fixa de recusa continua aplicando recusa", () => {
+      expect(sem({ contemRecusa: true })).toEqual({ acao: "aplicar", situacao: "recusa", regra: "frase_recusa" });
+    });
+
+    it("devolução e resposta automática seguem inalteradas", () => {
+      expect(sem({ devolucao: true, temAnexoOrcamento: true })).toEqual({ acao: "devolucao" });
+      expect(sem({ automatica: true, temAnexoOrcamento: true })).toEqual({ acao: "ignorar", motivo: "automatica" });
+    });
+  });
 });

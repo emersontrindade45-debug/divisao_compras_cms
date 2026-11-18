@@ -87,6 +87,8 @@ describe("verificarRespostasEmail", () => {
     expect(mocks.sincronizar).toHaveBeenCalledWith(PAYLOAD_OK, {
       processoId: "ckqut11d0000abcdefghijklm",
       inicioEm: expect.any(Number),
+      // A IA só aplica com um usuário a quem atribuir a ação (auditoria).
+      userId: expect.any(String),
     });
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/processos/ckqut11d0000abcdefghijklm");
   });

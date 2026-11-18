@@ -13,15 +13,19 @@ const mocks = vi.hoisted(() => ({
     fornecedor: { findMany: vi.fn() },
     respostaEmailPendente: { createMany: vi.fn(), updateMany: vi.fn(), findMany: vi.fn() },
     classificacaoIaResposta: { findMany: vi.fn(), createMany: vi.fn(), updateMany: vi.fn() },
+    auditLog: { createMany: vi.fn() },
     emailInvalido: { createMany: vi.fn() },
     $executeRaw: vi.fn(),
   },
   buscarCandidatosPorEmail: vi.fn(),
   classificarComIa: vi.fn(),
+  ligada: vi.fn(),
+  aplicar: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
+vi.mock("../aplicarIa", () => ({ aplicacaoIaLigada: mocks.ligada, aplicarClassificacaoIa: mocks.aplicar }));
 vi.mock("../classificarComIa", () => ({ classificarComIa: mocks.classificarComIa, MODELO_REVISOR: "modelo-revisor" }));
 vi.mock("../candidatos", () => ({ buscarCandidatosPorEmail: mocks.buscarCandidatosPorEmail }));
 
@@ -99,6 +103,9 @@ describe("sincronizarRespostasEmail", () => {
     mocks.db.fornecedor.findMany.mockResolvedValue([]);
     mocks.db.respostaEmailPendente.createMany.mockResolvedValue({ count: 0 });
     mocks.db.respostaEmailPendente.findMany.mockResolvedValue([]);
+    mocks.ligada.mockReturnValue(false);
+    mocks.aplicar.mockResolvedValue("aplicada");
+    mocks.db.auditLog.createMany.mockResolvedValue({ count: 0 });
     mocks.classificarComIa.mockResolvedValue({ vereditos: [], lotesComFalha: 0 });
     mocks.db.emailInvalido.createMany.mockResolvedValue({ count: 0 });
     mocks.db.$executeRaw.mockResolvedValue(0);
@@ -743,6 +750,110 @@ describe("sincronizarRespostasEmail", () => {
         expect(valores).toContain("a_confirmar");
         expect(valores).not.toContain("recusa");
         expect(mocks.db.respostaEmailPendente.updateMany.mock.calls.every((c) => c[0].data.resolvidaEm === undefined)).toBe(true);
+      });
+    });
+
+    describe("aplicação da IA (Fase 3b) — só com a chave ligada", () => {
+      const aprovar = (classe = "recusa") =>
+        mocks.classificarComIa.mockResolvedValue({
+          vereditos: [{ id: "m1", classe, confianca: "alta", justificativa: "x", evidenciaOk: true, evidenciaDizEnvio: false }],
+          lotesComFalha: 0,
+          lotesAdiados: 0,
+        });
+      const rodar = (extra: object = { userId: "u1" }) =>
+        sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] }, extra);
+
+      it("chave DESLIGADA: o critério aprova, mas nada é aplicado", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        aprovar();
+        const r = await rodar();
+        expect(mocks.classificarComIa).toHaveBeenCalledTimes(2);
+        expect(mocks.aplicar).not.toHaveBeenCalled();
+        expect(r.aplicadasPelaIa).toBe(0);
+      });
+
+      it("chave LIGADA: aplica o que o critério aprovou, com a classe, a consulta e a data da resposta", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        aprovar();
+        const r = await rodar();
+        expect(mocks.aplicar).toHaveBeenCalledWith({
+          gmailMensagemId: "m1",
+          classe: "recusa",
+          consultaId: "c0",
+          dataResposta: new Date("2026-11-17T10:00:00.000Z"),
+        });
+        expect(r.aplicadasPelaIa).toBe(1);
+      });
+
+      it("registra a aplicação na auditoria, atribuída ao usuário, só com ids e classe", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        aprovar();
+        await rodar();
+        expect(mocks.db.auditLog.createMany).toHaveBeenCalledWith({
+          data: [{ userId: "u1", acao: "ia_aplicar_resposta_email", detalhes: { gmailMensagemId: "m1", consultaId: "c0", classe: "recusa" } }],
+        });
+        expect(JSON.stringify(mocks.db.auditLog.createMany.mock.calls)).not.toContain("TRECHO-MARCADOR");
+      });
+
+      it("sem usuário para atribuir a ação, não aplica (toda ação é rastreável por usuário)", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        aprovar();
+        await rodar({});
+        expect(mocks.aplicar).not.toHaveBeenCalled();
+      });
+
+      it("critério reprovado (revisor discorda): nada é aplicado mesmo com a chave ligada", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        mocks.classificarComIa
+          .mockResolvedValueOnce({ vereditos: [{ id: "m1", classe: "recusa", confianca: "alta", justificativa: "x", evidenciaOk: true, evidenciaDizEnvio: false }], lotesComFalha: 0, lotesAdiados: 0 })
+          .mockResolvedValueOnce({ vereditos: [{ id: "m1", classe: "duvida", confianca: "alta", justificativa: "x", evidenciaOk: true, evidenciaDizEnvio: false }], lotesComFalha: 0, lotesAdiados: 0 });
+        await rodar();
+        expect(mocks.aplicar).not.toHaveBeenCalled();
+      });
+
+      it("aplicação que não se concretizou (analista já resolveu) não entra na contagem nem na auditoria", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        mocks.aplicar.mockResolvedValue("ja_resolvida");
+        aprovar();
+        const r = await rodar();
+        expect(r.aplicadasPelaIa).toBe(0);
+        expect(mocks.db.auditLog.createMany).not.toHaveBeenCalled();
+      });
+
+      it("a aplicação roda DEPOIS de as regras gravarem as consultas", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        aprovar();
+        const ordem: string[] = [];
+        mocks.db.$executeRaw.mockImplementation(async () => { ordem.push("regras"); return 0; });
+        mocks.aplicar.mockImplementation(async () => { ordem.push("ia"); return "aplicada"; });
+        await rodar();
+        expect(ordem.indexOf("regras")).toBeGreaterThanOrEqual(0);
+        expect(ordem.indexOf("ia")).toBeGreaterThan(ordem.lastIndexOf("regras"));
+      });
+
+      it("com a chave ligada, PDF sozinho vai à fila (não aplica orçamento) e a IA o lê", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        aprovar("orcamento");
+        await sincronizarRespostasEmail(
+          { envios: [envio()], respostas: [resposta({ temAnexoOrcamento: true, anexosPdf: 1, trecho: TRECHO })] },
+          { userId: "u1" },
+        );
+        expect(mocks.db.respostaEmailPendente.createMany.mock.calls[0]![0].data[0]).toMatchObject({ motivo: "anexo_pdf" });
+        expect(mocks.db.classificacaoIaResposta.createMany.mock.calls[0]![0].data[0]).toMatchObject({ regra: "fila:anexo_pdf", criterioOk: true });
+        expect(mocks.aplicar).toHaveBeenCalledWith(expect.objectContaining({ classe: "orcamento" }));
+      });
+
+      it("com a chave desligada, PDF sozinho continua aplicando orçamento (comportamento histórico)", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ temAnexoOrcamento: true })] }, { userId: "u1" });
+        expect(mocks.db.respostaEmailPendente.createMany).not.toHaveBeenCalled();
       });
     });
   });

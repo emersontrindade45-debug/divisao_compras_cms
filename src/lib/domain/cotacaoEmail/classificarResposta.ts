@@ -30,10 +30,29 @@ export type ResultadoClassificacao =
   | { acao: "aplicar"; situacao: "orcamento" | "recusa"; regra: RegraClassificacao }
   | {
       acao: "fila";
-      motivo: "sinais_ambiguos" | "provavel_recusa" | "provavel_orcamento" | "provavel_duvida";
+      motivo:
+        | "sinais_ambiguos"
+        | "provavel_recusa"
+        | "provavel_orcamento"
+        | "provavel_duvida"
+        | "anexo_pdf";
     };
 
-export function classificarResposta(m: MarcadoresResposta): ResultadoClassificacao {
+export interface OpcoesClassificacao {
+  /**
+   * O anexo em PDF, sozinho, define "orçamento". Padrão: sim (comportamento histórico). Em 2026-11-18
+   * o analista conferiu 11 casos em que a regra dizia "orçamento" por causa de um PDF e a IA, que
+   * dizia outra coisa, estava certa nos 11 — PDF anexado não basta (TR devolvido, apresentação da
+   * empresa, PDF junto de recusa ou pergunta). Com a aplicação da IA ligada, o PDF passa a ser só um
+   * sinal: a resposta vai à fila, e a IA decide (o critério exige o PDF OU o texto que envia).
+   */
+  pdfDecideSozinho?: boolean;
+}
+
+export function classificarResposta(
+  m: MarcadoresResposta,
+  opcoes: OpcoesClassificacao = {},
+): ResultadoClassificacao {
   if (m.devolucao) return { acao: "devolucao" };
   if (m.automatica) return { acao: "ignorar", motivo: "automatica" };
 
@@ -43,6 +62,7 @@ export function classificarResposta(m: MarcadoresResposta): ResultadoClassificac
   const sinalRecusa = m.contemRecusa;
 
   if (sinalOrcamento && !sinalRecusa) {
+    if (opcoes.pdfDecideSozinho === false) return { acao: "fila", motivo: "anexo_pdf" };
     return { acao: "aplicar", situacao: "orcamento", regra: "anexo_orcamento" };
   }
   if (sinalRecusa && !sinalOrcamento && !m.contemValor) {

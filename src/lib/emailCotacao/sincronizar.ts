@@ -5,8 +5,9 @@ import { ligarProcesso } from "@/lib/domain/cotacaoEmail/ligarProcesso";
 import { dominioDe, ligarRemetente } from "@/lib/domain/cotacaoEmail/ligarResposta";
 import { classificarResposta } from "@/lib/domain/cotacaoEmail/classificarResposta";
 import { buscarCandidatosPorEmail } from "./candidatos";
-import { avaliarCriterioIa } from "@/lib/domain/cotacaoEmail/criterioIa";
+import { avaliarCriterioIa, type ClasseResposta } from "@/lib/domain/cotacaoEmail/criterioIa";
 import { classificarComIa, MODELO_REVISOR, type TrechoParaClassificar } from "./classificarComIa";
+import { aplicacaoIaLigada, aplicarClassificacaoIa } from "./aplicarIa";
 import type { PayloadScript, RespostaScript } from "./payload";
 
 /**
@@ -29,6 +30,8 @@ export interface ResumoSincronizacao {
   respostasNaFila: number;
   emailsInvalidos: number;
   enviosSemProcesso: number;
+  /** Respostas que a IA aplicou nas consultas nesta leitura (só com a chave ligada). */
+  aplicadasPelaIa?: number;
 }
 
 const HORA_MS = 60 * 60 * 1000;
@@ -59,10 +62,23 @@ export const LIMITE_FUNCAO_MS = 55_000;
  */
 const RESERVA_LOTE_IA_MS = 10_000;
 /** Resposta a ser lida pela IA, com o que as regras já disseram sobre ela. */
-type ItemParaIa = TrechoParaClassificar & { consultaId: string | null; regra: string; contemRecusa: boolean };
+type ItemParaIa = TrechoParaClassificar & {
+  consultaId: string | null;
+  regra: string;
+  contemRecusa: boolean;
+  dataResposta: Date;
+};
+
+/** O que o critério aprovou, pronto para ser aplicado (só com a chave ligada). */
+interface Aprovada {
+  id: string;
+  classe: ClasseResposta;
+  consultaId: string;
+  dataResposta: Date;
+}
 
 /** Quem ainda está na fila por falta de decisão: só estes ganham SUGESTÃO na tela. */
-const MOTIVOS_PARA_IA = ["sinais_ambiguos", "provavel_recusa", "provavel_orcamento", "provavel_duvida"];
+const MOTIVOS_PARA_IA = ["sinais_ambiguos", "provavel_recusa", "provavel_orcamento", "provavel_duvida", "anexo_pdf"];
 
 /** Ano do dia civil em Santos (UTC−3) — o ano que o assunto "382" costuma querer dizer. */
 function anoEmSantos(instante: Date): number {
@@ -110,7 +126,7 @@ function desfechoFinal(d: DesfechoConsulta): {
 
 export async function sincronizarRespostasEmail(
   payload: PayloadScript,
-  opcoes: { processoId?: string; inicioEm?: number } = {},
+  opcoes: { processoId?: string; inicioEm?: number; userId?: string } = {},
 ): Promise<ResumoSincronizacao> {
   const processos = await db.processo.findMany({ select: { id: true, numero: true } });
 
@@ -235,6 +251,8 @@ export async function sincronizarRespostasEmail(
     enviosEscopo.map((e) => [e.id, e.destinatarios.map(minusculo)]),
   );
 
+  // Com a aplicação da IA ligada o PDF deixa de decidir sozinho (ver `classificarResposta`).
+  const iaAplica = aplicacaoIaLigada();
   const desfechos = new Map<string, DesfechoConsulta>();
   const pendentes: Array<{
     gmailMensagemId: string;
@@ -256,7 +274,7 @@ export async function sincronizarRespostasEmail(
     const envio = r.envioId ? envioPorGmail.get(r.envioId) : undefined;
     if (!r.envioId || !envio) continue;
     const data = new Date(r.data);
-    const resultado = classificarResposta(r);
+    const resultado = classificarResposta(r, { pdfDecideSozinho: !iaAplica });
 
     if (resultado.acao === "ignorar") continue;
     if (resultado.acao === "devolucao") {
@@ -295,6 +313,7 @@ export async function sincronizarRespostasEmail(
         consultaId: consulta ?? null,
         regra: motivoFila !== null ? `fila:${motivoFila}` : `aplicar:${situacao}`,
         contemRecusa: r.contemRecusa,
+        dataResposta: data,
       });
     }
 
@@ -355,7 +374,7 @@ export async function sincronizarRespostasEmail(
   // `inicioEm` (chamador que não mede), vale o prazo fixo.
   const gasto = opcoes.inicioEm === undefined ? 0 : Date.now() - opcoes.inicioEm;
   const prazoIa = Math.min(PRAZO_IA_MS, LIMITE_FUNCAO_MS - gasto - RESERVA_LOTE_IA_MS);
-  await classificarEmSombra(
+  const aprovadas = await classificarEmSombra(
     paraIa,
     new Set(pendentes.filter((p) => MOTIVOS_PARA_IA.includes(p.motivo)).map((p) => p.gmailMensagemId)),
     prazoIa,
@@ -389,6 +408,39 @@ export async function sincronizarRespostasEmail(
     await marcarDevolvidos(devolvidos);
   }
 
+  // APLICAÇÃO DA IA — só com a chave ligada e com um usuário a quem atribuir a ação (auditoria).
+  // Roda DEPOIS de as regras gravarem as consultas: a "situação anterior" que o desfazer restaura
+  // é a que ficou depois delas.
+  let aplicadasPelaIa = 0;
+  if (iaAplica && opcoes.userId && aprovadas.length > 0) {
+    const userId = opcoes.userId;
+    for (let i = 0; i < aprovadas.length; i += 5) {
+      const resultados = await Promise.all(
+        aprovadas.slice(i, i + 5).map(async (a) => {
+          const r = await aplicarClassificacaoIa({
+            gmailMensagemId: a.id,
+            classe: a.classe,
+            consultaId: a.consultaId,
+            dataResposta: a.dataResposta,
+          });
+          return { a, r };
+        }),
+      );
+      const feitas = resultados.filter((x) => x.r === "aplicada");
+      aplicadasPelaIa += feitas.length;
+      if (feitas.length > 0) {
+        await db.auditLog.createMany({
+          data: feitas.map(({ a }) => ({
+            userId,
+            acao: "ia_aplicar_resposta_email",
+            // Só ids e a classe — nenhum endereço nem texto.
+            detalhes: { gmailMensagemId: a.id, consultaId: a.consultaId, classe: a.classe },
+          })),
+        });
+      }
+    }
+  }
+
   const enviosSemProcesso = await db.envioCotacao.count({ where: { processoId: null } });
 
   return {
@@ -399,6 +451,7 @@ export async function sincronizarRespostasEmail(
     respostasNaFila: pendentes.length,
     emailsInvalidos,
     enviosSemProcesso,
+    aplicadasPelaIa,
   };
 }
 
@@ -415,10 +468,10 @@ async function classificarEmSombra(
   itens: ItemParaIa[],
   naFila: Set<string>,
   prazoMs: number,
-): Promise<void> {
+): Promise<Aprovada[]> {
   try {
     // Sem tempo para um lote inteiro: as respostas ficam para a leitura seguinte, não são perdidas.
-    if (itens.length === 0 || prazoMs <= 0) return;
+    if (itens.length === 0 || prazoMs <= 0) return [];
     const inicio = Date.now();
     const feitas = await db.classificacaoIaResposta.findMany({
       where: { gmailMensagemId: { in: itens.map((i) => i.id) } },
@@ -429,10 +482,10 @@ async function classificarEmSombra(
     // leitura, que o traz de novo, pode completá-la. Sem isto ela ficaria sem revisão para sempre.
     const semRevisao = new Set(feitas.filter((f) => f.criterioRazao === "sem_revisao").map((f) => f.gmailMensagemId));
     const alvo = itens.filter((i) => !jaFeitas.has(i.id) || semRevisao.has(i.id)).slice(0, MAX_IA_POR_LEITURA);
-    if (alvo.length === 0) return;
+    if (alvo.length === 0) return [];
 
     const { vereditos } = await classificarComIa(alvo, { prazoMs });
-    if (vereditos.length === 0) return;
+    if (vereditos.length === 0) return [];
     const porId = new Map(alvo.map((a) => [a.id, a]));
 
     // SEGUNDA leitura, por outro modelo que não viu a primeira, só do que está na fila (é onde a
@@ -503,8 +556,17 @@ async function classificarEmSombra(
         ),
       );
     }
+
+    // O que o critério aprovou — quem decide se aplica é o chamador, e só com a chave ligada.
+    return linhas.flatMap((l) => {
+      const item = porId.get(l.gmailMensagemId);
+      return l.criterioOk && item?.consultaId
+        ? [{ id: l.gmailMensagemId, classe: l.classeIa as ClasseResposta, consultaId: item.consultaId, dataResposta: item.dataResposta }]
+        : [];
+    });
   } catch {
     // Sem log: a mensagem de erro de SDK/banco pode carregar o corpo da requisição (o texto).
+    return [];
   }
 }
 

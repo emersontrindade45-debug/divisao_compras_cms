@@ -1,10 +1,11 @@
-import { Mail, Send, ClipboardCheck, MailQuestion } from "lucide-react";
+import { Mail, Send, ClipboardCheck, MailQuestion, Bot } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CotacoesTableReal } from "@/components/cotacoes/CotacoesTableReal";
 import { SelecaoFornecedoresForm } from "@/components/cotacoes/SelecaoFornecedoresForm";
 import { VerificarRespostasButton } from "@/components/cotacoes/VerificarRespostasButton";
 import { HistoricoRespostasButton } from "@/components/cotacoes/HistoricoRespostasButton";
 import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cotacoes/RespostasAConfirmar";
+import { AplicadasPelaIa, type AplicadaPelaIaItem } from "@/components/cotacoes/AplicadasPelaIa";
 import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
 import { ChecklistProposta } from "@/components/cotacoes/ChecklistProposta";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
@@ -29,7 +30,7 @@ export default async function CotacoesPage({
   await requireAuth();
   const { aba } = await searchParams;
 
-  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes] = await Promise.all([
+  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa] = await Promise.all([
     listarCotacoes(),
     buscarAlertas(),
     db.processo.findMany({
@@ -61,6 +62,7 @@ export default async function CotacoesPage({
       take: 20,
     }),
     carregarRespostasPendentes(),
+    carregarAplicadasPelaIa(),
   ]);
 
   const cotacoes = cotacoesRaw.map((c) => ({
@@ -112,7 +114,7 @@ export default async function CotacoesPage({
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
 
-      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : "painel"} className="space-y-4">
+      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : aba === "ia" ? "ia" : "painel"} className="space-y-4">
         <TabsList>
           <TabsTrigger value="painel" className="gap-2">
             <Mail className="size-3.5" />
@@ -131,6 +133,13 @@ export default async function CotacoesPage({
               </span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="ia" className="gap-2">
+            <Bot className="size-3.5" />
+            Aplicadas pela IA
+            {aplicadasPelaIa.length > 0 && (
+              <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">{aplicadasPelaIa.length}</span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="propostas" className="gap-2">
             <ClipboardCheck className="size-3.5" />
             Validação de propostas
@@ -147,6 +156,10 @@ export default async function CotacoesPage({
 
         <TabsContent value="confirmar">
           <RespostasAConfirmar itens={respostasPendentes} />
+        </TabsContent>
+
+        <TabsContent value="ia">
+          <AplicadasPelaIa itens={aplicadasPelaIa} />
         </TabsContent>
 
         <TabsContent value="propostas" className="space-y-4">
@@ -235,6 +248,49 @@ async function carregarRespostasPendentes(): Promise<RespostaPendenteItem[]> {
         sugestaoIa: p.sugestaoIa,
         justificativaIa: p.justificativaIa,
         linkGmail: linkDoGmail(p.gmailMensagemId),
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Respostas que a IA classificou sozinha e que ainda não foram desfeitas (M30.d, Fase 3b). `catch`
+ * devolve lista vazia: a página precisa abrir também antes da migration que cria as colunas (§9.19).
+ * `select` explícito em tudo (§9.46).
+ */
+async function carregarAplicadasPelaIa(): Promise<AplicadaPelaIaItem[]> {
+  try {
+    const linhas = await db.classificacaoIaResposta.findMany({
+      where: { aplicadaEm: { not: null }, desfeitaEm: null },
+      orderBy: { aplicadaEm: "desc" },
+      take: 200,
+      select: { gmailMensagemId: true, classeIa: true, justificativa: true, aplicadaEm: true, consultaId: true },
+    });
+    if (linhas.length === 0) return [];
+
+    const consultaIds = linhas.map((l) => l.consultaId).filter((x): x is string => x !== null);
+    const consultas = await db.consultaCotacao.findMany({
+      where: { id: { in: consultaIds } },
+      select: {
+        id: true,
+        email: true,
+        razaoSocial: true,
+        envio: { select: { numeroProcessoAssunto: true, processo: { select: { numero: true } } } },
+      },
+    });
+    const porId = new Map(consultas.map((c) => [c.id, c]));
+    return linhas.map((l) => {
+      const c = l.consultaId ? porId.get(l.consultaId) : undefined;
+      return {
+        gmailMensagemId: l.gmailMensagemId,
+        classe: l.classeIa,
+        justificativa: l.justificativa,
+        aplicadaEm: (l.aplicadaEm as Date).toISOString(),
+        processoNumero: c?.envio.processo?.numero ?? c?.envio.numeroProcessoAssunto ?? null,
+        fornecedor: c ? (c.razaoSocial ?? c.email) : null,
+        linkGmail: linkDoGmail(l.gmailMensagemId),
       };
     });
   } catch {
