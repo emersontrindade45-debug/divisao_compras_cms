@@ -1228,6 +1228,14 @@ model ClassificacaoIaResposta {
   criterioOk      Boolean  @default(false)
   /// Por que o critério falhou/passou, em código curto (ex.: "revisor_discorda").
   criterioRazao   String?
+  /// Quando a IA APLICOU este veredito na consulta (só com a chave IA_APLICAR_AUTOMATICO ligada).
+  aplicadaEm      DateTime?
+  /// Situação da consulta ANTES da aplicação — é o que o "Desfazer" restaura.
+  situacaoAnterior String?
+  /// A aplicação preencheu a data de resposta da consulta (o "Desfazer" a limpa).
+  dataRespostaDefinida Boolean @default(false)
+  /// Quando o analista desfez a aplicação. Aplicação desfeita nunca é refeita.
+  desfeitaEm      DateTime?
   createdAt       DateTime @default(now())
 
   @@index([createdAt])
