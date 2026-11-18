@@ -41,7 +41,12 @@ var FRASES_RECUSA = [
   "nao participaremos", "não participaremos", "sem interesse",
 ];
 
-var EXTENSOES_ORCAMENTO = /\.(pdf|xlsx?|docx?|ods|odt)$/i;
+/**
+ * Anexo que conta como orçamento: SÓ PDF (decisão do usuário, 2026-11-18). A Divisão envia dois
+ * arquivos — o TR em PDF e o modelo em Word para o fornecedor preencher — e o fornecedor devolve o
+ * orçamento em PDF. Word/Excel/imagem anexados NÃO bastam: vão para a fila.
+ */
+var EXTENSOES_ORCAMENTO = /\.pdf$/i;
 
 /** Extrai "382" de "RE: Solicitação de Orçamento Proc. 382 - …" (Proc / Proc. / Processo). */
 function numeroProcessoDoAssunto_(assunto) {
@@ -356,14 +361,16 @@ function provavelRecusa_(texto) {
 }
 
 /**
- * Texto que ENTREGA ou CONFIRMA um orçamento sem anexo reconhecido: "segue o orçamento/proposta/
- * cotação (em anexo)", "valores mantidos", "os valores estão corretos", "a proposta … permanece
- * válida". Só SUGERE (vai à fila). Não casa "segue em anexo foto…" (sem orçamento/proposta por
- * perto) nem cobrança de retorno ("já analisou a proposta?").
+ * Texto em que o fornecedor ENTREGA o orçamento: "segue o orçamento/proposta/cotação (em anexo)".
+ * Só SUGERE (vai à fila). Definição do usuário (2026-11-18): orçamento é o que o corpo diz que está
+ * enviando, ou o anexo em PDF; tudo o mais é dúvida, questionamento ou conversa. Por isso "valores
+ * mantidos", "os valores estão corretos" e "a proposta permanece válida" NÃO entram aqui: são
+ * respostas a uma pergunta nossa, sobre uma proposta já enviada. Não casa "segue em anexo foto…"
+ * (sem orçamento/proposta por perto) nem cobrança de retorno ("já analisou a proposta?").
  */
 function provavelOrcamento_(texto) {
   var t = normalizar_(semAssinatura_(texto));
-  return /(segue|seguem|em anexo)[^.]{0,40}(or[cç]amento|proposta|cota[cç][aã]o)|(or[cç]amento|proposta|cota[cç][aã]o)[^.]{0,40}(em anexo|anexa|anexo)|valores mantidos|valores? (est[aã]o|ficam) corretos?|proposta[\s\S]{0,120}permanece v[aá]lida/.test(t);
+  return /(segue|seguem|em anexo)[^.]{0,40}(or[cç]amento|proposta|cota[cç][aã]o)|(or[cç]amento|proposta|cota[cç][aã]o)[^.]{0,40}(em anexo|anexa|anexo)/.test(t);
 }
 
 /**
@@ -702,7 +709,7 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify({
     // Diagnóstico sem conteúdo: só a conta que executa e contagens.
     diagnostico: {
-      versao: "ia-1",
+      versao: "ia-2",
       contaEfetiva: Session.getEffectiveUser().getEmail(),
       contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
       fiosEncontrados: busca.fios.length,

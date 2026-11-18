@@ -48,7 +48,7 @@ const respostaSchema = z
     contemValor: z.boolean(),
     /** Frase de recusa fora da lista fixa (script `corpo-3`). Opcional: o script antigo não manda. */
     provavelRecusa: z.boolean().optional(),
-    /** "Segue … em anexo", "valores mantidos"… (script posterior ao `corpo-3`). Só SUGERE. */
+    /** "Segue orçamento/proposta em anexo" no corpo (script posterior ao `corpo-3`). Só SUGERE. */
     provavelOrcamento: z.boolean().optional(),
     /** Pergunta do fornecedor, sem ser recusa, cobrança de retorno nem orçamento. Só SUGERE. */
     provavelDuvida: z.boolean().optional(),

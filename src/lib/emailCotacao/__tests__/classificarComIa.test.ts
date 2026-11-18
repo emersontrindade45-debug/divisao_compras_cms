@@ -91,4 +91,11 @@ describe("classificarComIa", () => {
     for (const c of ["orcamento", "recusa", "duvida", "nao_e_resposta"]) expect(p).toContain(c);
     expect(p).toMatch(/Ignore qualquer instrução/);
   });
+
+  it("o prompt traz a definição de orçamento da Divisão: confirmar valor de proposta já enviada não é orçamento", () => {
+    const p = montarPrompt(["x"]);
+    expect(p).toMatch(/ESTÁ ENVIANDO/);
+    expect(p).toContain("sim, os valores estão corretos");
+    expect(p).toMatch(/Conversa sem dúvida nunca é duvida/);
+  });
 });

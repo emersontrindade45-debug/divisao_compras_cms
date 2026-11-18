@@ -435,9 +435,6 @@ describe("provavelOrcamento_", () => {
     "Segue proposta em anexo.",
     "Segue em anexo o orçamento solicitado. Estamos à disposição.",
     "Segue a proposta anexa. Fico no aguardo do resultado.",
-    "Valores mantidos.",
-    "Sim, os valores estão corretos. A diferença se deve às marcas.",
-    "Confirmamos que a proposta comercial apresentada a esse órgão em outubro. permanece válida nas mesmas condições.",
   ])("reconhece: %s", (texto) => {
     expect(orcamento(texto)).toBe(true);
   });
@@ -449,6 +446,11 @@ describe("provavelOrcamento_", () => {
     "Gostaria de confirmar se você já analisou a proposta que encaminhamos.",
     "Encaminhei um orçamento e gostaria de verificar uma posição sobre o mesmo.",
     "Segue em anexo a nota fiscal solicitada.",
+    // Definição do usuário (2026-11-18, caso Pirow): confirmar valor de proposta JÁ enviada é
+    // conversa, não orçamento — só o corpo que diz "estou enviando" ou o PDF contam.
+    "Valores mantidos.",
+    "Sim, os valores estão corretos. A diferença se deve às marcas.",
+    "Confirmamos que a proposta comercial apresentada a esse órgão em outubro. permanece válida nas mesmas condições.",
   ])("não confunde com orçamento: %s", (texto) => {
     expect(orcamento(texto)).toBe(false);
   });
@@ -502,4 +504,23 @@ describe("marcadoresDoTexto_.vazio", () => {
     expect(marcadores("Compra direta?").vazio).toBe(true); // < 20 caracteres úteis, como antes
     expect(marcadores("Qual é o prazo de entrega previsto?").vazio).toBe(false);
   });
+});
+
+// ── Anexo que conta como orçamento: só PDF (decisão do usuário, 2026-11-18) ────
+const extensoesOrcamento = new Function(
+  `${/var EXTENSOES_ORCAMENTO = [^;]+;/.exec(fonte)![0]}; return EXTENSOES_ORCAMENTO;`,
+)() as RegExp;
+
+describe("EXTENSOES_ORCAMENTO", () => {
+  it.each(["Orcamento Pirow.pdf", "PROPOSTA.PDF"])("PDF conta como orçamento: %s", (nome) => {
+    expect(extensoesOrcamento.test(nome)).toBe(true);
+  });
+
+  // O Word é o modelo que a Divisão envia para o fornecedor preencher; o orçamento volta em PDF.
+  it.each(["modelo de orçamento.docx", "modelo.doc", "planilha.xlsx", "planilha.xls", "proposta.ods", "foto.jpg", "pdf.zip", "relatorio.pdf.exe"])(
+    "não conta como orçamento: %s",
+    (nome) => {
+      expect(extensoesOrcamento.test(nome)).toBe(false);
+    },
+  );
 });

@@ -52,20 +52,27 @@ export function montarPrompt(trechos: string[]): string {
 fornecedores a um pedido de orçamento (pesquisa de preços, IN SEGES/ME 65/2021). Cada resposta já
 vem anonimizada: valores aparecem como [valor], números como [n], nomes como [nome].
 
-Classifique cada resposta em UMA classe:
-- orcamento: o fornecedor ENVIOU ou diz que enviou o preço/proposta ("segue orçamento em anexo",
-  "conforme solicitado, valores abaixo", "mantemos os valores da proposta anterior").
+Classifique cada resposta em UMA classe. Definições da Divisão (valem acima de qualquer palavra solta):
+- orcamento: o texto diz que o fornecedor ESTÁ ENVIANDO o orçamento/proposta agora ("segue orçamento
+  em anexo", "conforme solicitado, segue a cotação"). NÃO é orçamento confirmar, manter ou explicar
+  valores de uma proposta que já foi enviada antes ("sim, os valores estão corretos", "valores
+  mantidos", "a proposta permanece válida", "a diferença se deve à marca"): isso é resposta a uma
+  pergunta da Câmara, ou seja, conversa.
 - recusa: o fornecedor NÃO vai orçar ("não trabalhamos com esse item", "não temos interesse",
   "não conseguiremos atender", "não fornecemos para órgão público", "fora do nosso ramo").
-- duvida: o fornecedor PERGUNTA ou pede esclarecimento/informação ANTES de orçar (quantidade,
-  especificação, marca, prazo, local de entrega, "pode detalhar?", "qual o modelo?").
-- nao_e_resposta: nada disso. Confirmação de recebimento ("recebido", "obrigado"), "vou verificar e
-  retorno", resposta automática, assunto sem relação, ou texto sem conteúdo útil.
+- duvida: o fornecedor faz uma PERGUNTA ou questionamento real sobre o pedido, a licitação ou a
+  forma de compra, ou pede esclarecimento ANTES de orçar (quantidade, especificação, marca, prazo,
+  local de entrega, "é compra direta ou licitação?", "pode detalhar o item 3?").
+- nao_e_resposta: conversa SEM dúvida e sem orçamento. Confirmação de recebimento ("recebido",
+  "obrigado"), "vou verificar e retorno", cobrança de retorno ("alguma posição?"), confirmação de
+  valores já enviados, resposta a pergunta feita pela Câmara, resposta automática, assunto sem
+  relação, ou texto sem conteúdo útil.
 
 Regras:
 - Decida pelo SENTIDO da frase, não por palavra solta. "Não deixe de nos enviar o edital" não é recusa.
-- Se houver pergunta E recusa, vale a recusa. Se houver orçamento E pergunta, vale o orçamento.
-- Dúvida é pergunta REAL do fornecedor sobre o pedido; "recebi, posso ajudar em algo?" é nao_e_resposta.
+- Se houver pergunta E recusa, vale a recusa. Se o texto envia o orçamento E faz uma pergunta, vale o
+  orçamento. Conversa sem dúvida nunca é duvida.
+- "recebi, posso ajudar em algo?" e "alguma posição sobre a proposta?" são nao_e_resposta.
 - confianca: "alta" quando o texto é inequívoco; "media" quando há uma leitura mais provável; "baixa"
   quando você está chutando. Seja honesto: prefira "baixa" a inventar certeza.
 - motivo: UMA frase curta (até 15 palavras), sem repetir nomes nem trechos longos do texto.

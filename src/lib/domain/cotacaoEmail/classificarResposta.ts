@@ -10,12 +10,13 @@
 export interface MarcadoresResposta {
   devolucao: boolean;
   automatica: boolean;
+  /** Anexo em PDF (só PDF conta — o Word/Excel é o modelo que a Divisão envia para preencher). */
   temAnexoOrcamento: boolean;
   contemRecusa: boolean;
   contemValor: boolean;
   /** Frase de recusa fora da lista fixa; ausente no payload do script antigo. */
   provavelRecusa?: boolean;
-  /** Texto que entrega ou confirma um orçamento ("segue em anexo…"); ausente no script antigo. */
+  /** Corpo que diz estar ENVIANDO o orçamento ("segue orçamento em anexo"); ausente no script antigo. */
   provavelOrcamento?: boolean;
   /** Pergunta do fornecedor; ausente no script antigo. */
   provavelDuvida?: boolean;
