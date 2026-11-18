@@ -422,10 +422,13 @@ async function classificarEmSombra(
     const inicio = Date.now();
     const feitas = await db.classificacaoIaResposta.findMany({
       where: { gmailMensagemId: { in: itens.map((i) => i.id) } },
-      select: { gmailMensagemId: true },
+      select: { gmailMensagemId: true, criterioRazao: true },
     });
     const jaFeitas = new Set(feitas.map((f) => f.gmailMensagemId));
-    const alvo = itens.filter((i) => !jaFeitas.has(i.id)).slice(0, MAX_IA_POR_LEITURA);
+    // Linha gravada SEM a segunda leitura (faltou tempo): o texto não é guardado, então só esta
+    // leitura, que o traz de novo, pode completá-la. Sem isto ela ficaria sem revisão para sempre.
+    const semRevisao = new Set(feitas.filter((f) => f.criterioRazao === "sem_revisao").map((f) => f.gmailMensagemId));
+    const alvo = itens.filter((i) => !jaFeitas.has(i.id) || semRevisao.has(i.id)).slice(0, MAX_IA_POR_LEITURA);
     if (alvo.length === 0) return;
 
     const { vereditos } = await classificarComIa(alvo, { prazoMs });
@@ -442,37 +445,49 @@ async function classificarEmSombra(
       for (const v of rev.vereditos) segundas.set(v.id, v);
     }
 
-    await db.classificacaoIaResposta.createMany({
-      data: vereditos.map((v) => {
-        const item = porId.get(v.id)!;
-        const segunda = segundas.get(v.id);
-        // O critério só vale para o que está na fila. O que as regras já aplicaram não passa por ele.
-        const criterio = naFila.has(v.id)
-          ? avaliarCriterioIa({
-              primeira: { classe: v.classe, confianca: v.confianca, evidenciaOk: v.evidenciaOk },
-              segunda: segunda ? { classe: segunda.classe, evidenciaOk: segunda.evidenciaOk } : undefined,
-              anexosPdf: item.anexosPdf ?? 0,
-              // O envio pode ser provado por qualquer das duas citações.
-              evidenciaDizEnvio: v.evidenciaDizEnvio || (segunda?.evidenciaDizEnvio ?? false),
-              motivoFila: item.regra.startsWith("fila:") ? item.regra.slice("fila:".length) : "",
-              contemRecusa: item.contemRecusa,
-            })
-          : null;
-        return {
-          gmailMensagemId: v.id,
-          consultaId: item.consultaId,
-          classeIa: v.classe,
-          confianca: v.confianca,
-          justificativa: v.justificativa,
-          regra: item.regra,
-          segundaClasse: segunda?.classe ?? null,
-          evidenciaOk: v.evidenciaOk && (segunda?.evidenciaOk ?? false),
-          criterioOk: criterio?.ok ?? false,
-          criterioRazao: criterio?.razao ?? null,
-        };
-      }),
-      skipDuplicates: true,
+    const linhas = vereditos.map((v) => {
+      const item = porId.get(v.id)!;
+      const segunda = segundas.get(v.id);
+      // O critério só vale para o que está na fila. O que as regras já aplicaram não passa por ele.
+      const criterio = naFila.has(v.id)
+        ? avaliarCriterioIa({
+            primeira: { classe: v.classe, confianca: v.confianca, evidenciaOk: v.evidenciaOk },
+            segunda: segunda ? { classe: segunda.classe, evidenciaOk: segunda.evidenciaOk } : undefined,
+            anexosPdf: item.anexosPdf ?? 0,
+            // O envio pode ser provado por qualquer das duas citações.
+            evidenciaDizEnvio: v.evidenciaDizEnvio || (segunda?.evidenciaDizEnvio ?? false),
+            motivoFila: item.regra.startsWith("fila:") ? item.regra.slice("fila:".length) : "",
+            contemRecusa: item.contemRecusa,
+          })
+        : null;
+      return {
+        gmailMensagemId: v.id,
+        consultaId: item.consultaId,
+        classeIa: v.classe,
+        confianca: v.confianca,
+        justificativa: v.justificativa,
+        regra: item.regra,
+        segundaClasse: segunda?.classe ?? null,
+        evidenciaOk: v.evidenciaOk && (segunda?.evidenciaOk ?? false),
+        criterioOk: criterio?.ok ?? false,
+        criterioRazao: criterio?.razao ?? null,
+      };
     });
+
+    const novas = linhas.filter((l) => !semRevisao.has(l.gmailMensagemId));
+    const refeitas = linhas.filter((l) => semRevisao.has(l.gmailMensagemId));
+    if (novas.length > 0) await db.classificacaoIaResposta.createMany({ data: novas, skipDuplicates: true });
+    // Completa a linha que ficou sem revisão. Guarda: só se ela ainda está sem revisão (§9.14).
+    for (let i = 0; i < refeitas.length; i += 10) {
+      await Promise.all(
+        refeitas.slice(i, i + 10).map((l) =>
+          db.classificacaoIaResposta.updateMany({
+            where: { gmailMensagemId: l.gmailMensagemId, criterioRazao: "sem_revisao" },
+            data: l,
+          }),
+        ),
+      );
+    }
 
     const sugestoes = vereditos.filter((v) => v.confianca !== "baixa" && naFila.has(v.id));
     // Em blocos paralelos: até 120 updates em fila, um a um, somavam segundos de uma função de 60 s.

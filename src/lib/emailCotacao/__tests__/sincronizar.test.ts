@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
     consultaCotacao: { groupBy: vi.fn(), createMany: vi.fn(), findMany: vi.fn() },
     fornecedor: { findMany: vi.fn() },
     respostaEmailPendente: { createMany: vi.fn(), updateMany: vi.fn(), findMany: vi.fn() },
-    classificacaoIaResposta: { findMany: vi.fn(), createMany: vi.fn() },
+    classificacaoIaResposta: { findMany: vi.fn(), createMany: vi.fn(), updateMany: vi.fn() },
     emailInvalido: { createMany: vi.fn() },
     $executeRaw: vi.fn(),
   },
@@ -700,6 +700,38 @@ describe("sincronizarRespostasEmail", () => {
           respostas: [resposta({ trecho: TRECHO, anexosPdf: 1 })],
         });
         expect(gravado()).toMatchObject({ criterioOk: true, criterioRazao: "ok" });
+      });
+
+      it("linha que ficou SEM revisão (faltou tempo) é relida e completada na leitura seguinte", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.db.classificacaoIaResposta.findMany.mockResolvedValue([{ gmailMensagemId: "m1", criterioRazao: "sem_revisao" }]);
+        mocks.db.classificacaoIaResposta.updateMany.mockResolvedValue({ count: 1 });
+        ia([veredito("m1")]);
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(mocks.classificarComIa).toHaveBeenCalledTimes(2); // primeira leitura de novo + revisor
+        expect(mocks.db.classificacaoIaResposta.createMany).not.toHaveBeenCalled();
+        expect(mocks.db.classificacaoIaResposta.updateMany).toHaveBeenCalledWith({
+          where: { gmailMensagemId: "m1", criterioRazao: "sem_revisao" },
+          data: expect.objectContaining({ segundaClasse: "recusa", criterioOk: true, criterioRazao: "ok" }),
+        });
+      });
+
+      it("linha com qualquer outra razão (já revisada) NÃO é relida: ninguém paga duas vezes", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.db.classificacaoIaResposta.findMany.mockResolvedValue([{ gmailMensagemId: "m1", criterioRazao: "revisor_discorda" }]);
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(mocks.classificarComIa).not.toHaveBeenCalled();
+        expect(mocks.db.classificacaoIaResposta.updateMany).not.toHaveBeenCalled();
+      });
+
+      it("se ainda faltar tempo, a linha continua 'sem_revisao' e fica para a próxima leitura", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.db.classificacaoIaResposta.findMany.mockResolvedValue([{ gmailMensagemId: "m1", criterioRazao: "sem_revisao" }]);
+        mocks.db.classificacaoIaResposta.updateMany.mockResolvedValue({ count: 1 });
+        mocks.classificarComIa.mockResolvedValueOnce({ vereditos: [veredito("m1")], lotesComFalha: 0, lotesAdiados: 0 });
+        vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(40_000);
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(mocks.db.classificacaoIaResposta.updateMany.mock.calls[0]![0].data).toMatchObject({ criterioRazao: "sem_revisao" });
       });
 
       it("NUNCA aplica: nenhuma escrita em consulta por causa do veredito da IA (modo sombra)", async () => {
