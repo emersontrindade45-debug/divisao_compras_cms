@@ -61,6 +61,13 @@ export const LIMITE_FUNCAO_MS = 55_000;
  * esta reserva não precisa cobrir lote em curso.
  */
 const RESERVA_LOTE_IA_MS = 10_000;
+/**
+ * Reserva EXTRA quando a aplicação automática está ligada: cada aprovada é uma transação (e uma
+ * linha de auditoria), e até 120 por leitura somavam ~6 s depois da IA — o suficiente para passar de
+ * 60 s e dar 504 no "Importar histórico" (2026-11-18). O que não couber fica para o botão "Aplicar
+ * as já aprovadas", porque o critério já foi gravado.
+ */
+const RESERVA_APLICACAO_IA_MS = 10_000;
 /** Resposta a ser lida pela IA, com o que as regras já disseram sobre ela. */
 type ItemParaIa = TrechoParaClassificar & {
   consultaId: string | null;
@@ -373,7 +380,10 @@ export async function sincronizarRespostasEmail(
   // Quanto da função já foi gasto (leitura do Google + banco) define quanto a IA pode usar. Sem
   // `inicioEm` (chamador que não mede), vale o prazo fixo.
   const gasto = opcoes.inicioEm === undefined ? 0 : Date.now() - opcoes.inicioEm;
-  const prazoIa = Math.min(PRAZO_IA_MS, LIMITE_FUNCAO_MS - gasto - RESERVA_LOTE_IA_MS);
+  const prazoIa = Math.min(
+    PRAZO_IA_MS,
+    LIMITE_FUNCAO_MS - gasto - RESERVA_LOTE_IA_MS - (iaAplica ? RESERVA_APLICACAO_IA_MS : 0),
+  );
   const aprovadas = await classificarEmSombra(
     paraIa,
     new Set(pendentes.filter((p) => MOTIVOS_PARA_IA.includes(p.motivo)).map((p) => p.gmailMensagemId)),
@@ -415,6 +425,8 @@ export async function sincronizarRespostasEmail(
   if (iaAplica && opcoes.userId && aprovadas.length > 0) {
     const userId = opcoes.userId;
     for (let i = 0; i < aprovadas.length; i += 5) {
+      // Sem tempo: o resto fica aprovado no banco e sai pelo botão "Aplicar as já aprovadas".
+      if (opcoes.inicioEm !== undefined && Date.now() - opcoes.inicioEm > LIMITE_FUNCAO_MS - 3_000) break;
       const resultados = await Promise.all(
         aprovadas.slice(i, i + 5).map(async (a) => {
           const r = await aplicarClassificacaoIa({

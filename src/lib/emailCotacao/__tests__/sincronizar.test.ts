@@ -825,6 +825,54 @@ describe("sincronizarRespostasEmail", () => {
         expect(mocks.db.auditLog.createMany).not.toHaveBeenCalled();
       });
 
+      it("com a chave ligada o prazo da IA reserva 10 s extras para aplicar (evita o 504 do histórico)", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        aprovar();
+        await rodar({ userId: "u1", inicioEm: Date.now() - 20_000 });
+        // 55 − 20 − 10 (lote) − 10 (aplicação) = 15 s; sem a chave seriam 25 s.
+        const prazo = (mocks.classificarComIa.mock.calls[0]![1] as { prazoMs: number }).prazoMs;
+        expect(prazo).toBeGreaterThan(14_000);
+        expect(prazo).toBeLessThanOrEqual(15_000);
+      });
+
+      describe("relógio avança durante a IA", () => {
+        const rodarComSalto = async (saltoMs: number) => {
+          // O salto vale na 2ª chamada (a do revisor): a 1ª leitura é rápida e o critério ainda aprova.
+          mocks.classificarComIa.mockReset(); // sem fila de "Once" deixada por testes anteriores
+          mocks.aplicar.mockResolvedValue("aplicada");
+          armar({ existentes: ["g1"], jaTem: 3 });
+          mocks.ligada.mockReturnValue(true);
+          vi.useFakeTimers({ toFake: ["Date"] });
+          const inicio = Date.now();
+          mocks.classificarComIa.mockImplementation(async () => {
+            if (mocks.classificarComIa.mock.calls.length >= 2) vi.setSystemTime(inicio + saltoMs);
+            return {
+              vereditos: [{ id: "m1", classe: "recusa", confianca: "alta", justificativa: "x", evidenciaOk: true, evidenciaDizEnvio: false }],
+              lotesComFalha: 0,
+              lotesAdiados: 0,
+            };
+          });
+          try {
+            return await rodar({ userId: "u1", inicioEm: inicio });
+          } finally {
+            vi.useRealTimers();
+          }
+        };
+
+        it("controle positivo: com tempo de sobra, aplica", async () => {
+          const r = await rodarComSalto(5_000);
+          expect(mocks.aplicar).toHaveBeenCalledTimes(1);
+          expect(r.aplicadasPelaIa).toBe(1);
+        });
+
+        it("passou do limite da função durante a IA: não começa a aplicar (o botão do acervo cobre o resto)", async () => {
+          const r = await rodarComSalto(53_000);
+          expect(mocks.aplicar).not.toHaveBeenCalled();
+          expect(r.aplicadasPelaIa).toBe(0);
+        });
+      });
+
       it("a aplicação roda DEPOIS de as regras gravarem as consultas", async () => {
         armar({ existentes: ["g1"], jaTem: 3 });
         mocks.ligada.mockReturnValue(true);
