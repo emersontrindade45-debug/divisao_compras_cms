@@ -41,10 +41,28 @@ describe("payloadScriptSchema", () => {
   it("aceita o 'trecho' anonimizado, mas continua recusando 'corpo' e trecho acima do teto", () => {
     const ok = payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, trecho: "não atendemos" }] });
     expect(ok.success).toBe(true);
-    const longo = payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, trecho: "x".repeat(601) }] });
+    const longo = payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, trecho: "x".repeat(1601) }] });
     expect(longo.success).toBe(false);
     const corpo = payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, trecho: "x", corpo: "y" }] });
     expect(corpo.success).toBe(false);
+  });
+
+  it("aceita contexto do fio (até 3 mensagens) e contagem de anexos; recusa campo fora da lista", () => {
+    const ok = payloadScriptSchema.safeParse({
+      envios: [],
+      respostas: [{
+        ...resposta, trecho: "x", anexosPdf: 1, anexosOutros: 0,
+        contexto: [{ autor: "camara", texto: "pergunta" }, { autor: "fornecedor", texto: "resposta" }],
+      }],
+    });
+    expect(ok.success).toBe(true);
+    const quatro = Array.from({ length: 4 }, () => ({ autor: "camara", texto: "x" }));
+    expect(payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, contexto: quatro }] }).success).toBe(false);
+    const autorInvalido = [{ autor: "terceiro", texto: "x" }];
+    expect(payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, contexto: autorInvalido }] }).success).toBe(false);
+    const comNome = [{ autor: "camara", texto: "x", remetente: "a@b.com" }];
+    expect(payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, contexto: comNome }] }).success).toBe(false);
+    expect(payloadScriptSchema.safeParse({ envios: [], respostas: [{ ...resposta, anexosPdf: -1 }] }).success).toBe(false);
   });
 
   it("o campo 'processo' não carrega texto livre", () => {

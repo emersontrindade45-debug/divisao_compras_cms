@@ -524,3 +524,78 @@ describe("EXTENSOES_ORCAMENTO", () => {
     },
   );
 });
+
+// ── Texto para a IA: anonimização, conversa do fio e autor (2026-11-18) ────────
+const trechoDe = (nome: string) => new RegExp(`function ${nome}[\\s\\S]*?\\n}\\n`).exec(fonte)![0];
+const caixaSrc = /var CAIXA_ESPERADA = [^;]+;/.exec(fonte)![0];
+const paraIa = new Function(
+  `${trechoDe("semCitacao_")}\n${trechoDe("anonimizarParaIa_")}; return anonimizarParaIa_;`,
+)() as (corpo: string, limite: number) => string;
+const fioSrc = new Function(
+  `${caixaSrc}\n${trechoDe("enderecos_")}\n${trechoDe("semCitacao_")}\n${trechoDe("anonimizarParaIa_")}\n${trechoDe("autorDoFio_")}\n${trechoDe("contextoDoFio_")}
+   var LIMITE_CONTEXTO_IA = 600; return { autor: autorDoFio_, contexto: contextoDoFio_ };`,
+)() as {
+  autor: (m: { getFrom: () => string }) => string;
+  contexto: (ms: Array<{ getFrom: () => string; getPlainBody: () => string }>) => Array<{ autor: string; texto: string }>;
+};
+const msg = (de: string, corpo: string) => ({ getFrom: () => de, getPlainBody: () => corpo });
+
+describe("anonimizarParaIa_", () => {
+  it("preserva o que a IA precisa para ler uma dúvida: modalidade, item, quantidade, data e marcas", () => {
+    expect(paraIa("Compra Direta ou Pregão Eletrônico?", 1500)).toBe("Compra Direta ou Pregão Eletrônico?");
+    expect(paraIa("Podem confirmar o Item 2, 250 unidades, entrega até 30/10, marca Samsung?", 1500)).toBe(
+      "Podem confirmar o Item 2, 250 unidades, entrega até 30/10, marca Samsung?",
+    );
+  });
+
+  it("mascara o que identifica ou vale dinheiro: e-mail, telefone, CNPJ, CPF, link e valor em R$", () => {
+    const out = paraIa(
+      "Fale com joao@acme.com.br ou (13) 99999-8888. CNPJ 12.345.678/0001-90, CPF 123.456.789-09, https://acme.com.br/p. Total R$ 1.234,56.",
+      1500,
+    );
+    expect(out).toContain("[email]");
+    expect(out).toContain("[tel]");
+    expect(out).toContain("[link]");
+    expect(out).toContain("[valor]");
+    expect(out).not.toMatch(/joao@|99999|12\.345|123\.456|acme\.com|1\.234/);
+  });
+
+  it("corta a parte citada e a assinatura, e tira o nome da saudação", () => {
+    const corpo = "Olá Ana, boa tarde.\n\nSim, os valores estão corretos.\n\nAtenciosamente,\nJoão Silva\n\nDe: Divisão de Compras\nAssunto: Re: Solicitação";
+    expect(paraIa(corpo, 1500)).toBe("Sim, os valores estão corretos.");
+  });
+
+  it("respeita o limite de tamanho", () => {
+    expect(paraIa("palavra ".repeat(500), 100).length).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("contextoDoFio_ e autorDoFio_", () => {
+  it("classifica o autor: a caixa e qualquer @camarasantos são Câmara; o resto é fornecedor", () => {
+    expect(fioSrc.autor(msg("Divisão <compras@camarasantos.sp.gov.br>", ""))).toBe("camara");
+    expect(fioSrc.autor(msg("Douglas <douglas@camarasantos.sp.gov.br>", ""))).toBe("camara");
+    expect(fioSrc.autor(msg("Contato <contato@pirow.com.br>", ""))).toBe("fornecedor");
+  });
+
+  it("devolve só as 3 últimas, da mais antiga à mais recente, com autor e texto anonimizado", () => {
+    const fio = [
+      msg("a@forn.com.br", "primeira"),
+      msg("compras@camarasantos.sp.gov.br", "segunda, fale com x@y.com"),
+      msg("a@forn.com.br", "terceira"),
+      msg("compras@camarasantos.sp.gov.br", "quarta"),
+    ];
+    expect(fioSrc.contexto(fio)).toEqual([
+      { autor: "camara", texto: "segunda, fale com [email]" },
+      { autor: "fornecedor", texto: "terceira" },
+      { autor: "camara", texto: "quarta" },
+    ]);
+  });
+
+  it("pula mensagem sem texto e aceita fio sem anteriores", () => {
+    expect(fioSrc.contexto([msg("a@forn.com.br", "   "), msg("compras@camarasantos.sp.gov.br", "pergunta")])).toEqual([
+      { autor: "camara", texto: "pergunta" },
+    ]);
+    expect(fioSrc.contexto([])).toEqual([]);
+    expect(fioSrc.contexto(undefined as never)).toEqual([]);
+  });
+});

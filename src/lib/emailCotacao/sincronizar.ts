@@ -5,7 +5,7 @@ import { ligarProcesso } from "@/lib/domain/cotacaoEmail/ligarProcesso";
 import { dominioDe, ligarRemetente } from "@/lib/domain/cotacaoEmail/ligarResposta";
 import { classificarResposta } from "@/lib/domain/cotacaoEmail/classificarResposta";
 import { buscarCandidatosPorEmail } from "./candidatos";
-import { classificarComIa } from "./classificarComIa";
+import { classificarComIa, type TrechoParaClassificar } from "./classificarComIa";
 import type { PayloadScript, RespostaScript } from "./payload";
 
 /**
@@ -31,15 +31,22 @@ export interface ResumoSincronizacao {
 }
 
 const HORA_MS = 60 * 60 * 1000;
-/**
- * Teto de mensagens enviadas à IA por leitura: 6 lotes de 8 em 4 paralelos cabem com folga no
- * `maxDuration` (CLAUDE.md §9.92). O que passar do teto é lido na leitura seguinte — o filtro
- * `sugestaoIa: null` torna isso retomável, sem repetir o que já foi classificado.
- */
-export const MAX_IA_POR_LEITURA = 48;
-/** Quem ainda está na fila por falta de decisão: só estes valem a leitura da IA. */
-const MOTIVOS_PARA_IA = ["sinais_ambiguos", "provavel_recusa", "provavel_orcamento", "provavel_duvida"];
 const LOTE_CRIACAO = 1000;
+
+/**
+ * Teto de mensagens enviadas à IA por leitura. 120 = 15 lotes de 8; com 8 em paralelo são ~2 ondas
+ * de ~10 s, dentro do prazo abaixo (CLAUDE.md §9.92). O que passar do teto, ou do prazo, fica para
+ * a leitura seguinte — o filtro por "já classificada" torna isso retomável sem repetir cobrança.
+ */
+export const MAX_IA_POR_LEITURA = 120;
+/**
+ * A função tem 60 s e a leitura do Google já gastou até ~40 s no pior caso (TIMEOUT_SCRIPT_MS), mais
+ * o banco. O prazo só vale para COMEÇAR lotes (classificarComIa o confere antes de cada um); o lote
+ * em curso termina em ~10 s, então 26 s mantém a soma abaixo do limite no caso típico (~12 s de leitura).
+ */
+export const PRAZO_IA_MS = 26_000;
+/** Quem ainda está na fila por falta de decisão: só estes ganham SUGESTÃO na tela. */
+const MOTIVOS_PARA_IA = ["sinais_ambiguos", "provavel_recusa", "provavel_orcamento", "provavel_duvida"];
 
 /** Ano do dia civil em Santos (UTC−3) — o ano que o assunto "382" costuma querer dizer. */
 function anoEmSantos(instante: Date): number {
@@ -225,6 +232,7 @@ export async function sincronizarRespostasEmail(
     contemValor: boolean;
   }> = [];
   const devolvidos: Array<{ envioId: string; email: string; data: Date; mensagem: string }> = [];
+  const paraIa: Array<TrechoParaClassificar & { consultaId: string | null; regra: string }> = [];
   let respostasClassificadas = 0;
 
   const ordenadas = [...payload.respostas].sort((a, b) => a.data.localeCompare(b.data));
@@ -259,6 +267,18 @@ export async function sincronizarRespostasEmail(
         situacao = "a_confirmar";
         regra = motivoFila;
       }
+    }
+
+    if (r.trecho) {
+      paraIa.push({
+        id: r.id,
+        trecho: r.trecho,
+        contexto: r.contexto,
+        anexosPdf: r.anexosPdf,
+        anexosOutros: r.anexosOutros,
+        consultaId: consulta ?? null,
+        regra: motivoFila !== null ? `fila:${motivoFila}` : `aplicar:${situacao}`,
+      });
     }
 
     if (motivoFila !== null) {
@@ -314,9 +334,9 @@ export async function sincronizarRespostasEmail(
     }
   }
 
-  await sugerirComIa(
-    pendentes.filter((p) => MOTIVOS_PARA_IA.includes(p.motivo)).map((p) => p.gmailMensagemId),
-    new Map(payload.respostas.flatMap((r) => (r.trecho ? [[r.id, r.trecho] as const] : []))),
+  await classificarEmSombra(
+    paraIa,
+    new Set(pendentes.filter((p) => MOTIVOS_PARA_IA.includes(p.motivo)).map((p) => p.gmailMensagemId)),
   );
 
   const finais = [...desfechos.values()].map((d) => ({ d, ...desfechoFinal(d) }));
@@ -361,30 +381,55 @@ export async function sincronizarRespostasEmail(
 }
 
 /**
- * Pede à IA o veredito das mensagens ainda sem sugestão e grava SÓ o veredito e a frase curta.
- * Nunca derruba a leitura: qualquer falha deixa a fila como estava. O trecho não é guardado.
- * Guarda atômica (§9.14): só escreve onde ainda não há sugestão e a resposta segue aberta.
+ * MODO SOMBRA (M30.d): a IA lê cada resposta, com a conversa anterior, e o veredito é gravado ao
+ * lado do que as regras decidiram — sem alterar consulta nem dashboard. Serve para medir a IA contra
+ * as regras antes de ela decidir qualquer coisa. Só o veredito (classe, confiança, frase curta) é
+ * gravado; o texto nunca. Nunca derruba a leitura: qualquer falha deixa tudo como estava.
+ *
+ * Além disso, a resposta que está ABERTA na fila ganha a sugestão "IA sugere" (só com confiança
+ * média ou alta), com guarda atômica (§9.14): resposta já resolvida nunca é alterada.
  */
-async function sugerirComIa(ids: string[], trechoPorId: Map<string, string>): Promise<void> {
+async function classificarEmSombra(
+  itens: Array<TrechoParaClassificar & { consultaId: string | null; regra: string }>,
+  naFila: Set<string>,
+): Promise<void> {
   try {
-    const comTrecho = ids.filter((id) => trechoPorId.has(id));
-    if (comTrecho.length === 0) return;
-    const abertas = await db.respostaEmailPendente.findMany({
-      where: { gmailMensagemId: { in: comTrecho }, sugestaoIa: null, resolvidaEm: null },
+    if (itens.length === 0) return;
+    const feitas = await db.classificacaoIaResposta.findMany({
+      where: { gmailMensagemId: { in: itens.map((i) => i.id) } },
       select: { gmailMensagemId: true },
     });
-    const alvo = abertas.slice(0, MAX_IA_POR_LEITURA).map((a) => a.gmailMensagemId);
+    const jaFeitas = new Set(feitas.map((f) => f.gmailMensagemId));
+    const alvo = itens.filter((i) => !jaFeitas.has(i.id)).slice(0, MAX_IA_POR_LEITURA);
     if (alvo.length === 0) return;
 
-    const { vereditos } = await classificarComIa(alvo.map((id) => ({ id, trecho: trechoPorId.get(id)! })));
+    const { vereditos } = await classificarComIa(alvo, { prazoMs: PRAZO_IA_MS });
+    if (vereditos.length === 0) return;
+    const porId = new Map(alvo.map((a) => [a.id, a]));
+
+    await db.classificacaoIaResposta.createMany({
+      data: vereditos.map((v) => ({
+        gmailMensagemId: v.id,
+        consultaId: porId.get(v.id)?.consultaId ?? null,
+        classeIa: v.classe,
+        confianca: v.confianca,
+        justificativa: v.justificativa,
+        regra: porId.get(v.id)?.regra ?? "desconhecida",
+      })),
+      skipDuplicates: true,
+    });
+
     for (const v of vereditos) {
+      if (v.confianca === "baixa" || !naFila.has(v.id)) continue;
       await db.respostaEmailPendente.updateMany({
-        where: { gmailMensagemId: v.id, sugestaoIa: null, resolvidaEm: null },
+        // Substitui a sugestão antiga (feita sem a conversa do fio) pela nova: este veredito só
+        // roda para quem ainda não tem linha em sombra. Guarda atômica: resposta já resolvida não muda.
+        where: { gmailMensagemId: v.id, resolvidaEm: null },
         data: { sugestaoIa: v.classe, justificativaIa: v.justificativa },
       });
     }
   } catch {
-    // Sem log: a mensagem de erro de SDK/banco pode carregar o corpo da requisição (o trecho).
+    // Sem log: a mensagem de erro de SDK/banco pode carregar o corpo da requisição (o texto).
   }
 }
 

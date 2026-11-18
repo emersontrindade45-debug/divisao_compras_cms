@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     consultaCotacao: { groupBy: vi.fn(), createMany: vi.fn(), findMany: vi.fn() },
     fornecedor: { findMany: vi.fn() },
     respostaEmailPendente: { createMany: vi.fn(), updateMany: vi.fn(), findMany: vi.fn() },
+    classificacaoIaResposta: { findMany: vi.fn(), createMany: vi.fn() },
     emailInvalido: { createMany: vi.fn() },
     $executeRaw: vi.fn(),
   },
@@ -444,91 +445,148 @@ describe("sincronizarRespostasEmail", () => {
     });
   });
 
-  describe("IA sobre o trecho anonimizado", () => {
+  describe("IA em modo sombra", () => {
     const TRECHO = "TRECHO-MARCADOR não conseguiremos atender";
+    const CONTEXTO = [{ autor: "camara" as const, texto: "CONTEXTO-MARCADOR pergunta nossa" }];
+    const veredito = (id: string, classe = "recusa", confianca = "alta") => ({
+      id, classe, confianca, justificativa: "diz que não atende",
+    });
+    const ia = (vereditos: unknown[]) =>
+      mocks.classificarComIa.mockResolvedValue({ vereditos, lotesComFalha: 0, lotesAdiados: 0 });
 
-    it("manda à IA só o que ainda não tem sugestão e grava veredito + frase, com guarda atômica", async () => {
+    beforeEach(() => {
+      mocks.db.classificacaoIaResposta.findMany.mockResolvedValue([]);
+      mocks.db.classificacaoIaResposta.createMany.mockResolvedValue({ count: 1 });
+    });
+
+    it("grava o veredito em sombra com a classe, a confiança, a consulta e o que as regras fizeram", async () => {
       armar({ existentes: ["g1"], jaTem: 3 });
-      mocks.db.respostaEmailPendente.findMany.mockResolvedValue([{ gmailMensagemId: "m1" }]);
-      mocks.classificarComIa.mockResolvedValue({
-        vereditos: [{ id: "m1", classe: "recusa", justificativa: "diz que não atende" }],
-        lotesComFalha: 0,
-      });
+      ia([veredito("m1")]);
       await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
 
-      expect(mocks.db.respostaEmailPendente.findMany).toHaveBeenCalledWith({
-        where: { gmailMensagemId: { in: ["m1"] }, sugestaoIa: null, resolvidaEm: null },
-        select: { gmailMensagemId: true },
+      expect(mocks.db.classificacaoIaResposta.createMany).toHaveBeenCalledWith({
+        data: [{
+          gmailMensagemId: "m1", consultaId: "c0", classeIa: "recusa", confianca: "alta",
+          justificativa: "diz que não atende", regra: "fila:sinais_ambiguos",
+        }],
+        skipDuplicates: true,
       });
-      expect(mocks.classificarComIa).toHaveBeenCalledWith([{ id: "m1", trecho: TRECHO }]);
+    });
+
+    it("classifica TAMBÉM a resposta que as regras já decidiram — é o que permite comparar", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      ia([veredito("m1", "orcamento")]);
+      await sincronizarRespostasEmail({
+        envios: [envio()],
+        respostas: [resposta({ temAnexoOrcamento: true, trecho: "segue em anexo" })],
+      });
+      expect(mocks.classificarComIa).toHaveBeenCalledTimes(1);
+      expect(mocks.db.classificacaoIaResposta.createMany.mock.calls[0]![0].data[0]).toMatchObject({
+        gmailMensagemId: "m1", regra: "aplicar:orcamento",
+      });
+    });
+
+    it("manda à IA o texto, a conversa anterior e a contagem de anexos", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      ia([]);
+      await sincronizarRespostasEmail({
+        envios: [envio()],
+        respostas: [resposta({ trecho: TRECHO, contexto: CONTEXTO, anexosPdf: 1, anexosOutros: 2 })],
+      });
+      expect(mocks.classificarComIa.mock.calls[0]![0]).toEqual([
+        expect.objectContaining({ id: "m1", trecho: TRECHO, contexto: CONTEXTO, anexosPdf: 1, anexosOutros: 2 }),
+      ]);
+    });
+
+    it("não reclassifica a resposta que já tem veredito em sombra (não paga duas vezes)", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      mocks.db.classificacaoIaResposta.findMany.mockResolvedValue([{ gmailMensagemId: "m1" }]);
+      await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+      expect(mocks.classificarComIa).not.toHaveBeenCalled();
+    });
+
+    it("nem o texto nem a conversa são gravados: nenhuma escrita no banco os contém", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      ia([veredito("m1")]);
+      await sincronizarRespostasEmail({
+        envios: [envio()],
+        respostas: [resposta({ trecho: TRECHO, contexto: CONTEXTO })],
+      });
+      const escritas = [
+        ...mocks.db.respostaEmailPendente.createMany.mock.calls,
+        ...mocks.db.respostaEmailPendente.updateMany.mock.calls,
+        ...mocks.db.classificacaoIaResposta.createMany.mock.calls,
+        ...mocks.db.consultaCotacao.createMany.mock.calls,
+        ...mocks.db.$executeRaw.mock.calls,
+      ];
+      const dump = JSON.stringify(escritas);
+      expect(dump).not.toContain("TRECHO-MARCADOR");
+      expect(dump).not.toContain("CONTEXTO-MARCADOR");
+    });
+
+    it("resposta aberta na fila ganha a sugestão 'IA sugere', sem pisar em resposta resolvida", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      ia([veredito("m1", "recusa", "media")]);
+      await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
       expect(mocks.db.respostaEmailPendente.updateMany).toHaveBeenCalledWith({
-        where: { gmailMensagemId: "m1", sugestaoIa: null, resolvidaEm: null },
+        where: { gmailMensagemId: "m1", resolvidaEm: null },
         data: { sugestaoIa: "recusa", justificativaIa: "diz que não atende" },
       });
     });
 
-    it("o trecho nunca é gravado: nenhuma escrita no banco o contém", async () => {
+    it("confiança baixa fica gravada em sombra mas NÃO vira sugestão na tela", async () => {
       armar({ existentes: ["g1"], jaTem: 3 });
-      mocks.db.respostaEmailPendente.findMany.mockResolvedValue([{ gmailMensagemId: "m1" }]);
-      mocks.classificarComIa.mockResolvedValue({
-        vereditos: [{ id: "m1", classe: "recusa", justificativa: "ok" }],
-        lotesComFalha: 0,
-      });
+      ia([veredito("m1", "recusa", "baixa")]);
       await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
-      const escritas = [
-        ...mocks.db.respostaEmailPendente.createMany.mock.calls,
-        ...mocks.db.respostaEmailPendente.updateMany.mock.calls,
-        ...mocks.db.consultaCotacao.createMany.mock.calls,
-        ...mocks.db.$executeRaw.mock.calls,
-      ];
-      expect(JSON.stringify(escritas)).not.toContain("TRECHO-MARCADOR");
+      expect(mocks.db.classificacaoIaResposta.createMany).toHaveBeenCalled();
+      const sugestoes = mocks.db.respostaEmailPendente.updateMany.mock.calls.filter((c) => c[0].data.sugestaoIa !== undefined);
+      expect(sugestoes).toHaveLength(0);
     });
 
-    it("sem trecho (script antigo) não chama a IA", async () => {
+    it("resposta que as regras decidiram (fora da fila) tem veredito em sombra e nenhuma sugestão na tela", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      ia([veredito("m1", "orcamento")]);
+      await sincronizarRespostasEmail({
+        envios: [envio()],
+        respostas: [resposta({ temAnexoOrcamento: true, trecho: "segue em anexo" })],
+      });
+      expect(mocks.db.classificacaoIaResposta.createMany).toHaveBeenCalled();
+      const sugestoes = mocks.db.respostaEmailPendente.updateMany.mock.calls.filter((c) => c[0].data.sugestaoIa !== undefined);
+      expect(sugestoes).toHaveLength(0);
+    });
+
+    it("remetente que não se liga a nenhum fornecedor: veredito em sombra sim, sugestão na tela não", async () => {
+      armar({ existentes: ["g1"], jaTem: 3 });
+      ia([veredito("m1")]);
+      await sincronizarRespostasEmail({
+        envios: [envio()],
+        respostas: [resposta({ remetente: "estranho@desconhecido.com.br", remetenteEraDestinatario: false, trecho: TRECHO })],
+      });
+      expect(mocks.db.classificacaoIaResposta.createMany.mock.calls[0]![0].data[0].regra).toMatch(/^fila:(remetente_desconhecido|dominio_)/);
+      const sugestoes = mocks.db.respostaEmailPendente.updateMany.mock.calls.filter((c) => c[0].data.sugestaoIa !== undefined);
+      expect(sugestoes).toHaveLength(0);
+    });
+
+    it("sem texto (script antigo) não chama a IA", async () => {
       armar({ existentes: ["g1"], jaTem: 3 });
       await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta()] });
       expect(mocks.classificarComIa).not.toHaveBeenCalled();
     });
 
-    it("resposta que as regras já decidiram (não vai à fila) não é enviada à IA", async () => {
-      armar({ existentes: ["g1"], jaTem: 3 });
-      await sincronizarRespostasEmail({
-        envios: [envio()],
-        respostas: [resposta({ contemRecusa: true, trecho: TRECHO })],
-      });
-      expect(mocks.classificarComIa).not.toHaveBeenCalled();
-    });
-
-    it("remetente que não se liga a nenhum fornecedor (fila por outro motivo) não vai à IA", async () => {
-      armar({ existentes: ["g1"], jaTem: 3 });
-      // O banco TEM a mensagem aberta e sem sugestão: só o filtro por motivo a impede de ir à IA.
-      mocks.db.respostaEmailPendente.findMany.mockResolvedValue([{ gmailMensagemId: "m1" }]);
-      const r = await sincronizarRespostasEmail({
-        envios: [envio()],
-        respostas: [resposta({ remetente: "estranho@desconhecido.com.br", remetenteEraDestinatario: false, trecho: TRECHO })],
-      });
-      expect(mocks.db.respostaEmailPendente.createMany.mock.calls[0]![0].data[0].motivo).toMatch(/^(remetente_desconhecido|dominio_)/);
-      expect(r.respostasNaFila).toBe(1);
-      expect(mocks.classificarComIa).not.toHaveBeenCalled();
-    });
-
     it("falha da IA não derruba a leitura nem a fila", async () => {
       armar({ existentes: ["g1"], jaTem: 3 });
-      mocks.db.respostaEmailPendente.findMany.mockResolvedValue([{ gmailMensagemId: "m1" }]);
       mocks.classificarComIa.mockRejectedValue(new Error("boom"));
       const r = await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
       expect(r.respostasNaFila).toBe(1);
     });
 
-    it("respeita o teto por leitura", async () => {
+    it("respeita o teto por leitura e o prazo de tempo", async () => {
       armar({ existentes: ["g1"], jaTem: 3 });
-      const muitas = Array.from({ length: 60 }, (_, i) => ({ gmailMensagemId: `m${i}` }));
-      mocks.db.respostaEmailPendente.findMany.mockResolvedValue(muitas);
-      await sincronizarRespostasEmail({
-        envios: [envio()],
-        respostas: muitas.map((m) => resposta({ id: m.gmailMensagemId, trecho: "x" })),
-      });
-      expect(mocks.classificarComIa.mock.calls[0]![0]).toHaveLength(48);
+      ia([]);
+      const muitas = Array.from({ length: 150 }, (_, i) => resposta({ id: `m${i}`, trecho: "x" }));
+      await sincronizarRespostasEmail({ envios: [envio()], respostas: muitas });
+      expect(mocks.classificarComIa.mock.calls[0]![0]).toHaveLength(120);
+      expect(mocks.classificarComIa.mock.calls[0]![1]).toEqual({ prazoMs: 26_000 });
     });
   });
 });

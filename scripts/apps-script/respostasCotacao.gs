@@ -170,7 +170,7 @@ function ehAutomatica_(msg) {
     prec === "auto_reply" || ASSUNTO_AUTOMATICO.test(msg.getSubject() || "");
 }
 
-function metadadosDaMensagem_(msg, envio) {
+function metadadosDaMensagem_(msg, envio, anteriores) {
   var assunto = msg.getSubject();
   var semCit = semCitacao_(msg.getPlainBody());
   var ehRecusa = provavelRecusa_(semCit);
@@ -179,13 +179,16 @@ function metadadosDaMensagem_(msg, envio) {
   var anexos = msg.getAttachments({ includeInlineImages: false });
   var remetente = (/<([^>]+)>/.exec(msg.getFrom()) || [null, msg.getFrom()])[1].trim().toLowerCase();
   var ehDevolucao = REMETENTE_DEVOLUCAO.test(remetente);
-  var temAnexo = anexos.some(function (a) { return EXTENSOES_ORCAMENTO.test(a.getName()); });
+  var anexosPdf = anexos.filter(function (a) { return EXTENSOES_ORCAMENTO.test(a.getName()); }).length;
+  var temAnexo = anexosPdf > 0;
   var frase = FRASES_RECUSA.some(function (f) { return corpo.indexOf(f) !== -1; });
-  // Trecho para a IA classificar (liberado pelo usuário em 2026-11-18): só das respostas que as
-  // regras NÃO decidem sozinhas — devolução, resposta automática, frase de recusa fixa e anexo de
-  // orçamento já têm desfecho. Sai ANONIMIZADO (anonimizar_: sem citação, assinatura, e-mail, link,
-  // CNPJ/CPF, telefone, valores e números; até 400 caracteres). O sistema não o grava.
-  var trecho = (ehDevolucao || ehAutomatica_(msg) || frase || temAnexo) ? "" : anonimizar_(msg.getPlainBody());
+  // Texto para a IA classificar (liberado pelo usuário em 2026-11-18). Vai de TODA resposta humana —
+  // até a que as regras já decidem, para o sistema poder comparar a IA com as regras. Devolução e
+  // resposta automática ficam de fora (têm desfecho técnico). Sai ANONIMIZADO (anonimizarParaIa_:
+  // sem e-mail, telefone, CNPJ/CPF, links e valores em R$) e o sistema não o grava.
+  var humana = !(ehDevolucao || ehAutomatica_(msg));
+  var trecho = humana ? anonimizarParaIa_(msg.getPlainBody(), LIMITE_TRECHO_IA) : "";
+  var contexto = humana ? contextoDoFio_(anteriores) : [];
   var meta = {
     id: msg.getId(),
     fio: msg.getThread().getId(),
@@ -202,6 +205,8 @@ function metadadosDaMensagem_(msg, envio) {
       : [],
     automatica: ehAutomatica_(msg),
     temAnexoOrcamento: temAnexo,
+    anexosPdf: anexosPdf,
+    anexosOutros: anexos.length - anexosPdf,
     contemRecusa: frase,
     contemValor: /r\$\s*\d/.test(corpo),
     // Recusa em frase mais ampla que a lista fixa, sem a parte citada. Só SUGERE (vai à fila).
@@ -212,6 +217,7 @@ function metadadosDaMensagem_(msg, envio) {
     provavelDuvida: sugestoes.provavelDuvida,
   };
   if (trecho) meta.trecho = trecho;
+  if (contexto.length > 0) meta.contexto = contexto;
   return meta;
 }
 
@@ -227,10 +233,11 @@ function buscarRespostas_(envios) {
   var saida = [];
   Object.keys(envioPorFio).forEach(function (fio) {
     var envio = envioPorFio[fio];
-    GmailApp.getThreadById(fio).getMessages().forEach(function (m) {
+    var msgs = GmailApp.getThreadById(fio).getMessages();
+    msgs.forEach(function (m, i) {
       if (enderecos_(m.getFrom())[0] === eu) return;
       if (m.getDate() < new Date(envio.data)) return;
-      saida.push(metadadosDaMensagem_(m, envio));
+      saida.push(metadadosDaMensagem_(m, envio, msgs.slice(0, i)));
     });
   });
   return saida;
@@ -514,6 +521,56 @@ function amostraParaConferir() {
   });
 }
 
+/** Quanto do texto de cada mensagem vai à IA (o sistema aceita até 1600; o contexto, até 700). */
+var LIMITE_TRECHO_IA = 1500;
+var LIMITE_CONTEXTO_IA = 600;
+
+/**
+ * Anonimização para a IA (2026-11-18). Tira só o que identifica ou vale dinheiro: a parte citada, a
+ * assinatura, e-mails, links, CNPJ/CPF, telefones e valores em R$. Mantém números comuns (item 2,
+ * 250 unidades, 30/10) e palavras com inicial maiúscula ("Compra Direta", "Pregão Eletrônico",
+ * marcas): a versão antiga (anonimizar_) as trocava por [n] e [nome] e destruía justamente o que a
+ * IA precisa para ler uma dúvida. Nomes de pessoa só somem junto da saudação e da assinatura.
+ */
+function anonimizarParaIa_(corpo, limite) {
+  var t = semCitacao_(corpo);
+  var corte = t.search(/\n\s*(att\.?|atenciosamente|cordialmente|abra[cç]os?|grato|grata|--)\s*[,.;]?\s*(\n|$)|\s(fone\/fax|fone:|tel\.?:|cel\.?:|whatsapp|site:|e-mail:)/i);
+  if (corte !== -1) t = t.slice(0, corte);
+  for (var i = 0; i < 2; i++) {
+    t = t.replace(/^\s*(ol[aá]|oi|bom dia|boa tarde|boa noite|prezad[oa]s?|caro|cara)[^,.!?\n]{0,60}[,.!?]\s*/i, "");
+  }
+  return t
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "[email]")
+    .replace(/(https?:\/\/|www\.)\S+/gi, "[link]")
+    .replace(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g, "[doc]")
+    .replace(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g, "[doc]")
+    .replace(/\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}/g, "[tel]")
+    .replace(/r\$\s*[\d.,]+/gi, "[valor]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limite);
+}
+
+/** Quem escreveu: a Divisão (a caixa ou qualquer @camarasantos) ou o fornecedor. */
+function autorDoFio_(msg) {
+  var de = enderecos_(msg.getFrom())[0] || "";
+  return de === CAIXA_ESPERADA || /@camarasantos\.sp\.gov\.br$/.test(de) ? "camara" : "fornecedor";
+}
+
+/**
+ * As até 3 mensagens ANTERIORES do fio (da mais antiga à mais recente), anonimizadas, com o autor.
+ * É o contexto que a IA precisa para distinguir um orçamento novo de uma resposta a uma pergunta da
+ * Câmara sobre um orçamento já enviado (caso do proc. 92/2026). Mensagem sem texto é pulada.
+ */
+function contextoDoFio_(anteriores) {
+  var saida = [];
+  (anteriores || []).forEach(function (m) {
+    var texto = anonimizarParaIa_(m.getPlainBody(), LIMITE_CONTEXTO_IA);
+    if (texto) saida.push({ autor: autorDoFio_(m), texto: texto });
+  });
+  return saida.slice(-3);
+}
+
 /**
  * Tira do texto o que identifica ou vale dinheiro, ANTES de qualquer cópia sair do Google:
  * a parte citada, a assinatura, e-mails, links, CNPJ/CPF, telefones, valores e qualquer número.
@@ -709,7 +766,7 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify({
     // Diagnóstico sem conteúdo: só a conta que executa e contagens.
     diagnostico: {
-      versao: "ia-2",
+      versao: "ia-3",
       contaEfetiva: Session.getEffectiveUser().getEmail(),
       contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
       fiosEncontrados: busca.fios.length,

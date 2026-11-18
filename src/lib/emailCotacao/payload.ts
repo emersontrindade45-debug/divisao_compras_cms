@@ -53,11 +53,23 @@ const respostaSchema = z
     /** Pergunta do fornecedor, sem ser recusa, cobrança de retorno nem orçamento. Só SUGERE. */
     provavelDuvida: z.boolean().optional(),
     /**
-     * Trecho do corpo JÁ ANONIMIZADO pelo script (sem valores, CNPJ, e-mail, telefone, links; até
-     * 400 caracteres), só para a IA classificar. Vive em memória durante a leitura: o sistema nunca
-     * o grava (a `sincronizar` o descarta depois da chamada) e o Sentry ignora o módulo.
+     * Texto da mensagem JÁ ANONIMIZADO pelo script (sem e-mail, telefone, CNPJ/CPF, links e valores
+     * em R$; até 1500 caracteres), só para a IA classificar. Vive em memória durante a leitura: o
+     * sistema nunca o grava (a `sincronizar` o descarta depois da chamada) e o Sentry ignora o módulo.
      */
-    trecho: z.string().max(600).optional(),
+    trecho: z.string().max(1600).optional(),
+    /**
+     * As mensagens ANTERIORES do mesmo fio (até 3, da mais antiga à mais recente), anonimizadas do
+     * mesmo jeito. Sem elas a IA não distingue um orçamento novo de uma resposta a uma pergunta da
+     * Câmara sobre um orçamento já enviado. Mesmo tratamento do `trecho`: só em memória.
+     */
+    contexto: z
+      .array(z.object({ autor: z.enum(["camara", "fornecedor"]), texto: z.string().max(700) }).strict())
+      .max(3)
+      .optional(),
+    /** Quantos anexos PDF e de outro tipo vieram. Só a contagem: nome e conteúdo nunca saem. */
+    anexosPdf: z.number().int().min(0).max(50).optional(),
+    anexosOutros: z.number().int().min(0).max(50).optional(),
   })
   .strict();
 
