@@ -62,6 +62,7 @@ export async function verificarRespostasEmail(
   }
 
   let corpo: unknown;
+  const googleIniciou = Date.now();
   try {
     const resposta = await fetch(url, {
       method: "POST",
@@ -86,15 +87,19 @@ export async function verificarRespostasEmail(
     return { error: "A resposta do script de e-mail não tem o formato esperado." };
   }
 
+  const googleMs = Date.now() - googleIniciou;
   try {
+    const sincronizarIniciou = Date.now();
     const resumo = await sincronizarRespostasEmail(payload.data, { processoId, inicioEm });
+    const sincronizarMs = Date.now() - sincronizarIniciou;
 
     await registrarAuditoria({
       userId: user.id,
       acao: "verificar_respostas_email",
       processoId,
       // Só contagens — nenhum endereço, id de mensagem ou texto.
-      detalhes: { ...resumo },
+      // Tempo por etapa: sem isto, um 504 não diz se foi o Google, o banco ou a IA (CLAUDE.md §9.127).
+      detalhes: { ...resumo, googleMs, sincronizarMs, totalMs: Date.now() - inicioEm },
     });
 
     revalidatePath("/cotacoes");

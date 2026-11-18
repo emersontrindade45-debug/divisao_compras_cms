@@ -52,7 +52,11 @@ export const PRAZO_IA_MS = 26_000;
  * tempo conferido como "já passei?" autoriza começar o que não cabe).
  */
 export const LIMITE_FUNCAO_MS = 55_000;
-/** Um lote da IA em curso leva até ~10 s depois de o prazo ser conferido; reserva para ele. */
+/**
+ * Reserva para o que acontece DEPOIS da IA: gravar os vereditos, aplicar os desfechos das consultas e
+ * os e-mails devolvidos. O prazo da própria IA é duro (cada requisição é abortada no fim dele), então
+ * esta reserva não precisa cobrir lote em curso.
+ */
 const RESERVA_LOTE_IA_MS = 10_000;
 /** Resposta a ser lida pela IA, com o que as regras já disseram sobre ela. */
 type ItemParaIa = TrechoParaClassificar & { consultaId: string | null; regra: string; contemRecusa: boolean };
@@ -470,14 +474,19 @@ async function classificarEmSombra(
       skipDuplicates: true,
     });
 
-    for (const v of vereditos) {
-      if (v.confianca === "baixa" || !naFila.has(v.id)) continue;
-      await db.respostaEmailPendente.updateMany({
-        // Substitui a sugestão antiga (feita sem a conversa do fio) pela nova: este veredito só
-        // roda para quem ainda não tem linha em sombra. Guarda atômica: resposta já resolvida não muda.
-        where: { gmailMensagemId: v.id, resolvidaEm: null },
-        data: { sugestaoIa: v.classe, justificativaIa: v.justificativa },
-      });
+    const sugestoes = vereditos.filter((v) => v.confianca !== "baixa" && naFila.has(v.id));
+    // Em blocos paralelos: até 120 updates em fila, um a um, somavam segundos de uma função de 60 s.
+    for (let i = 0; i < sugestoes.length; i += 10) {
+      await Promise.all(
+        sugestoes.slice(i, i + 10).map((v) =>
+          db.respostaEmailPendente.updateMany({
+            // Substitui a sugestão antiga (feita sem a conversa do fio) pela nova: este veredito só
+            // roda para quem ainda não tem linha em sombra. Guarda atômica: resposta já resolvida não muda.
+            where: { gmailMensagemId: v.id, resolvidaEm: null },
+            data: { sugestaoIa: v.classe, justificativaIa: v.justificativa },
+          }),
+        ),
+      );
     }
   } catch {
     // Sem log: a mensagem de erro de SDK/banco pode carregar o corpo da requisição (o texto).

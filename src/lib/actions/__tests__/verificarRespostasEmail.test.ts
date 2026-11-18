@@ -57,10 +57,28 @@ describe("verificarRespostasEmail", () => {
     expect(f.mock.calls[0]![0]).toBe("https://script.google.com/macros/s/ID/exec");
     expect(JSON.parse(f.mock.calls[0]![1].body)).toEqual({ segredo: SEGREDO, dias: 30 });
     expect(f.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal); // todo fetch com prazo (§9.64)
+    // Contagens do resumo + o tempo de cada etapa (para um 504 dizer se foi Google, banco ou IA).
     expect(mocks.registrarAuditoria).toHaveBeenCalledWith(
-      expect.objectContaining({ acao: "verificar_respostas_email", detalhes: RESUMO }),
+      expect.objectContaining({
+        acao: "verificar_respostas_email",
+        detalhes: {
+          ...RESUMO,
+          googleMs: expect.any(Number),
+          sincronizarMs: expect.any(Number),
+          totalMs: expect.any(Number),
+        },
+      }),
     );
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/cotacoes");
+  });
+
+  it("os tempos da auditoria são números não negativos e o total cobre as duas etapas", async () => {
+    vi.stubGlobal("fetch", responder(PAYLOAD_OK));
+    await verificarRespostasEmail();
+    const d = mocks.registrarAuditoria.mock.calls[0]![0].detalhes as { googleMs: number; sincronizarMs: number; totalMs: number };
+    expect(d.googleMs).toBeGreaterThanOrEqual(0);
+    expect(d.sincronizarMs).toBeGreaterThanOrEqual(0);
+    expect(d.totalMs).toBeGreaterThanOrEqual(d.googleMs + d.sincronizarMs);
   });
 
   it("passa o processo pedido ao núcleo (botão da página do processo)", async () => {

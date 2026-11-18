@@ -142,10 +142,10 @@ describe("classificarComIa", () => {
         await new Promise((r) => setTimeout(r, 1000));
         return resp(Array.from({ length: TAMANHO_LOTE_IA }, (_, i) => item(i + 1, "recusa")));
       });
-      const p = classificarComIa(trechos, { prazoMs: 500 });
+      const p = classificarComIa(trechos, { prazoMs: 5_500 });
       await vi.runAllTimersAsync();
       const r = await p;
-      // 8 trabalhadores iniciam 8 lotes em t=0; o 9º não começa porque já passaram 1000 ms > 500.
+      // 8 trabalhadores iniciam 8 lotes em t=0 (restam 5500 ms); o 9º não começa: restam 4500 ms, menos que o mínimo de 5000.
       expect(mocks.create).toHaveBeenCalledTimes(8);
       expect(r.lotesAdiados).toBe(1);
       expect(r.vereditos).toHaveLength(8 * TAMANHO_LOTE_IA);
@@ -224,6 +224,56 @@ describe("classificarComIa", () => {
     it("pede a citação do trecho no prompt, nas duas leituras", () => {
       expect(montarPrompt([{ id: "a", trecho: "x" }])).toContain('"evidencia"');
       expect(montarPrompt([{ id: "a", trecho: "x" }], { revisor: true })).toContain("EXATAMENTE como está escrito");
+    });
+  });
+
+  describe("prazo duro (CLAUDE.md §9.65)", () => {
+    it("cada requisição recebe o tempo que resta como timeout e nenhuma retentativa", async () => {
+      mocks.create.mockResolvedValue(resp([item(1, "recusa")]));
+      await classificarComIa([{ id: "a", trecho: "x" }], { prazoMs: 20_000 });
+      const opcoesDaRequisicao = mocks.create.mock.calls[0]![1] as { timeout: number; maxRetries: number };
+      expect(opcoesDaRequisicao.maxRetries).toBe(0);
+      expect(opcoesDaRequisicao.timeout).toBeGreaterThan(19_000);
+      expect(opcoesDaRequisicao.timeout).toBeLessThanOrEqual(20_000);
+    });
+
+    it("sem prazo, a requisição usa o padrão do cliente (não impõe timeout)", async () => {
+      mocks.create.mockResolvedValue(resp([item(1, "recusa")]));
+      await classificarComIa([{ id: "a", trecho: "x" }]);
+      expect(mocks.create.mock.calls[0]![1]).toBeUndefined();
+    });
+
+    it("não começa lote com menos de 5 s de prazo: ficaria pela metade", async () => {
+      const r = await classificarComIa([{ id: "a", trecho: "x" }], { prazoMs: 4_000 });
+      expect(mocks.create).not.toHaveBeenCalled();
+      expect(r.lotesAdiados).toBe(1);
+    });
+
+    it("o timeout encolhe conforme o tempo passa: o 2º lote recebe menos que o 1º", async () => {
+      vi.useFakeTimers();
+      try {
+        const trechos = Array.from({ length: TAMANHO_LOTE_IA * 9 }, (_, i) => ({ id: `m${i}`, trecho: "x" }));
+        mocks.create.mockImplementation(async () => {
+          await new Promise((r) => setTimeout(r, 3_000));
+          return resp(Array.from({ length: TAMANHO_LOTE_IA }, (_, i) => item(i + 1, "recusa")));
+        });
+        const p = classificarComIa(trechos, { prazoMs: 20_000 });
+        await vi.runAllTimersAsync();
+        await p;
+        const timeouts = mocks.create.mock.calls.map((c) => (c[1] as { timeout: number }).timeout);
+        expect(Math.max(...timeouts)).toBeGreaterThan(Math.min(...timeouts));
+        expect(Math.min(...timeouts)).toBeGreaterThanOrEqual(5_000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("requisição abortada pelo prazo conta como lote com falha, não derruba os outros", async () => {
+      mocks.create.mockRejectedValueOnce(new Error("Request timed out.")).mockResolvedValue(resp([item(1, "recusa")]));
+      const trechos = Array.from({ length: TAMANHO_LOTE_IA + 1 }, (_, i) => ({ id: `m${i}`, trecho: "x" }));
+      const r = await classificarComIa(trechos, { prazoMs: 20_000 });
+      expect(r.lotesComFalha).toBe(1);
+      expect(r.vereditos).toHaveLength(1);
     });
   });
 });

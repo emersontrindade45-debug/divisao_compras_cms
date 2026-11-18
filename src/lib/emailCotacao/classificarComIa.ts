@@ -53,6 +53,11 @@ export const CONCORRENCIA_IA = 8;
 /** Teto de caracteres por mensagem (e por mensagem de contexto) que chegam ao modelo. */
 const MAX_TRECHO = 1600;
 const MAX_CONTEXTO = 700;
+/**
+ * Menos que isto de prazo restante não vale começar um lote: ele seria abortado no meio e pago à toa.
+ * (Um lote de 8 respostas leva ~8–10 s no modelo pequeno, mais no revisor.)
+ */
+const MIN_PRAZO_LOTE_MS = 5_000;
 /** Teto da justificativa que volta e é gravada. */
 const MAX_JUSTIFICATIVA = 160;
 
@@ -165,14 +170,22 @@ com UM item para cada item numerado.`;
 async function classificarLote(
   lote: TrechoParaClassificar[],
   opcoes: { modelo?: string; revisor?: boolean },
+  /** Quanto tempo esta requisição ainda pode levar. Estourou, é abortada — não é retentada. */
+  restanteMs?: number,
 ): Promise<VereditoIa[] | null> {
   try {
-    const completion = await getOpenAIClient().chat.completions.create({
-      model: opcoes.modelo ?? OPENAI_MODEL,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: montarPrompt(lote, { revisor: opcoes.revisor }) }],
-    });
+    const completion = await getOpenAIClient().chat.completions.create(
+      {
+        model: opcoes.modelo ?? OPENAI_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: montarPrompt(lote, { revisor: opcoes.revisor }) }],
+      },
+      // Prazo DURO por requisição (CLAUDE.md §9.65): o padrão do cliente é 20 s com 1 retentativa,
+      // ou seja, um lote iniciado no fim do prazo ainda levava até 40 s e matava a função (504).
+      // Sem retentativa: falhou, o item fica para a próxima leitura.
+      restanteMs === undefined ? undefined : { timeout: restanteMs, maxRetries: 0 },
+    );
     // JSON.parse direto: `parseJsonResponse` embute o texto recebido na mensagem de erro.
     const parsed = respostaSchema.safeParse(JSON.parse(completion.choices[0]?.message?.content ?? ""));
     if (!parsed.success) return null;
@@ -222,6 +235,7 @@ export async function classificarComIa(
   opcoes: { prazoMs?: number; modelo?: string; revisor?: boolean } = {},
 ): Promise<ResultadoClassificacaoIa> {
   const inicio = Date.now();
+  const fimEm = opcoes.prazoMs === undefined ? undefined : inicio + opcoes.prazoMs;
   const validos = itens.filter((t) => t.trecho.trim().length > 0);
   const lotes: TrechoParaClassificar[][] = [];
   for (let i = 0; i < validos.length; i += TAMANHO_LOTE_IA) lotes.push(validos.slice(i, i + TAMANHO_LOTE_IA));
@@ -230,9 +244,11 @@ export async function classificarComIa(
   let proximo = 0;
   async function trabalhador() {
     while (proximo < lotes.length) {
-      if (opcoes.prazoMs !== undefined && Date.now() - inicio >= opcoes.prazoMs) return;
+      const restante = fimEm === undefined ? undefined : fimEm - Date.now();
+      // Não começa lote sem tempo para terminá-lo: ficaria pela metade e seria pago à toa.
+      if (restante !== undefined && restante < MIN_PRAZO_LOTE_MS) return;
       const i = proximo++;
-      resultados[i] = await classificarLote(lotes[i]!, opcoes);
+      resultados[i] = await classificarLote(lotes[i]!, opcoes, restante);
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCORRENCIA_IA, lotes.length) }, trabalhador));
