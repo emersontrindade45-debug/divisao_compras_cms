@@ -7,10 +7,12 @@ vi.mock("@/lib/ia/openaiClient", () => ({
   OPENAI_MODEL: "gpt-4o-mini",
 }));
 
-import { classificarComIa, montarPrompt, TAMANHO_LOTE_IA } from "../classificarComIa";
+import { citacaoDizEnvio, classificarComIa, evidenciaExiste, montarPrompt, TAMANHO_LOTE_IA } from "../classificarComIa";
 
 const resp = (itens: unknown[]) => ({ choices: [{ message: { content: JSON.stringify({ itens }) } }] });
-const item = (n: number, classe: string, confianca = "alta", motivo = "porque sim") => ({ n, classe, confianca, motivo });
+const item = (n: number, classe: string, confianca = "alta", motivo = "porque sim", evidencia?: string) => ({
+  n, classe, confianca, motivo, ...(evidencia === undefined ? {} : { evidencia }),
+});
 
 describe("classificarComIa", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -22,8 +24,8 @@ describe("classificarComIa", () => {
       { id: "b", trecho: "segue orçamento em anexo" },
     ]);
     expect(r.vereditos).toEqual([
-      { id: "a", classe: "recusa", confianca: "alta", justificativa: "porque sim" },
-      { id: "b", classe: "orcamento", confianca: "alta", justificativa: "porque sim" },
+      { id: "a", classe: "recusa", confianca: "alta", justificativa: "porque sim", evidenciaOk: false, evidenciaDizEnvio: false },
+      { id: "b", classe: "orcamento", confianca: "alta", justificativa: "porque sim", evidenciaOk: false, evidenciaDizEnvio: false },
     ]);
     expect(r.lotesComFalha).toBe(0);
   });
@@ -31,14 +33,14 @@ describe("classificarComIa", () => {
   it("devolve a confiança, inclusive a baixa: quem decide o que fazer com ela é o chamador", async () => {
     mocks.create.mockResolvedValue(resp([item(1, "recusa", "baixa")]));
     const r = await classificarComIa([{ id: "a", trecho: "talvez" }]);
-    expect(r.vereditos).toEqual([{ id: "a", classe: "recusa", confianca: "baixa", justificativa: "porque sim" }]);
+    expect(r.vereditos).toEqual([{ id: "a", classe: "recusa", confianca: "baixa", justificativa: "porque sim", evidenciaOk: false, evidenciaDizEnvio: false }]);
     expect(r.lotesComFalha).toBe(0);
   });
 
   it("número fora do lote ou repetido é ignorado, nunca vai ao id errado", async () => {
     mocks.create.mockResolvedValue(resp([item(1, "recusa"), item(1, "orcamento"), item(9, "duvida")]));
     const r = await classificarComIa([{ id: "a", trecho: "x" }]);
-    expect(r.vereditos).toEqual([{ id: "a", classe: "recusa", confianca: "alta", justificativa: "porque sim" }]);
+    expect(r.vereditos).toEqual([{ id: "a", classe: "recusa", confianca: "alta", justificativa: "porque sim", evidenciaOk: false, evidenciaDizEnvio: false }]);
   });
 
   it("JSON fora do contrato ou classe inventada conta como lote com falha", async () => {
@@ -150,5 +152,78 @@ describe("classificarComIa", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("evidência citada pelo modelo", () => {
+    const TEXTO = "Olá, segue o orçamento em anexo conforme solicitado.";
+
+    it("citação que existe no texto vale; parafraseada não", async () => {
+      mocks.create.mockResolvedValue(
+        resp([item(1, "orcamento", "alta", "x", "segue o orçamento em anexo"), item(2, "orcamento", "alta", "x", "enviou a proposta")]),
+      );
+      const r = await classificarComIa([
+        { id: "a", trecho: TEXTO },
+        { id: "b", trecho: TEXTO },
+      ]);
+      expect(r.vereditos.map((v) => v.evidenciaOk)).toEqual([true, false]);
+    });
+
+    it("ignora caixa, acento composto e espaços na comparação", () => {
+      expect(evidenciaExiste("Segue  o\nORÇAMENTO em anexo", "segue o orçamento em anexo")).toBe(true);
+      expect(evidenciaExiste("segue o orçamento", "orc\u0327amento".normalize("NFD") + " inexistente")).toBe(false);
+    });
+
+    it("citação curta demais não prova nada, mesmo existindo no texto", () => {
+      expect(evidenciaExiste("sim, segue", "sim")).toBe(false);
+      expect(evidenciaExiste("sim, segue", "sim, segue")).toBe(true);
+    });
+
+    it("a citação só vale se estiver na MENSAGEM, não na conversa anterior", async () => {
+      mocks.create.mockResolvedValue(resp([item(1, "orcamento", "alta", "x", "valor do item 2 está correto")]));
+      const r = await classificarComIa([
+        { id: "a", trecho: "Ok, obrigado.", contexto: [{ autor: "camara", texto: "o valor do item 2 está correto?" }] },
+      ]);
+      expect(r.vereditos[0]!.evidenciaOk).toBe(false);
+    });
+
+    it("sem a chave 'evidencia' na resposta, evidenciaOk é falso (nunca verdadeiro por omissão)", async () => {
+      mocks.create.mockResolvedValue(resp([item(1, "recusa")]));
+      const r = await classificarComIa([{ id: "a", trecho: TEXTO }]);
+      expect(r.vereditos[0]!.evidenciaOk).toBe(false);
+    });
+
+    it("o texto citado NUNCA sai do módulo: o veredito não carrega a citação", async () => {
+      mocks.create.mockResolvedValue(resp([item(1, "orcamento", "alta", "x", "segue o orçamento em anexo")]));
+      const r = await classificarComIa([{ id: "a", trecho: TEXTO }]);
+      expect(JSON.stringify(r)).not.toContain("segue o orçamento em anexo");
+    });
+
+    it.each([
+      ["segue o orçamento em anexo", true],
+      ["Seguem em anexo a proposta e o TR", true],
+      ["orçamento em anexo", true],
+      ["os valores estão corretos", false],
+      ["segue em anexo a nota fiscal", false],
+    ])("citacaoDizEnvio(%s) = %s", (texto, esperado) => {
+      expect(citacaoDizEnvio(texto)).toBe(esperado);
+    });
+  });
+
+  describe("segunda leitura (revisor independente)", () => {
+    it("usa o modelo pedido e o prompt de revisor; a primeira leitura usa o padrão", async () => {
+      mocks.create.mockResolvedValue(resp([item(1, "recusa")]));
+      await classificarComIa([{ id: "a", trecho: "x" }]);
+      await classificarComIa([{ id: "a", trecho: "x" }], { modelo: "modelo-revisor", revisor: true });
+      const [primeira, segunda] = mocks.create.mock.calls.map((c) => c[0]);
+      expect(primeira.model).toBe("gpt-4o-mini");
+      expect(primeira.messages[0].content).not.toContain("REVISOR INDEPENDENTE");
+      expect(segunda.model).toBe("modelo-revisor");
+      expect(segunda.messages[0].content).toContain("REVISOR INDEPENDENTE");
+    });
+
+    it("pede a citação do trecho no prompt, nas duas leituras", () => {
+      expect(montarPrompt([{ id: "a", trecho: "x" }])).toContain('"evidencia"');
+      expect(montarPrompt([{ id: "a", trecho: "x" }], { revisor: true })).toContain("EXATAMENTE como está escrito");
+    });
   });
 });

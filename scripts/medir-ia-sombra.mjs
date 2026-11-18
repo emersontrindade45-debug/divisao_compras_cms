@@ -63,6 +63,37 @@ function concorda(rotulo, classe) {
     console.log("\n## Matriz: o que as regras disseram (linhas) × o que a IA disse (colunas)");
     console.table(matriz);
 
+    // ── Critério de aplicação sozinha (modo sombra) ─────────────────────────────────────────────
+    const crit = await c.query(
+      `select "criterioOk" ok, coalesce("criterioRazao",'(fora da fila)') razao, count(*)::int n
+         from classificacoes_ia_resposta group by 1,2 order by 1 desc, 3 desc`,
+    );
+    console.log("\n## Critério de aplicação sozinha: aprovadas (true) e por que as demais não");
+    console.table(crit.rows);
+
+    // O analista é o gabarito: o que ele decidiu na fila × o que a IA (e o critério) diziam.
+    const gab = await c.query(
+      `select ci."classeIa" ia, ci."criterioOk" ok, a.detalhes->>'desfecho' analista, count(*)::int n
+         from audit_logs a
+         join respostas_email_pendentes p on p.id = a.detalhes->>'pendenteId'
+         join classificacoes_ia_resposta ci on ci."gmailMensagemId" = p."gmailMensagemId"
+        where a.acao = 'resolver_resposta_email'
+        group by 1,2,3 order by 2 desc, 1, 3`,
+    );
+    const total = gab.rows.reduce((t, r) => t + r.n, 0);
+    const certos = gab.rows.filter((r) => r.ia === r.analista).reduce((t, r) => t + r.n, 0);
+    const okRows = gab.rows.filter((r) => r.ok);
+    const okTotal = okRows.reduce((t, r) => t + r.n, 0);
+    const okCertos = okRows.filter((r) => r.ia === r.analista).reduce((t, r) => t + r.n, 0);
+    console.log("\n## Decisões do analista na fila × IA (só o que ele já resolveu)");
+    console.table(gab.rows);
+    console.log(
+      `IA concorda com o analista em ${certos} de ${total}` +
+        `${total ? ` (${Math.round((100 * certos) / total)}%)` : ""}.\n` +
+        `QUANDO O CRITÉRIO APROVA: concorda em ${okCertos} de ${okTotal}` +
+        `${okTotal ? ` (${Math.round((100 * okCertos) / okTotal)}%)` : " — ainda sem amostra"}.`,
+    );
+
     const decididas = rows.filter((r) => r.regra.startsWith("aplicar:"));
     const certas = decididas.filter((r) => concorda(rotuloRegra(r.regra), r.classeIa));
     console.log(

@@ -5,7 +5,8 @@ import { ligarProcesso } from "@/lib/domain/cotacaoEmail/ligarProcesso";
 import { dominioDe, ligarRemetente } from "@/lib/domain/cotacaoEmail/ligarResposta";
 import { classificarResposta } from "@/lib/domain/cotacaoEmail/classificarResposta";
 import { buscarCandidatosPorEmail } from "./candidatos";
-import { classificarComIa, type TrechoParaClassificar } from "./classificarComIa";
+import { avaliarCriterioIa } from "@/lib/domain/cotacaoEmail/criterioIa";
+import { classificarComIa, MODELO_REVISOR, type TrechoParaClassificar } from "./classificarComIa";
 import type { PayloadScript, RespostaScript } from "./payload";
 
 /**
@@ -53,6 +54,9 @@ export const PRAZO_IA_MS = 26_000;
 export const LIMITE_FUNCAO_MS = 55_000;
 /** Um lote da IA em curso leva até ~10 s depois de o prazo ser conferido; reserva para ele. */
 const RESERVA_LOTE_IA_MS = 10_000;
+/** Resposta a ser lida pela IA, com o que as regras já disseram sobre ela. */
+type ItemParaIa = TrechoParaClassificar & { consultaId: string | null; regra: string; contemRecusa: boolean };
+
 /** Quem ainda está na fila por falta de decisão: só estes ganham SUGESTÃO na tela. */
 const MOTIVOS_PARA_IA = ["sinais_ambiguos", "provavel_recusa", "provavel_orcamento", "provavel_duvida"];
 
@@ -240,7 +244,7 @@ export async function sincronizarRespostasEmail(
     contemValor: boolean;
   }> = [];
   const devolvidos: Array<{ envioId: string; email: string; data: Date; mensagem: string }> = [];
-  const paraIa: Array<TrechoParaClassificar & { consultaId: string | null; regra: string }> = [];
+  const paraIa: ItemParaIa[] = [];
   let respostasClassificadas = 0;
 
   const ordenadas = [...payload.respostas].sort((a, b) => a.data.localeCompare(b.data));
@@ -286,6 +290,7 @@ export async function sincronizarRespostasEmail(
         anexosOutros: r.anexosOutros,
         consultaId: consulta ?? null,
         regra: motivoFila !== null ? `fila:${motivoFila}` : `aplicar:${situacao}`,
+        contemRecusa: r.contemRecusa,
       });
     }
 
@@ -403,13 +408,14 @@ export async function sincronizarRespostasEmail(
  * média ou alta), com guarda atômica (§9.14): resposta já resolvida nunca é alterada.
  */
 async function classificarEmSombra(
-  itens: Array<TrechoParaClassificar & { consultaId: string | null; regra: string }>,
+  itens: ItemParaIa[],
   naFila: Set<string>,
   prazoMs: number,
 ): Promise<void> {
   try {
     // Sem tempo para um lote inteiro: as respostas ficam para a leitura seguinte, não são perdidas.
     if (itens.length === 0 || prazoMs <= 0) return;
+    const inicio = Date.now();
     const feitas = await db.classificacaoIaResposta.findMany({
       where: { gmailMensagemId: { in: itens.map((i) => i.id) } },
       select: { gmailMensagemId: true },
@@ -422,15 +428,45 @@ async function classificarEmSombra(
     if (vereditos.length === 0) return;
     const porId = new Map(alvo.map((a) => [a.id, a]));
 
+    // SEGUNDA leitura, por outro modelo que não viu a primeira, só do que está na fila (é onde a
+    // decisão importa). Usa o que sobrou do prazo; sem tempo, o critério simplesmente não aprova.
+    const paraRevisar = vereditos.filter((v) => naFila.has(v.id)).map((v) => porId.get(v.id)!);
+    const sobra = prazoMs - (Date.now() - inicio);
+    const segundas = new Map<string, Awaited<ReturnType<typeof classificarComIa>>["vereditos"][number]>();
+    if (paraRevisar.length > 0 && sobra > 0) {
+      const rev = await classificarComIa(paraRevisar, { prazoMs: sobra, modelo: MODELO_REVISOR, revisor: true });
+      for (const v of rev.vereditos) segundas.set(v.id, v);
+    }
+
     await db.classificacaoIaResposta.createMany({
-      data: vereditos.map((v) => ({
-        gmailMensagemId: v.id,
-        consultaId: porId.get(v.id)?.consultaId ?? null,
-        classeIa: v.classe,
-        confianca: v.confianca,
-        justificativa: v.justificativa,
-        regra: porId.get(v.id)?.regra ?? "desconhecida",
-      })),
+      data: vereditos.map((v) => {
+        const item = porId.get(v.id)!;
+        const segunda = segundas.get(v.id);
+        // O critério só vale para o que está na fila. O que as regras já aplicaram não passa por ele.
+        const criterio = naFila.has(v.id)
+          ? avaliarCriterioIa({
+              primeira: { classe: v.classe, confianca: v.confianca, evidenciaOk: v.evidenciaOk },
+              segunda: segunda ? { classe: segunda.classe, evidenciaOk: segunda.evidenciaOk } : undefined,
+              anexosPdf: item.anexosPdf ?? 0,
+              // O envio pode ser provado por qualquer das duas citações.
+              evidenciaDizEnvio: v.evidenciaDizEnvio || (segunda?.evidenciaDizEnvio ?? false),
+              motivoFila: item.regra.startsWith("fila:") ? item.regra.slice("fila:".length) : "",
+              contemRecusa: item.contemRecusa,
+            })
+          : null;
+        return {
+          gmailMensagemId: v.id,
+          consultaId: item.consultaId,
+          classeIa: v.classe,
+          confianca: v.confianca,
+          justificativa: v.justificativa,
+          regra: item.regra,
+          segundaClasse: segunda?.classe ?? null,
+          evidenciaOk: v.evidenciaOk && (segunda?.evidenciaOk ?? false),
+          criterioOk: criterio?.ok ?? false,
+          criterioRazao: criterio?.razao ?? null,
+        };
+      }),
       skipDuplicates: true,
     });
 

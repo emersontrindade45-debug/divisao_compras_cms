@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
-vi.mock("../classificarComIa", () => ({ classificarComIa: mocks.classificarComIa }));
+vi.mock("../classificarComIa", () => ({ classificarComIa: mocks.classificarComIa, MODELO_REVISOR: "modelo-revisor" }));
 vi.mock("../candidatos", () => ({ buscarCandidatosPorEmail: mocks.buscarCandidatosPorEmail }));
 
 import { sincronizarRespostasEmail } from "../sincronizar";
@@ -449,7 +449,7 @@ describe("sincronizarRespostasEmail", () => {
     const TRECHO = "TRECHO-MARCADOR não conseguiremos atender";
     const CONTEXTO = [{ autor: "camara" as const, texto: "CONTEXTO-MARCADOR pergunta nossa" }];
     const veredito = (id: string, classe = "recusa", confianca = "alta") => ({
-      id, classe, confianca, justificativa: "diz que não atende",
+      id, classe, confianca, justificativa: "diz que não atende", evidenciaOk: true, evidenciaDizEnvio: false,
     });
     const ia = (vereditos: unknown[]) =>
       mocks.classificarComIa.mockResolvedValue({ vereditos, lotesComFalha: 0, lotesAdiados: 0 });
@@ -468,6 +468,7 @@ describe("sincronizarRespostasEmail", () => {
         data: [{
           gmailMensagemId: "m1", consultaId: "c0", classeIa: "recusa", confianca: "alta",
           justificativa: "diz que não atende", regra: "fila:sinais_ambiguos",
+          segundaClasse: "recusa", evidenciaOk: true, criterioOk: true, criterioRazao: "ok",
         }],
         skipDuplicates: true,
       });
@@ -612,6 +613,105 @@ describe("sincronizarRespostasEmail", () => {
       await sincronizarRespostasEmail({ envios: [envio()], respostas: muitas });
       expect(mocks.classificarComIa.mock.calls[0]![0]).toHaveLength(120);
       expect(mocks.classificarComIa.mock.calls[0]![1]).toEqual({ prazoMs: 26_000 });
+    });
+
+    describe("critério de aplicação sozinha (modo sombra: só grava, nunca aplica)", () => {
+      const gravado = () => mocks.db.classificacaoIaResposta.createMany.mock.calls[0]![0].data[0];
+
+      it("a segunda leitura usa o modelo revisor e roda só para o que está na fila", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        ia([veredito("m1")]);
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(mocks.classificarComIa).toHaveBeenCalledTimes(2);
+        expect(mocks.classificarComIa.mock.calls[1]![1]).toMatchObject({ modelo: "modelo-revisor", revisor: true });
+      });
+
+      it("o que as regras já decidiram (fora da fila) não é revisado nem passa pelo critério", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        ia([veredito("m1", "orcamento")]);
+        await sincronizarRespostasEmail({
+          envios: [envio()],
+          respostas: [resposta({ temAnexoOrcamento: true, trecho: "segue em anexo" })],
+        });
+        expect(mocks.classificarComIa).toHaveBeenCalledTimes(1);
+        expect(gravado()).toMatchObject({ criterioOk: false, criterioRazao: null, segundaClasse: null });
+      });
+
+      it("revisor que discorda reprova o critério e a razão fica gravada", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.classificarComIa
+          .mockResolvedValueOnce({ vereditos: [veredito("m1", "recusa")], lotesComFalha: 0, lotesAdiados: 0 })
+          .mockResolvedValueOnce({ vereditos: [veredito("m1", "duvida")], lotesComFalha: 0, lotesAdiados: 0 });
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(gravado()).toMatchObject({ segundaClasse: "duvida", criterioOk: false, criterioRazao: "revisor_discorda" });
+      });
+
+      it("sem tempo para a revisão, o critério não aprova (e a primeira leitura não se perde)", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.classificarComIa.mockResolvedValueOnce({ vereditos: [veredito("m1")], lotesComFalha: 0, lotesAdiados: 0 });
+        vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(40_000);
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(mocks.classificarComIa).toHaveBeenCalledTimes(1);
+        expect(gravado()).toMatchObject({ criterioOk: false, criterioRazao: "sem_revisao", classeIa: "recusa" });
+      });
+
+      it("trecho citado que não existe no texto reprova, mesmo com as duas leituras iguais", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.classificarComIa.mockResolvedValue({
+          vereditos: [{ ...veredito("m1"), evidenciaOk: false }],
+          lotesComFalha: 0,
+          lotesAdiados: 0,
+        });
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(gravado()).toMatchObject({ evidenciaOk: false, criterioOk: false, criterioRazao: "sem_evidencia" });
+      });
+
+      it("a IA contradizendo a regra de palavras (provável recusa) reprova: vai ao analista", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        ia([veredito("m1", "nao_e_resposta")]);
+        await sincronizarRespostasEmail({
+          envios: [envio()],
+          respostas: [resposta({ provavelRecusa: true, trecho: TRECHO })],
+        });
+        expect(gravado()).toMatchObject({ criterioOk: false, criterioRazao: "regra_discorda" });
+      });
+
+      it("orçamento sem PDF e sem o trecho dizer que envia: reprova; com PDF: aprova", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        ia([veredito("m1", "orcamento")]);
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(gravado()).toMatchObject({ criterioOk: false, criterioRazao: "orcamento_sem_prova" });
+
+        vi.clearAllMocks();
+        mocks.db.classificacaoIaResposta.findMany.mockResolvedValue([]);
+        mocks.db.classificacaoIaResposta.createMany.mockResolvedValue({ count: 1 });
+        mocks.db.respostaEmailPendente.createMany.mockResolvedValue({ count: 0 });
+        mocks.db.processo.findMany.mockResolvedValue([{ id: "p382", numero: "0382/2026" }]);
+        mocks.db.envioCotacao.count.mockResolvedValue(0);
+        mocks.db.consultaCotacao.findMany.mockResolvedValue(CONSULTAS);
+        mocks.db.fornecedor.findMany.mockResolvedValue([]);
+        mocks.db.emailInvalido.createMany.mockResolvedValue({ count: 0 });
+        mocks.db.$executeRaw.mockResolvedValue(0);
+        mocks.buscarCandidatosPorEmail.mockResolvedValue(new Map());
+        armar({ existentes: ["g1"], jaTem: 3 });
+        ia([veredito("m1", "orcamento")]);
+        await sincronizarRespostasEmail({
+          envios: [envio()],
+          respostas: [resposta({ trecho: TRECHO, anexosPdf: 1 })],
+        });
+        expect(gravado()).toMatchObject({ criterioOk: true, criterioRazao: "ok" });
+      });
+
+      it("NUNCA aplica: nenhuma escrita em consulta por causa do veredito da IA (modo sombra)", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        ia([veredito("m1", "recusa")]);
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        // Os VALORES passados ao SQL: a consulta fica "a_confirmar" (decisão das regras), nunca "recusa".
+        const valores = mocks.db.$executeRaw.mock.calls.flatMap((c) => (c.slice(1) as unknown[]).flat());
+        expect(valores).toContain("a_confirmar");
+        expect(valores).not.toContain("recusa");
+        expect(mocks.db.respostaEmailPendente.updateMany.mock.calls.every((c) => c[0].data.resolvidaEm === undefined)).toBe(true);
+      });
     });
   });
 });
