@@ -492,7 +492,14 @@ async function classificarEmSombra(
     const jaFeitas = new Set(feitas.map((f) => f.gmailMensagemId));
     // Linha gravada SEM a segunda leitura (faltou tempo): o texto não é guardado, então só esta
     // leitura, que o traz de novo, pode completá-la. Sem isto ela ficaria sem revisão para sempre.
-    const semRevisao = new Set(feitas.filter((f) => f.criterioRazao === "sem_revisao").map((f) => f.gmailMensagemId));
+    // Também a linha SEM critério (razão nula) de uma resposta que agora está na fila: foi lida
+    // quando as regras ainda a decidiam sozinhas (PDF = orçamento) e nunca passou pelo critério.
+    // Com a chave ligada ela cai na fila `anexo_pdf` e, sem isto, ficaria parada para sempre.
+    const semRevisao = new Set(
+      feitas
+        .filter((f) => f.criterioRazao === "sem_revisao" || (f.criterioRazao === null && naFila.has(f.gmailMensagemId)))
+        .map((f) => f.gmailMensagemId),
+    );
     const alvo = itens.filter((i) => !jaFeitas.has(i.id) || semRevisao.has(i.id)).slice(0, MAX_IA_POR_LEITURA);
     if (alvo.length === 0) return [];
 
@@ -547,7 +554,7 @@ async function classificarEmSombra(
       await Promise.all(
         refeitas.slice(i, i + 10).map((l) =>
           db.classificacaoIaResposta.updateMany({
-            where: { gmailMensagemId: l.gmailMensagemId, criterioRazao: "sem_revisao" },
+            where: { gmailMensagemId: l.gmailMensagemId, OR: [{ criterioRazao: "sem_revisao" }, { criterioRazao: null }] },
             data: l,
           }),
         ),

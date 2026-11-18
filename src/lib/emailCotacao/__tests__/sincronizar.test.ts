@@ -718,9 +718,35 @@ describe("sincronizarRespostasEmail", () => {
         expect(mocks.classificarComIa).toHaveBeenCalledTimes(2); // primeira leitura de novo + revisor
         expect(mocks.db.classificacaoIaResposta.createMany).not.toHaveBeenCalled();
         expect(mocks.db.classificacaoIaResposta.updateMany).toHaveBeenCalledWith({
-          where: { gmailMensagemId: "m1", criterioRazao: "sem_revisao" },
+          where: { gmailMensagemId: "m1", OR: [{ criterioRazao: "sem_revisao" }, { criterioRazao: null }] },
           data: expect.objectContaining({ segundaClasse: "recusa", criterioOk: true, criterioRazao: "ok" }),
         });
+      });
+
+      it("linha lida SEM critério (as regras decidiam) que agora está na fila é revista, e aplicada se aprovar", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.ligada.mockReturnValue(true);
+        mocks.db.classificacaoIaResposta.findMany.mockResolvedValue([{ gmailMensagemId: "m1", criterioRazao: null }]);
+        mocks.db.classificacaoIaResposta.updateMany.mockResolvedValue({ count: 1 });
+        ia([veredito("m1")]);
+        const r = await sincronizarRespostasEmail(
+          { envios: [envio()], respostas: [resposta({ trecho: TRECHO })] },
+          { userId: "u1" },
+        );
+        expect(mocks.classificarComIa).toHaveBeenCalledTimes(2);
+        expect(mocks.db.classificacaoIaResposta.createMany).not.toHaveBeenCalled();
+        expect(mocks.db.classificacaoIaResposta.updateMany.mock.calls[0]![0].data).toMatchObject({ criterioOk: true, criterioRazao: "ok" });
+        expect(r.aplicadasPelaIa).toBe(1);
+      });
+
+      it("linha sem critério de resposta que NÃO está na fila (regra decidiu e foi aplicada) não é relida", async () => {
+        armar({ existentes: ["g1"], jaTem: 3 });
+        mocks.db.classificacaoIaResposta.findMany.mockResolvedValue([{ gmailMensagemId: "m1", criterioRazao: null }]);
+        await sincronizarRespostasEmail({
+          envios: [envio()],
+          respostas: [resposta({ trecho: TRECHO, temAnexoOrcamento: true, anexosPdf: 1 })], // chave desligada: o PDF decide sozinho, fora da fila
+        });
+        expect(mocks.classificarComIa).not.toHaveBeenCalled();
       });
 
       it("linha com qualquer outra razão (já revisada) NÃO é relida: ninguém paga duas vezes", async () => {
