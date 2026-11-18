@@ -8,6 +8,7 @@ import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cot
 import { AplicadasPelaIa, type AplicadaPelaIaItem } from "@/components/cotacoes/AplicadasPelaIa";
 import { OrcamentosPorPdfARevisar, type OrcamentoPdfRevisarItem } from "@/components/cotacoes/OrcamentosPorPdfARevisar";
 import { REGRAS_ORCAMENTO_POR_ANEXO } from "@/lib/domain/cotacaoEmail/regrasOrcamentoPorAnexo";
+import { listarClassificaveisSemFornecedor } from "@/lib/emailCotacao/classificarSemFornecedor";
 import { listarEncerraveisNaoResposta } from "@/lib/emailCotacao/encerrarNaoResposta";
 import { aplicacaoIaLigada, listarAprovadasAplicaveis } from "@/lib/emailCotacao/aplicarIa";
 import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
@@ -34,7 +35,7 @@ export default async function CotacoesPage({
   await requireAuth();
   const { aba } = await searchParams;
 
-  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes, encerraveis] = await Promise.all([
+  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes, encerraveis, semFornecedor] = await Promise.all([
     listarCotacoes(),
     buscarAlertas(),
     db.processo.findMany({
@@ -70,6 +71,7 @@ export default async function CotacoesPage({
     carregarOrcamentosPdfARevisar(),
     contarAprovadasPendentes(),
     contarEncerraveis(),
+    contarSemFornecedor(),
   ]);
 
   const cotacoes = cotacoesRaw.map((c) => ({
@@ -169,7 +171,7 @@ export default async function CotacoesPage({
         </TabsContent>
 
         <TabsContent value="confirmar">
-          <RespostasAConfirmar itens={respostasPendentes} encerraveis={encerraveis} />
+          <RespostasAConfirmar itens={respostasPendentes} encerraveis={encerraveis} semFornecedor={semFornecedor} />
         </TabsContent>
 
         <TabsContent value="revisar-pdf">
@@ -377,5 +379,17 @@ async function contarEncerraveis(): Promise<number> {
     return (await listarEncerraveisNaoResposta()).length;
   } catch {
     return 0;
+  }
+}
+
+/** Respostas sem fornecedor ligado que a IA leu com confiança alta, por categoria. */
+async function contarSemFornecedor(): Promise<{ orcamento: number; recusa: number; duvida: number }> {
+  const zero = { orcamento: 0, recusa: 0, duvida: 0 };
+  try {
+    const alvos = await listarClassificaveisSemFornecedor();
+    for (const a of alvos) if (a.classe in zero) zero[a.classe as keyof typeof zero] += 1;
+    return zero;
+  } catch {
+    return { orcamento: 0, recusa: 0, duvida: 0 };
   }
 }

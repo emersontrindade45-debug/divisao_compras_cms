@@ -308,6 +308,13 @@ export interface ConsultaDesempenhoInput {
   dataResposta: Date | null;
   situacao: SituacaoConsultaInput;
   processo: ProcessoRef;
+  /**
+   * Resposta que a IA classificou mas que não foi ligada a um fornecedor (M30.d). Conta no
+   * NUMERADOR da categoria (orçamento/recusa/dúvida): o fornecedor que respondeu já está no
+   * denominador como consultado. Fica FORA de tudo o mais (consultadas, taxa de resposta, tempo,
+   * e-mails devolvidos, por processo), senão a mesma consulta entraria duas vezes.
+   */
+  semFornecedor?: boolean;
 }
 
 const STATUS_DA_SITUACAO: Record<
@@ -331,7 +338,7 @@ const STATUS_DA_SITUACAO: Record<
  */
 export function consultasComoCotacoes(consultas: ConsultaDesempenhoInput[]): CotacaoDesempenhoInput[] {
   return consultas
-    .filter((c) => c.situacao !== "email_invalido")
+    .filter((c) => c.situacao !== "email_invalido" && !c.semFornecedor)
     .map((c) => ({
       dataEnvio: c.dataEnvio,
       status: STATUS_DA_SITUACAO[c.situacao as keyof typeof STATUS_DA_SITUACAO],
@@ -361,14 +368,17 @@ export interface ContagemConsultas {
 
 /** Quantas consultas da janela caíram em cada situação (base dos cards Orçamentos/Recusas). */
 export function contarConsultas(consultas: ConsultaDesempenhoInput[], j: Janela): ContagemConsultas {
-  const daJanela = consultas.filter((c) => dentro(c.dataEnvio, j));
+  const daJanelaTodas = consultas.filter((c) => dentro(c.dataEnvio, j));
+  const daJanela = daJanelaTodas.filter((c) => !c.semFornecedor);
   const n = (s: SituacaoConsultaInput) => daJanela.filter((c) => c.situacao === s).length;
+  // Sem fornecedor ligado: só somam ao numerador da categoria, nunca ao denominador.
+  const extra = (s: SituacaoConsultaInput) => daJanelaTodas.filter((c) => c.semFornecedor && c.situacao === s).length;
   const invalidos = n("email_invalido");
   return {
     consultadas: daJanela.length - invalidos,
-    orcamentos: n("orcamento"),
-    recusas: n("recusa"),
-    duvidas: n("duvida"),
+    orcamentos: n("orcamento") + extra("orcamento"),
+    recusas: n("recusa") + extra("recusa"),
+    duvidas: n("duvida") + extra("duvida"),
     aConfirmar: n("a_confirmar"),
     invalidos,
   };
@@ -389,6 +399,7 @@ export function percentualDaSituacao(
 export function tempoRespostaDias(consultas: ConsultaDesempenhoInput[], j: Janela): Indicador {
   const respondidas = consultas.filter(
     (c) =>
+      !c.semFornecedor &&
       (c.situacao === "orcamento" || c.situacao === "recusa" || c.situacao === "duvida") &&
       dentro(c.dataResposta, j),
   );
@@ -405,7 +416,7 @@ export function tempoRespostaDias(consultas: ConsultaDesempenhoInput[], j: Janel
 
 /** % dos e-mails consultados na janela que voltaram — mede a higiene da lista de envio. */
 export function percentualEmailsInvalidos(consultas: ConsultaDesempenhoInput[], j: Janela): Indicador {
-  const enviadas = consultas.filter((c) => dentro(c.dataEnvio, j));
+  const enviadas = consultas.filter((c) => !c.semFornecedor && dentro(c.dataEnvio, j));
   return {
     valor: percentual(enviadas.filter((c) => c.situacao === "email_invalido").length, enviadas.length),
     base: enviadas.length,

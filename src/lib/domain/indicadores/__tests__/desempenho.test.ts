@@ -288,6 +288,31 @@ describe("indicadores das consultas por e-mail (M30.d)", () => {
     expect(r.valor).toBe(25);
   });
 
+  describe("respostas classificadas pela IA sem fornecedor ligado", () => {
+    const sem = (situacao: "orcamento" | "recusa" | "duvida") => cons({ situacao, semFornecedor: true, dataResposta: d("2026-11-03") });
+
+    it("somam ao numerador da categoria e NÃO ao denominador (a consulta do fornecedor já está nele)", () => {
+      const consultas = [cons({ situacao: "recusa" }), cons({ situacao: "sem_resposta" }), sem("recusa"), sem("orcamento"), sem("duvida")];
+      const c = contarConsultas(consultas, J);
+      expect(c).toMatchObject({ consultadas: 2, recusas: 2, orcamentos: 1, duvidas: 1 });
+      expect(percentualDaSituacao(consultas, J, "recusa")).toMatchObject({ valor: 100, base: 2 });
+    });
+
+    it("ficam fora da taxa de resposta, do tempo de resposta e dos e-mails devolvidos", () => {
+      const base = [cons({ situacao: "orcamento", dataResposta: d("2026-11-03") }), cons({ situacao: "sem_resposta" })];
+      const comSem = [...base, sem("recusa"), sem("duvida")];
+      expect(taxaRespostaConsultas(comSem, J)).toEqual(taxaRespostaConsultas(base, J));
+      expect(tempoRespostaDias(comSem, J)).toEqual(tempoRespostaDias(base, J));
+      expect(percentualEmailsInvalidos(comSem, J)).toEqual(percentualEmailsInvalidos(base, J));
+      expect(consultasComoCotacoes(comSem)).toHaveLength(2);
+    });
+
+    it("respeitam a janela de datas como as demais", () => {
+      const fora = cons({ situacao: "recusa", semFornecedor: true, dataEnvio: d("2026-01-01") });
+      expect(contarConsultas([fora], J).recusas).toBe(0);
+    });
+  });
+
   it("contarConsultas separa orçamento, recusa e a confirmar, e tira o e-mail devolvido da base", () => {
     const c = contarConsultas(
       [

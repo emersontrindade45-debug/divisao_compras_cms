@@ -11,6 +11,7 @@ import { resolverRespostaEmail, type DesfechoResposta } from "@/lib/actions/reso
 import { rotuloDoMotivo } from "@/lib/domain/cotacaoEmail/motivosFila";
 import { RecusaProvavelEmLote } from "@/components/cotacoes/RecusaProvavelEmLote";
 import { EncerrarNaoRespostaEmLote } from "@/components/cotacoes/EncerrarNaoRespostaEmLote";
+import { ClassificarSemFornecedorEmLote, type ContagemSemFornecedor } from "@/components/cotacoes/ClassificarSemFornecedorEmLote";
 
 export interface RespostaPendenteItem {
   id: string;
@@ -157,7 +158,7 @@ function Linha({ item }: { item: RespostaPendenteItem }) {
  * processo, data e o link para abrir o e-mail NO Gmail — nunca o corpo do e-mail, que não é
  * guardado. O valor do orçamento não entra aqui: a proposta segue pelo checklist de validade.
  */
-export function RespostasAConfirmar({ itens, encerraveis = 0 }: { itens: RespostaPendenteItem[]; encerraveis?: number }) {
+export function RespostasAConfirmar({ itens, encerraveis = 0, semFornecedor }: { itens: RespostaPendenteItem[]; encerraveis?: number; semFornecedor?: ContagemSemFornecedor }) {
   if (itens.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -172,6 +173,7 @@ export function RespostasAConfirmar({ itens, encerraveis = 0 }: { itens: Respost
   return (
     <div className="space-y-3">
       <EncerrarNaoRespostaEmLote quantas={encerraveis} />
+      {semFornecedor && <ClassificarSemFornecedorEmLote contagem={semFornecedor} />}
       {idsRecusaProvavel.length > 0 && <RecusaProvavelEmLote ids={idsRecusaProvavel} />}
       <ul className="space-y-2" aria-label="Respostas a confirmar">
         {itens.map((i) => (

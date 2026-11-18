@@ -7,6 +7,8 @@ const { dbMock } = vi.hoisted(() => ({
     processo: { findMany: vi.fn() },
     proposta: { findMany: vi.fn() },
     consultaCotacao: { findMany: vi.fn() },
+    classificacaoIaResposta: { findMany: vi.fn() },
+    respostaEmailPendente: { findMany: vi.fn() },
   },
 }));
 vi.mock("@/lib/db", () => ({ db: dbMock }));
@@ -39,6 +41,8 @@ beforeEach(() => {
   dbMock.processo.findMany.mockResolvedValue([]);
   dbMock.proposta.findMany.mockResolvedValue([]);
   dbMock.consultaCotacao.findMany.mockResolvedValue([]);
+  dbMock.classificacaoIaResposta.findMany.mockResolvedValue([]);
+  dbMock.respostaEmailPendente.findMany.mockResolvedValue([]);
 });
 
 describe("carregarCamadaDesempenho — taxa de resposta por processo", () => {
@@ -77,5 +81,39 @@ describe("carregarCamadaDesempenho — taxa de resposta por processo", () => {
 
     const where = dbMock.consultaCotacao.findMany.mock.calls[0]![0].where;
     expect(where.envio.processo).toEqual({ responsavelId: "u1" });
+  });
+});
+
+describe("carregarCamadaDesempenho — respostas da IA sem fornecedor ligado", () => {
+  const linhaIa = (gmailMensagemId: string, classeIa: string) => ({ gmailMensagemId, classeIa });
+  const pendente = (gmailMensagemId: string) => ({
+    gmailMensagemId,
+    dataResposta: ENVIO,
+    envio: { dataEnvio: ENVIO, processoId: null, numeroProcessoAssunto: null, processo: null },
+  });
+
+  it("lê só as aplicadas, sem consulta, não desfeitas e das 3 categorias (argumento passado ao Prisma)", async () => {
+    await carregarCamadaDesempenho("30d", "todos", "u1", AGORA);
+    expect(dbMock.classificacaoIaResposta.findMany.mock.calls[0]![0].where).toEqual({
+      consultaId: null,
+      aplicadaEm: { not: null },
+      desfeitaEm: null,
+      classeIa: { in: ["orcamento", "recusa", "duvida"] },
+    });
+  });
+
+  it("entram no numerador da categoria no dashboard; a base continua sendo as consultas", async () => {
+    dbMock.consultaCotacao.findMany.mockResolvedValue([linha({ situacao: "sem_resposta" }), linha({ situacao: "recusa" })]);
+    dbMock.classificacaoIaResposta.findMany.mockResolvedValue([linhaIa("m1", "recusa"), linhaIa("m2", "orcamento")]);
+    dbMock.respostaEmailPendente.findMany.mockResolvedValue([pendente("m1"), pendente("m2")]);
+    const c = await carregarCamadaDesempenho("30d", "todos", "u1", AGORA);
+    expect(c.contagem).toMatchObject({ consultadas: 2, recusas: 2, orcamentos: 1 });
+  });
+
+  it("falha ao ler as respostas da IA não derruba o dashboard", async () => {
+    dbMock.consultaCotacao.findMany.mockResolvedValue([linha({ situacao: "recusa" })]);
+    dbMock.classificacaoIaResposta.findMany.mockRejectedValue(new Error("boom"));
+    const c = await carregarCamadaDesempenho("30d", "todos", "u1", AGORA);
+    expect(c.contagem).toMatchObject({ consultadas: 1, recusas: 1 });
   });
 });

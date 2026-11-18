@@ -76,7 +76,7 @@ export async function carregarCamadaDesempenho(
         },
       },
     }),
-    carregarConsultas(anterior.inicio, escopo === "meus" ? { responsavelId: usuarioId } : null),
+    carregarConsultasComSemFornecedor(anterior.inicio, escopo === "meus" ? { responsavelId: usuarioId } : null),
     db.proposta.findMany({
       where: { createdAt: { gte: anterior.inicio }, cotacao: { processo: filtroResponsavel } },
       select: { createdAt: true, statusGeral: true },
@@ -166,6 +166,68 @@ async function carregarConsultas(
         processoNumero: l.envio.processo?.numero ?? null,
         numeroProcessoAssunto: l.envio.numeroProcessoAssunto,
       }),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** Consultas por e-mail mais as respostas classificadas pela IA sem fornecedor ligado (M30.d). */
+async function carregarConsultasComSemFornecedor(
+  desde: Date,
+  filtroProcesso: { responsavelId: string } | null,
+): Promise<ConsultaDesempenhoInput[]> {
+  const [consultas, semFornecedor] = await Promise.all([
+    carregarConsultas(desde, filtroProcesso),
+    carregarSemFornecedor(desde, filtroProcesso),
+  ]);
+  return [...consultas, ...semFornecedor];
+}
+
+/**
+ * Respostas que a IA classificou (recusa, orçamento, dúvida) sem ligá-las a um fornecedor: contam
+ * no numerador da categoria, no período do ENVIO como as demais. `catch` vazio: o dashboard abre
+ * mesmo se esta leitura falhar (a base das taxas por fornecedor não depende dela).
+ */
+async function carregarSemFornecedor(
+  desde: Date,
+  filtroProcesso: { responsavelId: string } | null,
+): Promise<ConsultaDesempenhoInput[]> {
+  try {
+    const ias = await db.classificacaoIaResposta.findMany({
+      where: { consultaId: null, aplicadaEm: { not: null }, desfeitaEm: null, classeIa: { in: ["orcamento", "recusa", "duvida"] } },
+      select: { gmailMensagemId: true, classeIa: true },
+    });
+    if (ias.length === 0) return [];
+    const classe = new Map(ias.map((i) => [i.gmailMensagemId, i.classeIa]));
+    const pendentes = await db.respostaEmailPendente.findMany({
+      where: {
+        gmailMensagemId: { in: [...classe.keys()] },
+        envio: { dataEnvio: { gte: desde }, ...(filtroProcesso ? { processo: filtroProcesso } : {}) },
+      },
+      select: {
+        gmailMensagemId: true,
+        dataResposta: true,
+        envio: {
+          select: {
+            dataEnvio: true,
+            processoId: true,
+            numeroProcessoAssunto: true,
+            processo: { select: { numero: true } },
+          },
+        },
+      },
+    });
+    return pendentes.map((p) => ({
+      dataEnvio: p.envio.dataEnvio,
+      dataResposta: p.dataResposta,
+      situacao: classe.get(p.gmailMensagemId) as "orcamento" | "recusa" | "duvida",
+      processo: referenciaProcesso({
+        processoId: p.envio.processoId,
+        processoNumero: p.envio.processo?.numero ?? null,
+        numeroProcessoAssunto: p.envio.numeroProcessoAssunto,
+      }),
+      semFornecedor: true,
     }));
   } catch {
     return [];
