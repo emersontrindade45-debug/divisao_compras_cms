@@ -1220,6 +1220,14 @@ model ClassificacaoIaResposta {
   justificativa   String
   /// O que as regras fizeram: "aplicar:orcamento", "aplicar:recusa" ou "fila:<motivo>".
   regra           String
+  /// Classe da SEGUNDA leitura (modelo revisor, independente da primeira). Null = não houve.
+  segundaClasse   String?
+  /// As duas leituras citaram um trecho que de fato existe no texto (o trecho em si nunca é gravado).
+  evidenciaOk     Boolean  @default(false)
+  /// O critério de aplicação sozinha foi atendido. Em modo sombra: "teria aplicado", sem aplicar.
+  criterioOk      Boolean  @default(false)
+  /// Por que o critério falhou/passou, em código curto (ex.: "revisor_discorda").
+  criterioRazao   String?
   createdAt       DateTime @default(now())
 
   @@index([createdAt])
