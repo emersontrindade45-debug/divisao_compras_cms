@@ -1189,6 +1189,11 @@ model RespostaEmailPendente {
   temAnexoOrcamento  Boolean
   contemRecusa       Boolean
   contemValor        Boolean
+  /// Veredito da IA sobre o texto anonimizado (M30.d): orcamento | recusa | duvida | nao_e_resposta.
+  /// Só SUGERE — o analista decide. O texto lido pela IA nunca é guardado.
+  sugestaoIa         String?
+  /// Frase curta da IA explicando o veredito (até 160 caracteres).
+  justificativaIa    String?
   resolvidaEm        DateTime?
   createdAt          DateTime  @default(now())
 
