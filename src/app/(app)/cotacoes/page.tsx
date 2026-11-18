@@ -1,4 +1,4 @@
-import { Mail, Send, ClipboardCheck, MailQuestion, Bot } from "lucide-react";
+import { Mail, Send, ClipboardCheck, MailQuestion, Bot, FileSearch } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CotacoesTableReal } from "@/components/cotacoes/CotacoesTableReal";
 import { SelecaoFornecedoresForm } from "@/components/cotacoes/SelecaoFornecedoresForm";
@@ -6,6 +6,8 @@ import { VerificarRespostasButton } from "@/components/cotacoes/VerificarRespost
 import { HistoricoRespostasButton } from "@/components/cotacoes/HistoricoRespostasButton";
 import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cotacoes/RespostasAConfirmar";
 import { AplicadasPelaIa, type AplicadaPelaIaItem } from "@/components/cotacoes/AplicadasPelaIa";
+import { OrcamentosPorPdfARevisar, type OrcamentoPdfRevisarItem } from "@/components/cotacoes/OrcamentosPorPdfARevisar";
+import { REGRAS_ORCAMENTO_POR_ANEXO } from "@/lib/domain/cotacaoEmail/regrasOrcamentoPorAnexo";
 import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
 import { ChecklistProposta } from "@/components/cotacoes/ChecklistProposta";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
@@ -30,7 +32,7 @@ export default async function CotacoesPage({
   await requireAuth();
   const { aba } = await searchParams;
 
-  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa] = await Promise.all([
+  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf] = await Promise.all([
     listarCotacoes(),
     buscarAlertas(),
     db.processo.findMany({
@@ -63,6 +65,7 @@ export default async function CotacoesPage({
     }),
     carregarRespostasPendentes(),
     carregarAplicadasPelaIa(),
+    carregarOrcamentosPdfARevisar(),
   ]);
 
   const cotacoes = cotacoesRaw.map((c) => ({
@@ -114,7 +117,7 @@ export default async function CotacoesPage({
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
 
-      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : aba === "ia" ? "ia" : "painel"} className="space-y-4">
+      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : aba === "ia" ? "ia" : aba === "revisar-pdf" ? "revisar-pdf" : "painel"} className="space-y-4">
         <TabsList>
           <TabsTrigger value="painel" className="gap-2">
             <Mail className="size-3.5" />
@@ -140,6 +143,13 @@ export default async function CotacoesPage({
               <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">{aplicadasPelaIa.length}</span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="revisar-pdf" className="gap-2">
+            <FileSearch className="size-3.5" />
+            Orçamentos por PDF
+            {orcamentosPdf.length > 0 && (
+              <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">{orcamentosPdf.length}</span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="propostas" className="gap-2">
             <ClipboardCheck className="size-3.5" />
             Validação de propostas
@@ -156,6 +166,10 @@ export default async function CotacoesPage({
 
         <TabsContent value="confirmar">
           <RespostasAConfirmar itens={respostasPendentes} />
+        </TabsContent>
+
+        <TabsContent value="revisar-pdf">
+          <OrcamentosPorPdfARevisar itens={orcamentosPdf} />
         </TabsContent>
 
         <TabsContent value="ia">
@@ -293,6 +307,51 @@ async function carregarAplicadasPelaIa(): Promise<AplicadaPelaIaItem[]> {
         linkGmail: linkDoGmail(l.gmailMensagemId),
       };
     });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Consultas "orçamento" decididas só pelo anexo (regras antigas) em que a IA discorda (M30.d).
+ * Sem classificação da IA não há o que mostrar: não é divergência. `select` explícito (§9.46); `catch`
+ * devolve vazio para a página abrir mesmo se a tabela da IA falhar.
+ */
+async function carregarOrcamentosPdfARevisar(): Promise<OrcamentoPdfRevisarItem[]> {
+  try {
+    const consultas = await db.consultaCotacao.findMany({
+      where: { situacao: "orcamento", regra: { in: [...REGRAS_ORCAMENTO_POR_ANEXO] }, gmailRespostaId: { not: null } },
+      select: {
+        id: true,
+        email: true,
+        razaoSocial: true,
+        gmailRespostaId: true,
+        envio: { select: { numeroProcessoAssunto: true, processo: { select: { numero: true } } } },
+      },
+    });
+    if (consultas.length === 0) return [];
+    const ias = await db.classificacaoIaResposta.findMany({
+      where: {
+        gmailMensagemId: { in: consultas.map((c) => c.gmailRespostaId as string) },
+        classeIa: { in: ["recusa", "duvida", "nao_e_resposta"] },
+      },
+      select: { gmailMensagemId: true, classeIa: true, justificativa: true },
+    });
+    const porMsg = new Map(ias.map((i) => [i.gmailMensagemId, i]));
+    const itens: OrcamentoPdfRevisarItem[] = [];
+    for (const c of consultas) {
+      const ia = porMsg.get(c.gmailRespostaId as string);
+      if (!ia) continue;
+      itens.push({
+        consultaId: c.id,
+        classeIa: ia.classeIa as OrcamentoPdfRevisarItem["classeIa"],
+        justificativa: ia.justificativa,
+        processoNumero: c.envio.processo?.numero ?? c.envio.numeroProcessoAssunto ?? null,
+        fornecedor: c.razaoSocial ?? c.email,
+        linkGmail: linkDoGmail(c.gmailRespostaId as string),
+      });
+    }
+    return itens;
   } catch {
     return [];
   }
