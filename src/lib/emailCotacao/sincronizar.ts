@@ -46,9 +46,9 @@ export const MAX_IA_POR_LEITURA = 120;
 /**
  * A função tem 60 s e a leitura do Google já gastou até ~40 s no pior caso (TIMEOUT_SCRIPT_MS), mais
  * o banco. O prazo só vale para COMEÇAR lotes (classificarComIa o confere antes de cada um); o lote
- * em curso termina em ~10 s, então 26 s mantém a soma abaixo do limite no caso típico (~12 s de leitura).
+ * em curso termina em ~10 s, então 20 s mantém a soma abaixo do limite no caso típico (~12 s de leitura). Eram 26 s, mas 8 fatias do histórico fecharam em 53–55 s de 60 (2026-11-18) e algumas morreram sem registro; 20 s devolve ~6 s de folga.
  */
-export const PRAZO_IA_MS = 26_000;
+export const PRAZO_IA_MS = 20_000;
 /**
  * Limite da função serverless (maxDuration = 60) com folga. A leitura do Google pode levar até
  * ~40 s; o que sobrar depois dela e do banco é o que a IA pode usar (CLAUDE.md §9.100: teto de

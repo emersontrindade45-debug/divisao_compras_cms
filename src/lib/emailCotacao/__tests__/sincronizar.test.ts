@@ -619,7 +619,7 @@ describe("sincronizarRespostasEmail", () => {
       const muitas = Array.from({ length: 150 }, (_, i) => resposta({ id: `m${i}`, trecho: "x" }));
       await sincronizarRespostasEmail({ envios: [envio()], respostas: muitas });
       expect(mocks.classificarComIa.mock.calls[0]![0]).toHaveLength(120);
-      expect(mocks.classificarComIa.mock.calls[0]![1]).toEqual({ prazoMs: 26_000 });
+      expect(mocks.classificarComIa.mock.calls[0]![1]).toEqual({ prazoMs: 20_000 });
     });
 
     describe("critério de aplicação sozinha (modo sombra: só grava, nunca aplica)", () => {
