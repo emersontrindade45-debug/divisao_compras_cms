@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { desfazerRespostaAplicadaPelaIa } from "@/lib/actions/desfazerAplicacaoIa";
+import { aplicarAprovadasPelaIa } from "@/lib/actions/aplicarAprovadasIa";
 
 export interface AplicadaPelaIaItem {
   gmailMensagemId: string;
@@ -73,17 +74,56 @@ function Linha({ item }: { item: AplicadaPelaIaItem }) {
  * Respostas que a IA classificou SOZINHA (M30.d, Fase 3b), para o analista conferir e, se discordar,
  * desfazer. Mostra a justificativa curta e o link para abrir o e-mail NO Gmail — nunca o texto.
  */
-export function AplicadasPelaIa({ itens }: { itens: AplicadaPelaIaItem[] }) {
+function AplicarAcervo({ quantas }: { quantas: number }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  if (quantas <= 0) return null;
+
+  function aplicar() {
+    startTransition(async () => {
+      const r = await aplicarAprovadasPelaIa();
+      if (r.error || !r.data) {
+        toast.error(r.error ?? "Não foi possível aplicar.");
+        return;
+      }
+      const { aplicadas, ignoradas, restantes } = r.data;
+      toast.success(
+        `${aplicadas} aplicada(s)` +
+          (ignoradas ? `, ${ignoradas} já resolvida(s) por você` : "") +
+          (restantes ? `. Restam ${restantes}: clique de novo.` : "."),
+      );
+      router.refresh();
+    });
+  }
+
+  return (
+    <section aria-label="Aplicar o que a IA já aprovou" className="space-y-2 rounded-md border border-dashed bg-muted/30 p-3">
+      <p className="text-sm">
+        <strong>{quantas}</strong> {quantas === 1 ? "resposta já passou" : "respostas já passaram"} no critério da IA
+        (duas leituras concordam) e ainda não foram aplicadas. Cada uma pode ser desfeita depois.
+      </p>
+      <Button size="sm" onClick={aplicar} disabled={pending}>
+        {pending ? "Aplicando…" : `Aplicar as ${Math.min(quantas, 100)} primeiras`}
+      </Button>
+    </section>
+  );
+}
+
+export function AplicadasPelaIa({ itens, aprovadasPendentes = 0 }: { itens: AplicadaPelaIaItem[]; aprovadasPendentes?: number }) {
   if (itens.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Nenhuma resposta foi classificada pela IA sozinha. Quando a aplicação automática estiver ligada, o que ela
-        decidir aparece aqui, com o botão para desfazer.
-      </p>
+      <div className="space-y-3">
+        <AplicarAcervo quantas={aprovadasPendentes} />
+        <p className="text-sm text-muted-foreground">
+          Nenhuma resposta foi classificada pela IA sozinha. Quando a aplicação automática estiver ligada, o que ela
+          decidir aparece aqui, com o botão para desfazer.
+        </p>
+      </div>
     );
   }
   return (
     <div className="space-y-3">
+      <AplicarAcervo quantas={aprovadasPendentes} />
       <p className="text-sm text-muted-foreground">
         A IA aplicou estas classificações porque duas leituras independentes concordaram e a regra de palavras não
         contradisse. Se alguma estiver errada, desfaça: a resposta volta para a fila.

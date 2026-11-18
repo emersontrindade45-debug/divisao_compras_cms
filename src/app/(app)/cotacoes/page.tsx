@@ -8,6 +8,7 @@ import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cot
 import { AplicadasPelaIa, type AplicadaPelaIaItem } from "@/components/cotacoes/AplicadasPelaIa";
 import { OrcamentosPorPdfARevisar, type OrcamentoPdfRevisarItem } from "@/components/cotacoes/OrcamentosPorPdfARevisar";
 import { REGRAS_ORCAMENTO_POR_ANEXO } from "@/lib/domain/cotacaoEmail/regrasOrcamentoPorAnexo";
+import { aplicacaoIaLigada, listarAprovadasAplicaveis } from "@/lib/emailCotacao/aplicarIa";
 import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
 import { ChecklistProposta } from "@/components/cotacoes/ChecklistProposta";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
@@ -32,7 +33,7 @@ export default async function CotacoesPage({
   await requireAuth();
   const { aba } = await searchParams;
 
-  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf] = await Promise.all([
+  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes] = await Promise.all([
     listarCotacoes(),
     buscarAlertas(),
     db.processo.findMany({
@@ -66,6 +67,7 @@ export default async function CotacoesPage({
     carregarRespostasPendentes(),
     carregarAplicadasPelaIa(),
     carregarOrcamentosPdfARevisar(),
+    contarAprovadasPendentes(),
   ]);
 
   const cotacoes = cotacoesRaw.map((c) => ({
@@ -173,7 +175,7 @@ export default async function CotacoesPage({
         </TabsContent>
 
         <TabsContent value="ia">
-          <AplicadasPelaIa itens={aplicadasPelaIa} />
+          <AplicadasPelaIa itens={aplicadasPelaIa} aprovadasPendentes={aprovadasPendentes} />
         </TabsContent>
 
         <TabsContent value="propostas" className="space-y-4">
@@ -354,5 +356,15 @@ async function carregarOrcamentosPdfARevisar(): Promise<OrcamentoPdfRevisarItem[
     return itens;
   } catch {
     return [];
+  }
+}
+
+/** Respostas que o critério aprovou em sombra e ainda não foram aplicadas (só conta com a chave ligada). */
+async function contarAprovadasPendentes(): Promise<number> {
+  if (!aplicacaoIaLigada()) return 0;
+  try {
+    return (await listarAprovadasAplicaveis()).length;
+  } catch {
+    return 0;
   }
 }

@@ -148,3 +148,96 @@ export async function desfazerAplicacaoIa(gmailMensagemId: string): Promise<Resu
     return "desfeita" as const;
   });
 }
+
+/** Aplicações por clique do "Aplicar as já aprovadas": cada uma é uma transação curta. */
+export const MAX_APLICACOES_POR_CLIQUE = 100;
+
+export interface BackfillResultado {
+  aplicadas: number;
+  /** Uma decisão do analista chegou antes: nada foi alterado. */
+  ignoradas: number;
+  /** Ainda por aplicar (além do limite deste clique). */
+  restantes: number;
+}
+
+interface Aplicavel {
+  gmailMensagemId: string;
+  classeIa: string;
+  consultaId: string;
+  dataResposta: Date;
+}
+
+/**
+ * O que o critério aprovou em sombra e AINDA pode ser aplicado: a resposta segue aberta na fila.
+ * Resposta que o analista já resolveu fica de fora (senão o contador nunca chegaria a zero).
+ */
+export async function listarAprovadasAplicaveis(): Promise<Aplicavel[]> {
+  const abertas = await db.respostaEmailPendente.findMany({
+    where: { resolvidaEm: null },
+    select: { gmailMensagemId: true, dataResposta: true },
+  });
+  if (abertas.length === 0) return [];
+  const dataPorMsg = new Map(abertas.map((a) => [a.gmailMensagemId, a.dataResposta]));
+  const linhas = await db.classificacaoIaResposta.findMany({
+    where: {
+      gmailMensagemId: { in: [...dataPorMsg.keys()] },
+      criterioOk: true,
+      aplicadaEm: null,
+      desfeitaEm: null,
+      consultaId: { not: null },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { gmailMensagemId: true, classeIa: true, consultaId: true },
+  });
+  return linhas.map((l) => ({
+    gmailMensagemId: l.gmailMensagemId,
+    classeIa: l.classeIa,
+    consultaId: l.consultaId as string,
+    dataResposta: dataPorMsg.get(l.gmailMensagemId) as Date,
+  }));
+}
+
+/**
+ * Aplica o que o critério aprovou ANTES de a chave ser ligada. A leitura normal só aplica o que
+ * classifica agora (`classificarEmSombra` pula o que já tem linha), então sem isto o acervo em
+ * sombra ficaria parado. Usa a MESMA `aplicarClassificacaoIa` — mesmas guardas atômicas, nunca por
+ * cima de decisão do analista. Chave desligada = não faz nada (§9.45).
+ */
+export async function aplicarAprovadasPendentes(userId: string): Promise<BackfillResultado> {
+  if (!aplicacaoIaLigada()) return { aplicadas: 0, ignoradas: 0, restantes: 0 };
+  const todas = await listarAprovadasAplicaveis();
+  const linhas = todas.slice(0, MAX_APLICACOES_POR_CLIQUE);
+
+  let aplicadas = 0;
+  const feitas: Aplicavel[] = [];
+  for (let i = 0; i < linhas.length; i += 5) {
+    const lote = linhas.slice(i, i + 5);
+    const rs = await Promise.all(
+      lote.map((l) =>
+        aplicarClassificacaoIa({
+          gmailMensagemId: l.gmailMensagemId,
+          classe: l.classeIa as ClasseResposta,
+          consultaId: l.consultaId,
+          dataResposta: l.dataResposta,
+        }),
+      ),
+    );
+    rs.forEach((r, k) => {
+      if (r === "aplicada") {
+        aplicadas += 1;
+        feitas.push(lote[k]);
+      }
+    });
+  }
+  if (feitas.length > 0) {
+    await db.auditLog.createMany({
+      data: feitas.map((f) => ({
+        userId,
+        acao: "ia_aplicar_resposta_email",
+        detalhes: { gmailMensagemId: f.gmailMensagemId, consultaId: f.consultaId, classe: f.classeIa, origem: "acervo" },
+      })),
+    });
+  }
+  // As ignoradas não são aplicadas e "ja_resolvida"/"ja_tratada" saem da lista (fila fechada).
+  return { aplicadas, ignoradas: linhas.length - aplicadas, restantes: Math.max(todas.length - linhas.length, 0) };
+}
