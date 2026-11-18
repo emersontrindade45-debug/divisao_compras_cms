@@ -47,6 +47,17 @@ describe("IndicadoresDesempenho", () => {
     expect(screen.getByText(/3 de 10 consultas · pediram esclarecimento/)).toBeInTheDocument();
   });
 
+  it("o cartão de orçamentos diz a unidade do 'a confirmar' (fornecedores, não mensagens)", () => {
+    render(
+      <IndicadoresDesempenho
+        dados={dados({
+          contagem: { consultadas: 10, orcamentos: 2, recusas: 1, duvidas: 3, aConfirmar: 4, invalidos: 0 },
+        })}
+      />,
+    );
+    expect(screen.getByText(/4 fornecedor\(es\) com resposta a confirmar/)).toBeInTheDocument();
+  });
+
   it("mostra valor, cobertura com excluídos e a comparação com o período anterior", () => {
     render(
       <IndicadoresDesempenho

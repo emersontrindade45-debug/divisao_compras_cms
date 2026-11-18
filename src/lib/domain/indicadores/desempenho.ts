@@ -78,8 +78,14 @@ function mediana(valores: number[]): number | null {
   return v.length % 2 === 1 ? v[meio]! : (v[meio - 1]! + v[meio]!) / 2;
 }
 
+/**
+ * Percentual inteiro; abaixo de 10% mantém uma casa decimal, senão 63/7500 (0,84%) aparece como
+ * "1%" e esconde a diferença entre quase nada e um por cento.
+ */
 function percentual(parte: number, todo: number): number | null {
-  return todo > 0 ? Math.round((parte / todo) * 100) : null;
+  if (todo <= 0) return null;
+  const v = (parte / todo) * 100;
+  return v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
 }
 
 // ── Tempo até marco ───────────────────────────────────────────────────────

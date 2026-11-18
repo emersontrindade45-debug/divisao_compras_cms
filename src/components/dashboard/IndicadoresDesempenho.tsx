@@ -57,7 +57,7 @@ export function IndicadoresDesempenho({ dados }: { dados: CamadaDesempenho }) {
         label="Orçamentos entregues"
         value={valor(dados.orcamentos.atual, "%")}
         delta={delta(dados.orcamentos, "maior_melhor", " p.p.")}
-        hint={`${dados.contagem.orcamentos} de ${dados.contagem.consultadas} consultas · ${dados.contagem.aConfirmar} aguardando confirmação`}
+        hint={`${dados.contagem.orcamentos} de ${dados.contagem.consultadas} consultas · ${dados.contagem.aConfirmar} fornecedor(es) com resposta a confirmar`}
         icon={Mail}
         href="/cotacoes"
       />

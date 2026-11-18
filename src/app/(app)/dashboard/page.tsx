@@ -124,8 +124,8 @@ export default async function DashboardPage({
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
             {acao.emails.respostasAConfirmar > 0 && (
               <Link href="/cotacoes?aba=confirmar" className="font-medium hover:underline">
-                {acao.emails.respostasAConfirmar.toLocaleString("pt-BR")} resposta(s) de fornecedor aguardando
-                confirmação →
+                {acao.emails.respostasAConfirmar.toLocaleString("pt-BR")} mensagem(ns) de fornecedor a confirmar
+                (todo o período) →
               </Link>
             )}
             {acao.emails.enviosSemProcesso > 0 && (

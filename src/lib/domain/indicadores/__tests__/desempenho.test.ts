@@ -316,6 +316,18 @@ describe("indicadores das consultas por e-mail (M30.d)", () => {
     expect(percentualDaSituacao(base, J, "recusa")).toEqual({ valor: 25, base: 4, excluidos: 1 });
   });
 
+  it("percentual abaixo de 10% mantém uma casa decimal; de 10% em diante é inteiro", () => {
+    const mk = (n: number, total: number) => [
+      ...Array.from({ length: n }, () => cons({ situacao: "recusa" })),
+      ...Array.from({ length: total - n }, () => cons({ situacao: "sem_resposta" })),
+    ];
+    // 63/7500 = 0,84% — antes aparecia como "1%"
+    expect(percentualDaSituacao(mk(63, 7500), J, "recusa").valor).toBe(0.8);
+    expect(percentualDaSituacao(mk(9, 100), J, "recusa").valor).toBe(9);
+    expect(percentualDaSituacao(mk(1, 3), J, "recusa").valor).toBe(33);
+    expect(percentualDaSituacao(mk(0, 10), J, "recusa").valor).toBe(0);
+  });
+
   it("tempo de resposta ignora 'a confirmar'", () => {
     const r = tempoRespostaDias(
       [cons({ situacao: "a_confirmar", dataResposta: d("2026-11-03") })],
