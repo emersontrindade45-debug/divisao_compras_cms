@@ -1203,6 +1203,29 @@ model RespostaEmailPendente {
   @@map("respostas_email_pendentes")
 }
 
+/// Veredito da IA sobre CADA resposta de fornecedor, guardado ao lado do que as regras decidiram
+/// (M30.d, "modo sombra"): serve para MEDIR a IA contra as regras antes de ela decidir qualquer
+/// coisa. Não altera consulta nem dashboard. O texto lido pela IA nunca é guardado — só a classe,
+/// a confiança e uma frase curta.
+model ClassificacaoIaResposta {
+  id              String   @id @default(cuid())
+  /// Id da mensagem no Gmail (único: a mesma resposta é classificada uma vez).
+  gmailMensagemId String   @unique
+  /// Consulta provável a que a resposta se liga, quando houve ligação.
+  consultaId      String?
+  /// orcamento | recusa | duvida | nao_e_resposta
+  classeIa        String
+  /// alta | media | baixa
+  confianca       String
+  justificativa   String
+  /// O que as regras fizeram: "aplicar:orcamento", "aplicar:recusa" ou "fila:<motivo>".
+  regra           String
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("classificacoes_ia_resposta")
+}
+
 /// E-mail que voltou (devolução do servidor). Some da lista de envio da "Nova cotação".
 model EmailInvalido {
   /// Minúsculo.
