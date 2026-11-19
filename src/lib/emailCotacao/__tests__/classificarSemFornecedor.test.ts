@@ -17,7 +17,12 @@ const mocks = vi.hoisted(() => {
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
 
-import { classificarSemFornecedorEmLote, listarClassificaveisSemFornecedor } from "../classificarSemFornecedor";
+import {
+  classificarSemFornecedorEmLote,
+  listarClassificaveisSemFornecedor,
+  OPCOES_TRANSACAO,
+  RESPOSTAS_POR_TRANSACAO,
+} from "../classificarSemFornecedor";
 
 describe("classificar respostas sem fornecedor pela IA", () => {
   beforeEach(() => {
@@ -94,5 +99,51 @@ describe("classificar respostas sem fornecedor pela IA", () => {
     mocks.db.respostaEmailPendente.findMany.mockResolvedValue([]);
     expect((await classificarSemFornecedorEmLote()).feitas).toEqual([]);
     expect(mocks.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  describe("transação (o botão dava erro e não gravava nada: 25 por bloco estourava os 5 s do Prisma)", () => {
+    const muitos = (n: number) => ({
+      pend: Array.from({ length: n }, (_, i) => ({ id: `p${i}`, gmailMensagemId: `m${i}` })),
+      ia: Array.from({ length: n }, (_, i) => ({ gmailMensagemId: `m${i}`, classeIa: "recusa" })),
+    });
+
+    it("blocos pequenos, com prazo explícito acima do padrão de 5 s", async () => {
+      const { pend, ia } = muitos(25);
+      mocks.db.respostaEmailPendente.findMany.mockResolvedValue(pend);
+      mocks.db.classificacaoIaResposta.findMany.mockResolvedValue(ia);
+      await classificarSemFornecedorEmLote();
+      expect(RESPOSTAS_POR_TRANSACAO).toBeLessThanOrEqual(10);
+      expect(mocks.db.$transaction).toHaveBeenCalledTimes(Math.ceil(25 / RESPOSTAS_POR_TRANSACAO));
+      expect(mocks.db.$transaction.mock.calls[0][1]).toEqual(OPCOES_TRANSACAO);
+      expect(OPCOES_TRANSACAO.timeout).toBeGreaterThan(5_000);
+    });
+
+    it("um bloco que falha NÃO derruba os demais, e só o que foi confirmado conta como feito", async () => {
+      const { pend, ia } = muitos(25);
+      mocks.db.respostaEmailPendente.findMany.mockResolvedValue(pend);
+      mocks.db.classificacaoIaResposta.findMany.mockResolvedValue(ia);
+      mocks.db.$transaction
+        .mockImplementationOnce(async () => {
+          throw new Error("Transaction already closed");
+        })
+        .mockImplementation(async (fn: (t: typeof mocks.tx) => unknown) => fn(mocks.tx));
+      const r = await classificarSemFornecedorEmLote();
+      expect(r.blocosComFalha).toBe(1);
+      expect(r.feitas).toHaveLength(25 - RESPOSTAS_POR_TRANSACAO);
+      expect(r.feitas.map((f) => f.pendenteId)).not.toContain("p0");
+    });
+
+    it("transação que lança DEPOIS de rodar o corpo não deixa o bloco marcado como feito", async () => {
+      const { pend, ia } = muitos(3);
+      mocks.db.respostaEmailPendente.findMany.mockResolvedValue(pend);
+      mocks.db.classificacaoIaResposta.findMany.mockResolvedValue(ia);
+      mocks.db.$transaction.mockImplementationOnce(async (fn: (t: typeof mocks.tx) => unknown) => {
+        await fn(mocks.tx);
+        throw new Error("commit falhou");
+      });
+      const r = await classificarSemFornecedorEmLote();
+      expect(r.feitas).toEqual([]);
+      expect(r.blocosComFalha).toBe(1);
+    });
   });
 });

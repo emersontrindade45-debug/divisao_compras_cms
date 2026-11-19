@@ -153,6 +153,47 @@ describe("sincronizarRespostasEmail", () => {
       expect(mocks.db.envioCotacao.createMany.mock.calls[0]![0].data[0].processoId).toBeNull();
     });
 
+    describe("envio gravado sem número que a leitura atual já devolve com número", () => {
+      // Função: o código atualiza o objeto em memória, e um objeto compartilhado vazaria entre os testes.
+      const SEM_NUMERO = () => ({ ...ENVIO_DB, processoId: null, numeroProcessoAssunto: null });
+      beforeEach(() => {
+        mocks.db.envioCotacao.findMany.mockReset(); // sem fila de "Once" deixada por testes anteriores
+        mocks.db.envioCotacao.updateMany.mockResolvedValue({ count: 1 });
+      });
+
+      it("preenche o número e liga o processo, com guarda atômica (só se ainda está sem número)", async () => {
+        armar({ existentes: ["g1"], enviosDb: [SEM_NUMERO()], jaTem: 3 });
+        await sincronizarRespostasEmail({ envios: [envio({ processo: "382" })], respostas: [] });
+        expect(mocks.db.envioCotacao.updateMany).toHaveBeenCalledWith({
+          where: { id: "E1", numeroProcessoAssunto: null },
+          data: { numeroProcessoAssunto: "382", processoId: "p382" },
+        });
+      });
+
+      it("processo ainda não importado: grava só o número", async () => {
+        mocks.db.processo.findMany.mockResolvedValue([]);
+        armar({ existentes: ["g1"], enviosDb: [SEM_NUMERO()], jaTem: 3 });
+        await sincronizarRespostasEmail({ envios: [envio({ processo: "382" })], respostas: [] });
+        expect(mocks.db.envioCotacao.updateMany).toHaveBeenCalledWith({
+          where: { id: "E1", numeroProcessoAssunto: null },
+          data: { numeroProcessoAssunto: "382" },
+        });
+      });
+
+      it("se a leitura continua sem número, não escreve nada", async () => {
+        armar({ existentes: ["g1"], enviosDb: [SEM_NUMERO()], jaTem: 3 });
+        await sincronizarRespostasEmail({ envios: [envio({ processo: null })], respostas: [] });
+        expect(mocks.db.envioCotacao.updateMany).not.toHaveBeenCalled();
+      });
+
+      it("NUNCA troca um número que já existe", async () => {
+        armar({ existentes: ["g1"], enviosDb: [{ ...ENVIO_DB, numeroProcessoAssunto: "382" }], jaTem: 3 });
+        await sincronizarRespostasEmail({ envios: [envio({ processo: "999" })], respostas: [] });
+        const chamadas = mocks.db.envioCotacao.updateMany.mock.calls.map((c) => JSON.stringify(c[0]));
+        expect(chamadas.some((c) => c.includes("numeroProcessoAssunto"))).toBe(false);
+      });
+    });
+
     it("liga sozinho um envio que esperava o processo, com guarda atômica", async () => {
       armar({ existentes: ["g1"], enviosDb: [{ ...ENVIO_DB, processoId: null }], jaTem: 3 });
       await sincronizarRespostasEmail({ envios: [envio()], respostas: [] });

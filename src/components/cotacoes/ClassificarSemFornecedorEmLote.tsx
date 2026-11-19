@@ -28,6 +28,10 @@ export function ClassificarSemFornecedorEmLote({ contagem }: { contagem: Contage
       const r = await classificarSemFornecedorPelaIa();
       setConfirmando(false);
       if (r.error || !r.data) toast.error(r.error ?? "Não foi possível classificar.");
+      else if (r.data.blocosComFalha > 0)
+        toast.warning(
+          `${r.data.classificadas} classificada(s); parte falhou e continua na fila. Clique de novo para as que faltam.`,
+        );
       else toast.success(`${r.data.classificadas} resposta(s) classificadas e contadas no dashboard.`);
       router.refresh();
     });

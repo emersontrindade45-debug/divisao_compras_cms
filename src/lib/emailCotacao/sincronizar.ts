@@ -181,6 +181,24 @@ export async function sincronizarRespostasEmail(
     },
   });
 
+  // Envio gravado SEM número (versão antiga do script, ou formato que ela não lia) recebe o número
+  // que a leitura atual já devolve. Guarda atômica: só preenche se ainda está sem número, e nunca
+  // troca um número que já existe. O `processoId` entra na mesma escrita, se o processo já existe.
+  const numeroNoPayload = new Map(payload.envios.map((e) => [e.id, e.processo]));
+  for (const e of enviosDb.filter((x) => x.numeroProcessoAssunto === null)) {
+    const numero = numeroNoPayload.get(e.gmailMensagemId);
+    if (!numero) continue;
+    const processoId = e.processoId ?? ligarProcesso(numero, anoEmSantos(e.dataEnvio), processos);
+    const r = await db.envioCotacao.updateMany({
+      where: { id: e.id, numeroProcessoAssunto: null },
+      data: { numeroProcessoAssunto: numero, ...(processoId && !e.processoId ? { processoId } : {}) },
+    });
+    if (r.count > 0) {
+      e.numeroProcessoAssunto = numero;
+      if (processoId) e.processoId = processoId;
+    }
+  }
+
   // Q51 — envio que esperava o processo se liga sozinho quando a planilha é sincronizada.
   for (const e of enviosDb.filter((x) => x.processoId === null && x.numeroProcessoAssunto)) {
     const processoId = ligarProcesso(e.numeroProcessoAssunto, anoEmSantos(e.dataEnvio), processos);

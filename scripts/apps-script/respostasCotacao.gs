@@ -63,7 +63,8 @@ function numeroProcessoDoAssunto_(assunto) {
  * devolve null: ligar ao processo errado não é recuperável, ficar sem ligação é (CLAUDE.md §9.93).
  */
 function numeroProcessoDoCorpo_(corpo) {
-  var re = /\bproc(?:esso)?\.?\s*(?:administrativo\s*)?(?:n[ºo°.]?\s*)?:?\s*(\d{1,6})(?:\s*\/\s*(\d{1,6}))?/gi;
+  // "PROCESSO Nº.: 12141/2025" (modelo da Divisão): "Nº" + ponto + dois-pontos, nesta ordem.
+  var re = /\bproc(?:esso)?\.?\s*(?:administrativo\s*)?(?:n\.?[ºo°]?\.?\s*)?:?\s*(\d{1,6})(?:\s*\/\s*(\d{1,6}))?/gi;
   var achados = {};
   var m;
   while ((m = re.exec(corpo || "")) !== null) {
@@ -773,7 +774,7 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify({
     // Diagnóstico sem conteúdo: só a conta que executa e contagens.
     diagnostico: {
-      versao: "ia-3",
+      versao: "ia-4",
       contaEfetiva: Session.getEffectiveUser().getEmail(),
       contaAtiva: Session.getActiveUser().getEmail() || "(vazia)",
       fiosEncontrados: busca.fios.length,

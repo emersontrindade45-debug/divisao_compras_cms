@@ -1,14 +1,15 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import { ClassificarSemFornecedorEmLote } from "../ClassificarSemFornecedorEmLote";
 import { classificarSemFornecedorPelaIa } from "@/lib/actions/classificarSemFornecedor";
 
 vi.mock("@/lib/actions/classificarSemFornecedor", () => ({
-  classificarSemFornecedorPelaIa: vi.fn(async () => ({ data: { classificadas: 146 } })),
+  classificarSemFornecedorPelaIa: vi.fn(async () => ({ data: { classificadas: 146, blocosComFalha: 0 } })),
 }));
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 const C = { orcamento: 43, recusa: 71, duvida: 32 };
 
@@ -42,5 +43,14 @@ describe("ClassificarSemFornecedorEmLote", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sim, classificar 146" }));
     await waitFor(() => expect(classificarSemFornecedorPelaIa).toHaveBeenCalledWith());
     await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+
+  it("se parte falhou, avisa que o resto continua na fila (não diz que deu tudo certo)", async () => {
+    vi.mocked(classificarSemFornecedorPelaIa).mockResolvedValueOnce({ data: { classificadas: 100, blocosComFalha: 1 } });
+    render(<ClassificarSemFornecedorEmLote contagem={C} />);
+    fireEvent.click(screen.getByRole("button", { name: /Classificar 146/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Sim, classificar 146" }));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

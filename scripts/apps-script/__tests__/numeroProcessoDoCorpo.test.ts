@@ -19,6 +19,12 @@ describe("numeroProcessoDoCorpo_", () => {
     ["Processo: 382", "382"],
     ["Processo 2026/382", "382"],
     ["Proc nº 15.", "15"],
+    // Modelo real da Divisão (2026-11-19): "Nº" + ponto + dois-pontos. Antes devolvia null e deixou
+    // 27 envios (2.592 consultas) sem processo.
+    ["PROCESSO Nº.: 12141/2025", "12141"],
+    ["PROCESSO N°.: 12141/2025", "12141"],
+    ["PROCESSO N.º 12141/2025", "12141"],
+    ["CNPJ: 49.203.409/0001-02\nPROCESSO Nº.: 12141/2025\nSolicitamos, por meio deste", "12141"],
   ])("lê %j", (texto, esperado) => {
     expect(numeroDoCorpo(texto)).toBe(esperado);
   });

@@ -11,9 +11,9 @@ import type { ActionResult } from "./processos";
  * dúvida, confiança alta) e a conta no dashboard (M30.d). Não recebe ids do cliente; nenhuma
  * consulta é alterada. Auditoria: contagem e ids internos da fila, nenhum endereço nem texto.
  */
-export async function classificarSemFornecedorPelaIa(): Promise<ActionResult<{ classificadas: number }>> {
+export async function classificarSemFornecedorPelaIa(): Promise<ActionResult<{ classificadas: number; blocosComFalha: number }>> {
   const user = await requireRole("pesquisa");
-  const { feitas } = await classificarSemFornecedorEmLote();
+  const { feitas, blocosComFalha } = await classificarSemFornecedorEmLote();
   if (feitas.length > 0) {
     await registrarAuditoria({
       userId: user.id,
@@ -23,5 +23,5 @@ export async function classificarSemFornecedorPelaIa(): Promise<ActionResult<{ c
     revalidatePath("/cotacoes");
     revalidatePath("/dashboard");
   }
-  return { data: { classificadas: feitas.length } };
+  return { data: { classificadas: feitas.length, blocosComFalha } };
 }
