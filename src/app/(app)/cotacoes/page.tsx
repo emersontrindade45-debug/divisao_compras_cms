@@ -1,4 +1,4 @@
-import { Mail, Send, ClipboardCheck, MailQuestion, Bot, FileSearch } from "lucide-react";
+import { Mail, Send, ClipboardCheck, MailQuestion, Bot, FileSearch, Link2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CotacoesTableReal } from "@/components/cotacoes/CotacoesTableReal";
 import { SelecaoFornecedoresForm } from "@/components/cotacoes/SelecaoFornecedoresForm";
@@ -7,6 +7,8 @@ import { HistoricoRespostasButton } from "@/components/cotacoes/HistoricoRespost
 import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cotacoes/RespostasAConfirmar";
 import { AplicadasPelaIa, type AplicadaPelaIaItem } from "@/components/cotacoes/AplicadasPelaIa";
 import { OrcamentosPorPdfARevisar, type OrcamentoPdfRevisarItem } from "@/components/cotacoes/OrcamentosPorPdfARevisar";
+import { LigarRespostasAFornecedor, type RespostaLigavelItem } from "@/components/cotacoes/LigarRespostasAFornecedor";
+import { listarRespostasLigaveis } from "@/lib/emailCotacao/ligarRespostaFornecedor";
 import { REGRAS_ORCAMENTO_POR_ANEXO } from "@/lib/domain/cotacaoEmail/regrasOrcamentoPorAnexo";
 import { listarClassificaveisSemFornecedor } from "@/lib/emailCotacao/classificarSemFornecedor";
 import { listarEncerraveisNaoResposta } from "@/lib/emailCotacao/encerrarNaoResposta";
@@ -35,7 +37,7 @@ export default async function CotacoesPage({
   await requireAuth();
   const { aba } = await searchParams;
 
-  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes, encerraveis, semFornecedor] = await Promise.all([
+  const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes, encerraveis, semFornecedor, ligaveis] = await Promise.all([
     listarCotacoes(),
     buscarAlertas(),
     db.processo.findMany({
@@ -72,6 +74,7 @@ export default async function CotacoesPage({
     contarAprovadasPendentes(),
     contarEncerraveis(),
     contarSemFornecedor(),
+    carregarLigaveis(),
   ]);
 
   const cotacoes = cotacoesRaw.map((c) => ({
@@ -123,7 +126,7 @@ export default async function CotacoesPage({
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
 
-      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : aba === "ia" ? "ia" : aba === "revisar-pdf" ? "revisar-pdf" : "painel"} className="space-y-4">
+      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : aba === "ia" ? "ia" : aba === "revisar-pdf" ? "revisar-pdf" : aba === "ligar" ? "ligar" : "painel"} className="space-y-4">
         <TabsList>
           <TabsTrigger value="painel" className="gap-2">
             <Mail className="size-3.5" />
@@ -156,6 +159,13 @@ export default async function CotacoesPage({
               <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">{orcamentosPdf.length}</span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="ligar" className="gap-2">
+            <Link2 className="size-3.5" />
+            Ligar fornecedor
+            {ligaveis.length > 0 && (
+              <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">{ligaveis.length}</span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="propostas" className="gap-2">
             <ClipboardCheck className="size-3.5" />
             Validação de propostas
@@ -176,6 +186,10 @@ export default async function CotacoesPage({
 
         <TabsContent value="revisar-pdf">
           <OrcamentosPorPdfARevisar itens={orcamentosPdf} />
+        </TabsContent>
+
+        <TabsContent value="ligar">
+          <LigarRespostasAFornecedor itens={ligaveis} />
         </TabsContent>
 
         <TabsContent value="ia">
@@ -391,5 +405,18 @@ async function contarSemFornecedor(): Promise<{ orcamento: number; recusa: numbe
     return zero;
   } catch {
     return { orcamento: 0, recusa: 0, duvida: 0 };
+  }
+}
+
+/**
+ * Respostas que a IA classificou e que não estão ligadas a nenhum fornecedor (ligação rápida).
+ * `catch` devolve vazio para a página abrir mesmo se a leitura falhar.
+ */
+async function carregarLigaveis(): Promise<RespostaLigavelItem[]> {
+  try {
+    const itens = await listarRespostasLigaveis();
+    return itens.map(({ dataResposta: _dataResposta, ...resto }) => resto);
+  } catch {
+    return [];
   }
 }

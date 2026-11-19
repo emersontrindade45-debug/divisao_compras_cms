@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => {
     db: {
       respostaEmailPendente: { findMany: vi.fn() },
       classificacaoIaResposta: { findMany: vi.fn() },
-      $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
+      $transaction: vi.fn<(fn: (t: typeof tx) => unknown, opcoes?: unknown) => Promise<unknown>>(async (fn) => fn(tx)),
     },
   };
 });
