@@ -7,12 +7,14 @@ import { WorkQueueCard } from "@/components/dashboard/WorkQueueCard";
 import { AtribuirResponsavelSelect } from "@/components/dashboard/AtribuirResponsavelSelect";
 import { IndicadoresDesempenho } from "@/components/dashboard/IndicadoresDesempenho";
 import { RespostaPorProcesso } from "@/components/dashboard/RespostaPorProcesso";
+import { DemandaDivisao } from "@/components/dashboard/DemandaDivisao";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAuth } from "@/lib/auth/rbac";
 import { buscarAlertas } from "@/lib/actions/alertas";
 import { escopoPadrao } from "@/lib/domain/indicadores/camadaAcao";
 import { lerPeriodo, PERIODO_LABEL, PERIODOS, tituloPeriodo, type Periodo } from "@/lib/domain/indicadores/desempenho";
 import { carregarCamadaDesempenho } from "@/lib/indicadores/desempenho";
+import { carregarDemanda } from "@/lib/indicadores/demanda";
 import {
   carregarCamadaAcao,
   contarProcessosDoUsuario,
@@ -44,11 +46,14 @@ export default async function DashboardPage({
   const filaCompleta = params.fila === "todas";
   const periodo = lerPeriodo(params.periodo);
 
-  const [acao, desempenho, usuarios, alertas] = await Promise.all([
+  const anoDaDemanda = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric" }).format(agora));
+
+  const [acao, desempenho, usuarios, alertas, demanda] = await Promise.all([
     carregarCamadaAcao(escopo, user.id, agora),
     carregarCamadaDesempenho(periodo, escopo, user.id, agora),
     listarUsuariosAtribuiveis(),
     buscarAlertas(),
+    carregarDemanda(anoDaDemanda),
   ]);
 
   const { resumo } = acao;
@@ -262,6 +267,18 @@ export default async function DashboardPage({
 
         <IndicadoresDesempenho dados={desempenho} />
         <RespostaPorProcesso processos={desempenho.porProcesso} />
+      </section>
+
+      <section aria-labelledby="camada-demanda" className="space-y-4">
+        <div>
+          <h2 id="camada-demanda" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Demanda da Divisão · {anoDaDemanda}
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Processos que chegaram à Divisão de Compras e quantas vezes cada um voltou. Independe do período e do escopo.
+          </p>
+        </div>
+        <DemandaDivisao resultado={demanda} ano={anoDaDemanda} />
       </section>
     </div>
   );
