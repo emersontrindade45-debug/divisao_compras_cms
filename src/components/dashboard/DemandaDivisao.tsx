@@ -140,7 +140,7 @@ export function DemandaDivisao({ resultado, ano }: { resultado: ResultadoDemanda
       <p className="text-xs text-muted-foreground">
         Última remessa em {demanda.ultimaRemessa ? dataBr(demanda.ultimaRemessa) : "—"}. A planilha é atualizada de
         hora em hora.
-        {descartadas > 0 && ` ${numero(descartadas)} linha(s) ignorada(s) por data ou processo inválido.`}
+        {descartadas > 0 && ` ${numero(descartadas)} linha(s) ignorada(s) por formato não reconhecido.`}
         {duplicadas > 0 && ` ${numero(duplicadas)} remessa(s) repetida(s) contada(s) uma vez.`}
       </p>
     </div>

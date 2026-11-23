@@ -149,3 +149,56 @@ describe("calcularDemanda", () => {
     expect(d).toMatchObject({ remessas: 0, processosDistintos: 0, mediaRemessas: 0, porMes: [], ultimaRemessa: null });
   });
 });
+
+describe("lerRemessas — tabela sem cabeçalho abaixo da principal (planilha de 2026-11-23)", () => {
+  // [ID Remessa, "dd/mm/aaaa hh:mm", Mês, Processo, ID do E-mail]
+  const semCab = (id: string, dh: string, proc: string, email: string) => [id, dh, "Novembro", proc, email];
+  // Registro bruto de e-mails que vem na mesma aba: [id, id, hora, remetente, destinatário, assunto, ...]
+  const bruto = (id: string) => [id, id, "15:24", "Câmara <x@y>", "compras@z", "Recebimento de Processos - Remessa 1", "Recebido"];
+
+  it("lê a tabela sem cabeçalho (data e hora na mesma célula) e a junta à principal", () => {
+    const r = ler([
+      linha("17/11/2026", "Geral Nº 1/2026", "E1", "10"),
+      semCab("11", "19/11/2026 15:24", "Aquisição de Serviços Nº 8462/2025", "E2"),
+    ]);
+    expect(r.remessas.map((x) => [x.data, x.chave, x.idEmail])).toEqual([
+      ["2026-11-17", "1/2026", "E1"],
+      ["2026-11-19", "8462/2025", "E2"],
+    ]);
+    expect(r.descartadas).toBe(0);
+  });
+
+  it("a mesma remessa nas duas tabelas conta UMA vez (par e-mail + processo)", () => {
+    const r = ler([
+      linha("17/11/2026", "Geral Nº 1/2026", "E1", "10"),
+      semCab("10", "17/11/2026 18:37", "Geral Nº 1/2026 - volume 1", "E1"),
+    ]);
+    expect(r.remessas).toHaveLength(1);
+    expect(r.duplicadas).toBe(1);
+  });
+
+  it("o registro bruto de e-mails NÃO vira remessa: é descartado e contado", () => {
+    const r = ler([linha("17/11/2026", "Geral Nº 1/2026", "E1", "10"), bruto("E9"), bruto("E8")]);
+    expect(r.remessas).toHaveLength(1);
+    expect(r.descartadas).toBe(2);
+  });
+
+  it.each([
+    ["ID de remessa não numérico", ["abc", "19/11/2026 15:24", "x", "Geral Nº 2/2026", "E2"]],
+    ["data impossível", ["11", "31/02/2026 15:24", "x", "Geral Nº 2/2026", "E2"]],
+    ["só a data, sem hora", ["11", "19/11/2026", "x", "Geral Nº 2/2026", "E2"]],
+    ["sem processo", ["11", "19/11/2026 15:24", "x", "", "E2"]],
+    ["sem id de e-mail", ["11", "19/11/2026 15:24", "x", "Geral Nº 2/2026", ""]],
+  ])("linha fora da forma esperada é descartada (%s)", (_motivo, l) => {
+    // Cabeçalho com Data/Processo além da largura da linha: só a forma sem cabeçalho pode aceitá-la.
+    const r = ler([l], ["a", "b", "c", "d", "e", "Data", "Processo"]);
+    expect(r.remessas).toHaveLength(0);
+    expect(r.descartadas).toBe(1);
+  });
+
+  it("a linha da tabela principal continua sendo lida pelo cabeçalho (não pela forma nova)", () => {
+    const r = ler([linha("05/01/2026", "Geral Nº 1/2026", "E1", "10")]);
+    expect(r.remessas).toHaveLength(1);
+    expect(r.descartadas).toBe(0);
+  });
+});
