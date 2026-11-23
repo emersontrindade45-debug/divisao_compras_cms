@@ -1832,3 +1832,19 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      da função tem o seu"); (d) contar `new PrismaClient`/`new Pool` por requisição é o jeito barato de
      achar vazamento de conexão: o sintoma (EMAXCONN) apareceu num `$executeRaw`, que nada tem a ver com
      a causa (§9.134: o erro aparece longe de onde nasceu).
+
+136. **Taxa de acerto medida numa população não vale para outra — a política tem de ser medida sobre
+     o mesmo recorte em que vai rodar.** Ao desenhar a política de fechamento das pendentes pela IA
+     (2026-11-23), recomendei "adotar orçamento com PDF" citando que a IA concordou em 144 de 144 com
+     a decisão anterior. Esses 144 eram consultas que a **regra do anexo já decide sozinha** — o que
+     sobra na fila de pendentes é, por construção, o ambíguo (PDF + texto de recusa). Medida no
+     recorte certo (pendentes com PDF em que a IA leu "orçamento"), a concordância com o analista foi
+     **0 de 9**: ele decidiu "recusa" nas nove. A política foi corrigida antes de ir ao ar: orçamento
+     saiu, recusa e dúvida ficaram (31 de 32 e 6 de 6 também **com** PDF). Regras: (a) antes de
+     afirmar a precisão de uma classe para uma ação, perguntar **de que conjunto saiu o número** e se
+     ele é o conjunto sobre o qual a ação vai agir — filtro de seleção (a fila só tem o que as regras
+     não resolveram) muda a taxa; (b) toda política automática tem o recorte de produção medido por
+     classe e por subgrupo relevante (aqui, com e sem PDF) antes de ser aplicada; (c) a mesma tabela
+     de decisões humanas que serve de gabarito pode ter viés (o analista pode ter seguido a sugestão
+     da IA): dizer isso junto do número; (d) política que *tira* classe é tão válida quanto a que
+     põe — "não é resposta" (0 de 9) e orçamento nas pendentes (0 de 9) ficam com o analista.

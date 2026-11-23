@@ -16,6 +16,8 @@ import { REGRAS_ORCAMENTO_POR_ANEXO } from "@/lib/domain/cotacaoEmail/regrasOrca
 import { listarClassificaveisSemFornecedor } from "@/lib/emailCotacao/classificarSemFornecedor";
 import { listarEncerraveisNaoResposta } from "@/lib/emailCotacao/encerrarNaoResposta";
 import { aplicacaoIaLigada, listarAprovadasAplicaveis } from "@/lib/emailCotacao/aplicarIa";
+import { AplicarPoliticaIa, type ContagemPolitica } from "@/components/cotacoes/AplicarPoliticaIa";
+import { listarAdotaveisPelaPolitica } from "@/lib/emailCotacao/politicaIa";
 import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
 import { ChecklistProposta } from "@/components/cotacoes/ChecklistProposta";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
@@ -44,6 +46,7 @@ export default async function CotacoesPage({
   // Lida sempre (como as demais abas): trocar de aba no cliente não refaz a leitura do servidor. A
   // função captura seus próprios erros e devolve "indisponivel", então a página abre mesmo sem a tabela.
   const painelConferencia = await carregarPainelConferencia({ escopo: escopoConferencia, classe: classeConferencia });
+  const contagemPolitica = await contarPoliticaIa();
 
   const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes, encerraveis, semFornecedor, ligaveis] = await Promise.all([
     listarCotacoes(),
@@ -208,7 +211,8 @@ export default async function CotacoesPage({
           <ConferirClassificacaoIa painel={painelConferencia} escopo={escopoConferencia} classe={classeConferencia} />
         </TabsContent>
 
-        <TabsContent value="ia">
+        <TabsContent value="ia" className="space-y-3">
+          <AplicarPoliticaIa contagem={contagemPolitica} />
           <AplicadasPelaIa itens={aplicadasPelaIa} aprovadasPendentes={aprovadasPendentes} />
         </TabsContent>
 
@@ -390,6 +394,18 @@ async function carregarOrcamentosPdfARevisar(): Promise<OrcamentoPdfRevisarItem[
     return itens;
   } catch {
     return [];
+  }
+}
+
+/** Pendentes que cabem na política da IA, por classe (só conta com a chave ligada; `catch` abre a página). */
+async function contarPoliticaIa(): Promise<ContagemPolitica> {
+  const zero = { recusa: 0, duvida: 0 };
+  if (!aplicacaoIaLigada()) return zero;
+  try {
+    for (const a of await listarAdotaveisPelaPolitica()) if (a.classeIa in zero) zero[a.classeIa as keyof typeof zero] += 1;
+    return zero;
+  } catch {
+    return { recusa: 0, duvida: 0 };
   }
 }
 
