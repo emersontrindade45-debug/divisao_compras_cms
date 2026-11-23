@@ -1,4 +1,4 @@
-import { Mail, Send, ClipboardCheck, MailQuestion, Bot, FileSearch, Link2 } from "lucide-react";
+import { Mail, Send, ClipboardCheck, MailQuestion, Bot, FileSearch, Link2, ListChecks } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CotacoesTableReal } from "@/components/cotacoes/CotacoesTableReal";
 import { SelecaoFornecedoresForm } from "@/components/cotacoes/SelecaoFornecedoresForm";
@@ -7,8 +7,11 @@ import { HistoricoRespostasButton } from "@/components/cotacoes/HistoricoRespost
 import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cotacoes/RespostasAConfirmar";
 import { AplicadasPelaIa, type AplicadaPelaIaItem } from "@/components/cotacoes/AplicadasPelaIa";
 import { OrcamentosPorPdfARevisar, type OrcamentoPdfRevisarItem } from "@/components/cotacoes/OrcamentosPorPdfARevisar";
+import { ConferirClassificacaoIa } from "@/components/cotacoes/ConferirClassificacaoIa";
 import { LigarRespostasAFornecedor, type RespostaLigavelItem } from "@/components/cotacoes/LigarRespostasAFornecedor";
 import { listarRespostasLigaveis } from "@/lib/emailCotacao/ligarRespostaFornecedor";
+import { carregarPainelConferencia, type Escopo } from "@/lib/emailCotacao/conferenciaIa";
+import { ehClasse } from "@/lib/domain/cotacaoEmail/conferenciaIa";
 import { REGRAS_ORCAMENTO_POR_ANEXO } from "@/lib/domain/cotacaoEmail/regrasOrcamentoPorAnexo";
 import { listarClassificaveisSemFornecedor } from "@/lib/emailCotacao/classificarSemFornecedor";
 import { listarEncerraveisNaoResposta } from "@/lib/emailCotacao/encerrarNaoResposta";
@@ -32,10 +35,15 @@ export const maxDuration = 60;
 export default async function CotacoesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ aba?: string }>;
+  searchParams: Promise<{ aba?: string; escopo?: string; classe?: string }>;
 }) {
   await requireAuth();
-  const { aba } = await searchParams;
+  const { aba, escopo: escopoParam, classe: classeParam } = await searchParams;
+  const escopoConferencia: Escopo = escopoParam === "sugeridas" ? "sugeridas" : "aplicadas";
+  const classeConferencia = ehClasse(classeParam) ? classeParam : undefined;
+  // Lida sempre (como as demais abas): trocar de aba no cliente não refaz a leitura do servidor. A
+  // função captura seus próprios erros e devolve "indisponivel", então a página abre mesmo sem a tabela.
+  const painelConferencia = await carregarPainelConferencia({ escopo: escopoConferencia, classe: classeConferencia });
 
   const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes, encerraveis, semFornecedor, ligaveis] = await Promise.all([
     listarCotacoes(),
@@ -126,7 +134,7 @@ export default async function CotacoesPage({
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
 
-      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : aba === "ia" ? "ia" : aba === "revisar-pdf" ? "revisar-pdf" : aba === "ligar" ? "ligar" : "painel"} className="space-y-4">
+      <Tabs defaultValue={aba === "confirmar" ? "confirmar" : aba === "ia" ? "ia" : aba === "revisar-pdf" ? "revisar-pdf" : aba === "ligar" ? "ligar" : aba === "conferir" ? "conferir" : "painel"} className="space-y-4">
         <TabsList>
           <TabsTrigger value="painel" className="gap-2">
             <Mail className="size-3.5" />
@@ -166,6 +174,10 @@ export default async function CotacoesPage({
               <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">{ligaveis.length}</span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="conferir" className="gap-2">
+            <ListChecks className="size-3.5" />
+            Conferir IA
+          </TabsTrigger>
           <TabsTrigger value="propostas" className="gap-2">
             <ClipboardCheck className="size-3.5" />
             Validação de propostas
@@ -190,6 +202,10 @@ export default async function CotacoesPage({
 
         <TabsContent value="ligar">
           <LigarRespostasAFornecedor itens={ligaveis} />
+        </TabsContent>
+
+        <TabsContent value="conferir">
+          <ConferirClassificacaoIa painel={painelConferencia} escopo={escopoConferencia} classe={classeConferencia} />
         </TabsContent>
 
         <TabsContent value="ia">

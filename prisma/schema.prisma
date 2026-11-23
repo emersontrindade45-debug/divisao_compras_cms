@@ -1242,6 +1242,25 @@ model ClassificacaoIaResposta {
   @@map("classificacoes_ia_resposta")
 }
 
+/// Conferência humana de uma classificação da IA (M30.d): o analista abre a resposta no Gmail e diz
+/// qual era a classe certa. É só MEDIÇÃO — não altera consulta, fila nem dashboard. Uma linha por
+/// mensagem (corrigir o clique sobrescreve). Não guarda texto de e-mail: só ids e classes.
+model ConferenciaIaResposta {
+  id              String   @id @default(cuid())
+  gmailMensagemId String   @unique
+  /// Quem conferiu (rastreabilidade; sem relação para não acoplar à tabela de usuários).
+  userId          String
+  /// A classe que o analista diz ser a certa: orcamento | recusa | duvida | nao_e_resposta.
+  classeCorreta   String
+  /// A classe que a IA tinha dado NO MOMENTO da conferência.
+  classeIa        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([createdAt])
+  @@map("conferencias_ia_resposta")
+}
+
 /// E-mail que voltou (devolução do servidor). Some da lista de envio da "Nova cotação".
 model EmailInvalido {
   /// Minúsculo.
