@@ -27,9 +27,13 @@ function obterCliente(): PrismaClient {
   if (existente) return existente;
 
   const cliente = createPrismaClient();
-  // Fora de produção o singleton sobrevive ao hot reload; em produção cada
-  // instância da função tem o seu, e o pooler cuida do resto.
-  if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = cliente;
+  // O singleton vive em `globalThis` em QUALQUER ambiente. Em produção ele não é "hot reload": é o que
+  // faz a instância da função serverless reaproveitar UM client (e um conjunto de conexões) entre
+  // acessos e entre invocações. A versão anterior só o guardava fora de produção, então cada
+  // `db.<model>` em produção criava um PrismaClient novo com pool próprio, nunca encerrado — e o
+  // pooler do Supabase respondeu `EMAXCONN (limit: 200)` (2026-11-23), quatro meses depois do defeito
+  // nascer, quando a carga por página subiu.
+  globalForPrisma.prisma = cliente;
   return cliente;
 }
 
@@ -52,9 +56,10 @@ function obterCliente(): PrismaClient {
  */
 export const db = new Proxy({} as PrismaClient, {
   get(_alvo, propriedade, receptor) {
-    const valor = Reflect.get(obterCliente(), propriedade, receptor);
+    const cliente = obterCliente();
+    const valor = Reflect.get(cliente, propriedade, receptor);
     // Métodos do client (`$transaction`, `$connect`, ...) precisam continuar
     // ligados ao client, não ao Proxy vazio.
-    return typeof valor === "function" ? valor.bind(obterCliente()) : valor;
+    return typeof valor === "function" ? valor.bind(cliente) : valor;
   },
 });

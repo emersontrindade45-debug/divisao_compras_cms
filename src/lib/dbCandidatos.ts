@@ -59,15 +59,16 @@ function obterClienteCandidatos(): PrismaClient {
   if (existente) return existente;
 
   const cliente = createPrismaCandidatosClient();
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrismaCandidatos.prismaCandidatos = cliente;
-  }
+  // Guardado em QUALQUER ambiente (ver `lib/db.ts`): só guardar fora de produção fazia cada acesso a
+  // `dbCandidatos.<model>` criar um PrismaClient novo com pool próprio, nunca encerrado.
+  globalForPrismaCandidatos.prismaCandidatos = cliente;
   return cliente;
 }
 
 export const dbCandidatos = new Proxy({} as PrismaClient, {
   get(_alvo, propriedade, receptor) {
-    const valor = Reflect.get(obterClienteCandidatos(), propriedade, receptor);
-    return typeof valor === "function" ? valor.bind(obterClienteCandidatos()) : valor;
+    const cliente = obterClienteCandidatos();
+    const valor = Reflect.get(cliente, propriedade, receptor);
+    return typeof valor === "function" ? valor.bind(cliente) : valor;
   },
 });

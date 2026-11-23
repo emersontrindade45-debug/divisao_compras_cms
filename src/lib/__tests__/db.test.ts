@@ -83,4 +83,23 @@ describe("cliente Prisma", () => {
 
     expect(mocks.PrismaClient).toHaveBeenCalledTimes(1);
   });
+
+  // A regressão do EMAXCONN (2026-11-23). O singleton só era guardado FORA de produção, então em
+  // produção cada `db.<model>` criava um PrismaClient novo com pool próprio, nunca encerrado. O teste
+  // acima ("reaproveita o mesmo client") passava porque roda com NODE_ENV=test — o ambiente em que o
+  // defeito não existia.
+  it("em PRODUÇÃO também reaproveita o mesmo client entre acessos e entre usos de método", async () => {
+    vi.stubEnv("DATABASE_URL", URL_FALSA);
+    vi.stubEnv("NODE_ENV", "production");
+    const { db } = await import("../db");
+
+    void db.cotacao;
+    void db.processo;
+    void db.cotacao;
+    void (db as unknown as Record<string, unknown>).$transaction;
+    void (db as unknown as Record<string, unknown>).$executeRaw;
+
+    expect(mocks.PrismaClient).toHaveBeenCalledTimes(1);
+    expect(mocks.PrismaPg).toHaveBeenCalledTimes(1);
+  });
 });

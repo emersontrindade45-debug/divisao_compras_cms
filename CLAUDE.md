@@ -1810,3 +1810,25 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      funcionando enquanto o botão manual e as ações vizinhas quebravam: **um defeito de carregamento
      afeta o pacote inteiro e aparece num clique que não tem relação com a causa** — ao ver "Erro
      inesperado" depois de um clique, procurar o stack do servidor antes de culpar o código recém-escrito.
+
+135. **Singleton de cliente de banco que só é guardado "fora de produção" cria um cliente novo a cada
+     acesso em produção — e o teste roda justamente no ambiente em que o defeito não existe.** Em
+     2026-11-23 a aplicação respondeu `prisma:error … (EMAXCONN) max client connections reached,
+     limit: 200` num `$executeRaw`. A causa estava em `lib/db.ts` desde 2026-07-27 (§9.54): o `Proxy`
+     preguiçoso chamava `obterCliente()`, que só gravava o client em `globalThis` quando
+     `NODE_ENV !== "production"` — o padrão de "hot reload" do Next, copiado sem perguntar *o que
+     acontece em produção quando a condição é falsa*. Em produção `existente` era sempre `undefined`,
+     então **cada** `db.<model>` (e cada método ligado, duas vezes) fabricava um `PrismaClient` com
+     `PrismaPg` e pool próprios, nunca encerrados. A página `/cotacoes` faz ~20 acessos por carga;
+     cada `router.refresh()` multiplicava isso, e o pooler do Supabase (limite de 200 clientes) deu
+     EMAXCONN. O defeito ficou quatro meses calado porque a carga era menor, e o mesmo padrão tinha
+     sido copiado para `lib/dbCandidatos.ts`. O teste "reaproveita o mesmo client entre acessos"
+     existia e passava, **porque o vitest roda com `NODE_ENV=test`**, onde o singleton é guardado.
+     Regras: (a) singleton de client de banco é guardado em `globalThis` em TODO ambiente — em
+     serverless é isso que faz a instância quente reaproveitar o pool; (b) todo teste de singleton
+     precisa de um caso com `vi.stubEnv("NODE_ENV", "production")` (confirmado por mutação: restaurar
+     `if (NODE_ENV !== "production")` derruba o teste); (c) ao copiar um padrão de "só em dev", perguntar
+     o que o ramo de produção faz — aqui fazia o oposto do comentário ("em produção cada instância
+     da função tem o seu"); (d) contar `new PrismaClient`/`new Pool` por requisição é o jeito barato de
+     achar vazamento de conexão: o sintoma (EMAXCONN) apareceu num `$executeRaw`, que nada tem a ver com
+     a causa (§9.134: o erro aparece longe de onde nasceu).
