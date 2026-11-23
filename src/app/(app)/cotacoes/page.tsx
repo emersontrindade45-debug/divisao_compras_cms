@@ -18,6 +18,8 @@ import { listarEncerraveisNaoResposta } from "@/lib/emailCotacao/encerrarNaoResp
 import { aplicacaoIaLigada, listarAprovadasAplicaveis } from "@/lib/emailCotacao/aplicarIa";
 import { AplicarPoliticaIa, type ContagemPolitica } from "@/components/cotacoes/AplicarPoliticaIa";
 import { listarAdotaveisPelaPolitica } from "@/lib/emailCotacao/politicaIa";
+import { FecharPendenciasIa, type ContagemFechamento } from "@/components/cotacoes/FecharPendenciasIa";
+import { planejarFechamento } from "@/lib/emailCotacao/fechamentoIa";
 import { linkDoGmail } from "@/lib/domain/cotacaoEmail/gmail";
 import { ChecklistProposta } from "@/components/cotacoes/ChecklistProposta";
 import { AlertasBanner } from "@/components/common/AlertasBanner";
@@ -47,6 +49,7 @@ export default async function CotacoesPage({
   // função captura seus próprios erros e devolve "indisponivel", então a página abre mesmo sem a tabela.
   const painelConferencia = await carregarPainelConferencia({ escopo: escopoConferencia, classe: classeConferencia });
   const contagemPolitica = await contarPoliticaIa();
+  const contagemFechamento = await contarFechamento();
 
   const [cotacoesRaw, alertas, processosDb, propostas, respostasPendentes, aplicadasPelaIa, orcamentosPdf, aprovadasPendentes, encerraveis, semFornecedor, ligaveis] = await Promise.all([
     listarCotacoes(),
@@ -212,6 +215,7 @@ export default async function CotacoesPage({
         </TabsContent>
 
         <TabsContent value="ia" className="space-y-3">
+          <FecharPendenciasIa contagem={contagemFechamento} />
           <AplicarPoliticaIa contagem={contagemPolitica} />
           <AplicadasPelaIa itens={aplicadasPelaIa} aprovadasPendentes={aprovadasPendentes} />
         </TabsContent>
@@ -394,6 +398,26 @@ async function carregarOrcamentosPdfARevisar(): Promise<OrcamentoPdfRevisarItem[
     return itens;
   } catch {
     return [];
+  }
+}
+
+/** Pendências que o fechamento trata, por grupo (`catch` abre a página). */
+async function contarFechamento(): Promise<ContagemFechamento> {
+  const zero: ContagemFechamento = { aplicarOrcamento: 0, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 0, semFornecedor: 0, fecharSemAlterar: 0, dispensar: 0 };
+  try {
+    const plano = await planejarFechamento();
+    for (const a of plano.aplicar) {
+      if (a.classeIa === "orcamento") zero.aplicarOrcamento += 1;
+      else if (a.classeIa === "recusa") zero.aplicarRecusa += 1;
+      else if (a.classeIa === "duvida") zero.aplicarDuvida += 1;
+      else if (a.classeIa === "nao_e_resposta") zero.aplicarNaoEResposta += 1;
+    }
+    zero.semFornecedor = plano.semFornecedor.length;
+    zero.fecharSemAlterar = plano.fecharSemAlterar.length;
+    zero.dispensar = plano.dispensar.length;
+    return zero;
+  } catch {
+    return { aplicarOrcamento: 0, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 0, semFornecedor: 0, fecharSemAlterar: 0, dispensar: 0 };
   }
 }
 
