@@ -1790,3 +1790,23 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      de schema; (3) valor de enum novo só pode ser citado em código (Server Action, SQL cru) depois
      de a migration estar APLICADA em produção — por isso a migration foi para `main`, aplicada e
      conferida no banco antes do código que a usa (§9.19, §9.46).
+
+134. **Arquivo `"use server"` não reexporta nada — nem tipo. `export type { X }` compila como valor e
+     derruba o módulo no carregamento.** Em 2026-11-23 o clique em "Certa" (e todo clique que chamava
+     uma Server Action do mesmo pacote) abriu a tela "Erro inesperado" com `ReferenceError:
+     JanelaLeitura is not defined`. A causa estava no commit do agendador (`eb8fee7`): ao mover o miolo
+     para `lib/emailCotacao/verificar.ts`, `verificarRespostasEmail.ts` passou a reexportar
+     `export type { JanelaLeitura, ResumoLeitura }`. O Turbopack gera, para arquivo de ação, um
+     `ensureServerEntryExports([fn, JanelaLeitura, ResumoLeitura])` — os nomes de tipo viram
+     identificadores de valor, que não existem no runtime. Foi confirmado lendo o chunk compilado
+     (`.next/server/chunks/ssr/…`), o mesmo arquivo que o stack trace citava. **Nada acusa isso antes
+     do runtime**: `tsc` verde, 2.378 testes verdes e `next build` verde (§9.23, §9.30, §9.38).
+     Regras: (a) arquivo `"use server"` só exporta funções assíncronas declaradas nele — quem precisa
+     do tipo importa do módulo de origem; (b) o teste `actions/__tests__/arquivosUseServer.test.ts`
+     varre todos os `"use server"` e barra `export {…}`, `export type {…}` e `export *` (confirmado por
+     mutação: recolocar a linha derruba o teste); (c) ao mexer em `"use server"`, a evidência é
+     `grep` pelo nome do tipo em `.next/server` depois do build — zero ocorrências —, não o build
+     verde; (d) a rota do cron não importava essa ação, por isso a verificação automática seguiu
+     funcionando enquanto o botão manual e as ações vizinhas quebravam: **um defeito de carregamento
+     afeta o pacote inteiro e aparece num clique que não tem relação com a causa** — ao ver "Erro
+     inesperado" depois de um clique, procurar o stack do servidor antes de culpar o código recém-escrito.

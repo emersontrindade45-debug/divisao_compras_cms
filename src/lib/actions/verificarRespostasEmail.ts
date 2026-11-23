@@ -5,8 +5,10 @@ import { requireRole } from "@/lib/auth/rbac";
 import { executarVerificacao, janelaSchema, type JanelaLeitura, type ResumoLeitura } from "@/lib/emailCotacao/verificar";
 import type { ActionResult } from "./processos";
 
-// Server Action de arquivo "use server" só pode exportar funções: os tipos saem como reexport de tipo.
-export type { JanelaLeitura, ResumoLeitura };
+// Arquivo "use server" só exporta funções assíncronas. NÃO reexportar tipos daqui (`export type { … }`):
+// o Turbopack os trata como valores e o módulo estoura com "ReferenceError: <Tipo> is not defined" ao
+// carregar, derrubando toda Server Action do mesmo pacote (visto em produção em 2026-11-23). Quem
+// precisa dos tipos importa de "@/lib/emailCotacao/verificar".
 
 /**
  * Botão "Verificar respostas" (M30.d): exige login, valida a entrada e delega ao miolo compartilhado
