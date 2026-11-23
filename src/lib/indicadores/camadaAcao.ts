@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
+import { emailDoUsuarioDeSistema } from "@/lib/auth/usuarioSistema";
 import { priorizarFilaTrabalho, type FilaItem } from "@/lib/domain/filaTrabalho";
 import {
   processoAtivo,
@@ -191,6 +192,15 @@ export async function contarProcessosDoUsuario(usuarioId: string): Promise<numbe
   return db.processo.count({ where: { responsavelId: usuarioId } });
 }
 
+/**
+ * Quem pode ser escolhido como responsável de um processo. O usuário de SISTEMA da verificação
+ * automática fica de fora: ele existe só para a auditoria e não é uma pessoa.
+ */
 export async function listarUsuariosAtribuiveis(): Promise<{ id: string; name: string }[]> {
-  return db.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
+  const sistema = emailDoUsuarioDeSistema();
+  return db.user.findMany({
+    where: sistema ? { email: { not: sistema } } : {},
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
 }

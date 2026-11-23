@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { autorizadoPorCron } from "@/lib/auth/cron";
+import { emailDoUsuarioDeSistema } from "@/lib/auth/usuarioSistema";
 import { executarVerificacao } from "@/lib/emailCotacao/verificar";
 
 /**
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ erro: "Não autorizado" }, { status: 401 });
   }
 
-  const email = process.env.CRON_USUARIO_EMAIL?.trim().toLowerCase();
+  const email = emailDoUsuarioDeSistema();
   const usuario = email ? await db.user.findUnique({ where: { email }, select: { id: true } }) : null;
   if (!usuario) {
     return NextResponse.json({ erro: "O usuário de sistema da verificação automática não está configurado." }, { status: 503 });
