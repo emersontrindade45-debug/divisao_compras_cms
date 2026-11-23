@@ -14,10 +14,12 @@ export interface ContagemFechamento {
   semFornecedor: number;
   fecharSemAlterar: number;
   dispensar: number;
+  /** Consultas "a confirmar" com a fila já encerrada: a leitura da IA vai direto na consulta. */
+  consultasOrfas: number;
 }
 
 export function totalDoFechamento(c: ContagemFechamento): number {
-  return c.aplicarOrcamento + c.aplicarRecusa + c.aplicarDuvida + c.aplicarNaoEResposta + c.semFornecedor + c.fecharSemAlterar + c.dispensar;
+  return c.aplicarOrcamento + c.aplicarRecusa + c.aplicarDuvida + c.aplicarNaoEResposta + c.semFornecedor + c.fecharSemAlterar + c.dispensar + c.consultasOrfas;
 }
 
 /**
@@ -43,6 +45,7 @@ export function FecharPendenciasIa({ contagem }: { contagem: ContagemFechamento 
       const d = r.data;
       toast.success(
         `${d.aplicadas} sugestão(ões) da IA aplicada(s), ${d.semFornecedor} sem fornecedor, ` +
+          `${d.consultasResolvidas} consulta(s) "a confirmar" resolvida(s), ` +
           `${d.fechadasSemAlterar} entrada(s) já decidida(s) encerrada(s) e ${d.dispensadas} antiga(s) dispensada(s)` +
           (d.ignoradas ? `. ${d.ignoradas} já tinham sido decididas e não foram alteradas` : "") +
           (d.iaDesligada ? ". A aplicação da IA está desligada: só o encerramento foi feito" : "") +
@@ -67,6 +70,10 @@ export function FecharPendenciasIa({ contagem }: { contagem: ContagemFechamento 
         </li>
         <li>
           <strong>{contagem.fecharSemAlterar}</strong> cuja consulta já tem decisão: só a entrada da fila é encerrada
+        </li>
+        <li>
+          <strong>{contagem.consultasOrfas}</strong> consulta(s) &ldquo;a confirmar&rdquo; cuja fila já foi encerrada: a leitura da IA
+          é aplicada direto na consulta
         </li>
         <li>
           <strong>{contagem.dispensar}</strong> de out a dez/2025 que a IA nunca leu: dispensadas da fila

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => {
   const tx = {
     respostaEmailPendente: { updateMany: vi.fn() },
     classificacaoIaResposta: { updateMany: vi.fn() },
+    consultaCotacao: { updateMany: vi.fn() },
   };
   return {
     tx,
@@ -21,7 +22,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
-vi.mock("../aplicarIa", () => ({ aplicarClassificacaoIa: mocks.aplicar, aplicacaoIaLigada: mocks.ligada }));
+vi.mock("../aplicarIa", () => ({ aplicarClassificacaoIa: mocks.aplicar, aplicacaoIaLigada: mocks.ligada, REGRA_IA: "ia" }));
 
 import { executarFechamento, planejarFechamento } from "../fechamentoIa";
 
@@ -29,14 +30,24 @@ const D_2026 = new Date("2026-11-10T12:00:00Z");
 const D_OUT25 = new Date("2025-11-05T12:00:00-03:00");
 
 interface P { id: string; m: string; d?: Date; ia?: { c: string; k: string | null }; sit?: string }
-function cenario(ps: P[]) {
-  mocks.db.respostaEmailPendente.findMany.mockResolvedValue(ps.map((p) => ({ id: p.id, gmailMensagemId: p.m, dataResposta: p.d ?? D_2026 })));
-  mocks.db.classificacaoIaResposta.findMany.mockResolvedValue(
-    ps.filter((p) => p.ia).map((p) => ({ gmailMensagemId: p.m, classeIa: p.ia!.c, consultaId: p.ia!.k })),
-  );
-  mocks.db.consultaCotacao.findMany.mockResolvedValue(
-    ps.filter((p) => p.ia?.k).map((p) => ({ id: p.ia!.k as string, situacao: p.sit ?? "a_confirmar" })),
-  );
+interface O { m: string; c: string; k: string; fila?: "aberta" | "resolvida" | "nenhuma"; semIa?: boolean }
+
+/** `ps` = entradas ABERTAS da fila; `os` = consultas "a confirmar" ligadas a uma mensagem (órfãs ou não). */
+function cenario(ps: P[], os: O[] = []) {
+  mocks.db.respostaEmailPendente.findMany.mockImplementation(async (a: { where: { resolvidaEm?: null; gmailMensagemId?: unknown } }) => {
+    if (a.where.resolvidaEm === null) return ps.map((p) => ({ id: p.id, gmailMensagemId: p.m, dataResposta: p.d ?? D_2026 }));
+    return os.filter((o) => o.fila !== "nenhuma").map((o) => ({ gmailMensagemId: o.m, dataResposta: D_2026 }));
+  });
+  mocks.db.classificacaoIaResposta.findMany.mockImplementation(async (a: { where: { gmailMensagemId: { in: string[] } } }) => {
+    const ids = a.where.gmailMensagemId.in;
+    const das = ps.filter((p) => p.ia && ids.includes(p.m)).map((p) => ({ gmailMensagemId: p.m, classeIa: p.ia!.c, consultaId: p.ia!.k }));
+    const dasOrf = os.filter((o) => !o.semIa && ids.includes(o.m)).map((o) => ({ gmailMensagemId: o.m, classeIa: o.c, consultaId: o.k }));
+    return [...das, ...dasOrf];
+  });
+  mocks.db.consultaCotacao.findMany.mockImplementation(async (a: { where: { situacao?: string; id?: { in: string[] } } }) => {
+    if (a.where.situacao === "a_confirmar") return os.map((o) => ({ id: o.k, gmailRespostaId: o.m, situacao: "a_confirmar" }));
+    return ps.filter((p) => p.ia?.k).map((p) => ({ id: p.ia!.k as string, situacao: p.sit ?? "a_confirmar" }));
+  });
 }
 
 describe("planejarFechamento", () => {
@@ -61,6 +72,10 @@ describe("planejarFechamento", () => {
       where: { id: { in: ["c1"] } },
       select: { id: true, situacao: true },
     });
+    expect(mocks.db.consultaCotacao.findMany).toHaveBeenCalledWith({
+      where: { situacao: "a_confirmar", gmailRespostaId: { not: null } },
+      select: { id: true, gmailRespostaId: true, situacao: true },
+    });
   });
 
   it("separa os quatro grupos", async () => {
@@ -82,7 +97,7 @@ describe("planejarFechamento", () => {
   it("sem leitura da IA e FORA de out–dez/2025: fica na fila (não é dispensada)", async () => {
     cenario([{ id: "p1", m: "m1", d: new Date("2026-03-10T12:00:00Z") }, { id: "p2", m: "m2", d: new Date("2025-09-01T12:00:00Z") }]);
     const p = await planejarFechamento();
-    expect(p).toEqual({ aplicar: [], semFornecedor: [], fecharSemAlterar: [], dispensar: [] });
+    expect(p).toEqual({ aplicar: [], semFornecedor: [], fecharSemAlterar: [], dispensar: [], consultasOrfas: [] });
   });
 
   it("'não é resposta' sem fornecedor não é tocada", async () => {
@@ -90,9 +105,38 @@ describe("planejarFechamento", () => {
     expect((await planejarFechamento()).semFornecedor).toEqual([]);
   });
 
-  it("sem pendente aberta não consulta mais nada", async () => {
+  it("sem pendente aberta não procura leitura para as pendentes (só as órfãs, se houver)", async () => {
+    cenario([]);
     expect((await planejarFechamento()).aplicar).toEqual([]);
     expect(mocks.db.classificacaoIaResposta.findMany).not.toHaveBeenCalled();
+  });
+
+  it("consultas ÓRFÃS: a confirmar + leitura da IA + fila já encerrada entram, com a data da resposta", async () => {
+    cenario([], [{ m: "mo1", c: "nao_e_resposta", k: "co1" }, { m: "mo2", c: "duvida", k: "co2" }]);
+    const p = await planejarFechamento();
+    expect(p.consultasOrfas).toEqual([
+      { gmailMensagemId: "mo1", classeIa: "nao_e_resposta", consultaId: "co1", dataResposta: D_2026 },
+      { gmailMensagemId: "mo2", classeIa: "duvida", consultaId: "co2", dataResposta: D_2026 },
+    ]);
+  });
+
+  it("órfã: sem leitura da IA não entra; com a fila ABERTA não entra (é tratada pelo outro grupo)", async () => {
+    cenario(
+      [{ id: "p9", m: "mo2", ia: { c: "recusa", k: "co2" }, sit: "a_confirmar" }],
+      [{ m: "mo1", c: "recusa", k: "co1", semIa: true }, { m: "mo2", c: "recusa", k: "co2" }],
+    );
+    const p = await planejarFechamento();
+    expect(p.consultasOrfas).toEqual([]);
+    expect(p.aplicar.map((x) => x.gmailMensagemId)).toEqual(["mo2"]);
+  });
+
+  it("órfã: lê só leituras NÃO desfeitas, com select explícito (§9.46)", async () => {
+    cenario([], [{ m: "mo1", c: "recusa", k: "co1" }]);
+    await planejarFechamento();
+    expect(mocks.db.classificacaoIaResposta.findMany).toHaveBeenCalledWith({
+      where: { gmailMensagemId: { in: ["mo1"] }, desfeitaEm: null },
+      select: { gmailMensagemId: true, classeIa: true },
+    });
   });
 });
 
@@ -104,6 +148,7 @@ describe("executarFechamento", () => {
     mocks.db.respostaEmailPendente.updateMany.mockResolvedValue({ count: 1 });
     mocks.tx.respostaEmailPendente.updateMany.mockResolvedValue({ count: 1 });
     mocks.tx.classificacaoIaResposta.updateMany.mockResolvedValue({ count: 1 });
+    mocks.tx.consultaCotacao.updateMany.mockResolvedValue({ count: 1 });
     mocks.db.auditLog.createMany.mockResolvedValue({ count: 0 });
   });
 
@@ -119,7 +164,7 @@ describe("executarFechamento", () => {
     const r = await executarFechamento("u1");
     expect(mocks.aplicar).toHaveBeenCalledTimes(1);
     expect(mocks.aplicar).toHaveBeenCalledWith({ gmailMensagemId: "m1", classe: "nao_e_resposta", consultaId: "c1", dataResposta: D_2026 });
-    expect(r).toEqual({ iaDesligada: false, aplicadas: 1, ignoradas: 0, semFornecedor: 1, fechadasSemAlterar: 1, dispensadas: 1 });
+    expect(r).toEqual({ iaDesligada: false, aplicadas: 1, ignoradas: 0, semFornecedor: 1, fechadasSemAlterar: 1, dispensadas: 1, consultasResolvidas: 0 });
     // fecha a entrada (p2 e p4) só pelo id da fila, com resolvidaEm: null no WHERE (atômico)
     expect(mocks.db.respostaEmailPendente.updateMany).toHaveBeenCalledWith({ where: { id: "p2", resolvidaEm: null }, data: { resolvidaEm: expect.any(Date) } });
     expect(mocks.db.respostaEmailPendente.updateMany).toHaveBeenCalledWith({ where: { id: "p4", resolvidaEm: null }, data: { resolvidaEm: expect.any(Date) } });
@@ -166,7 +211,7 @@ describe("executarFechamento", () => {
     mocks.ligada.mockReturnValue(false);
     cenario(TUDO);
     const r = await executarFechamento("u1");
-    expect(r).toEqual({ iaDesligada: true, aplicadas: 0, ignoradas: 0, semFornecedor: 0, fechadasSemAlterar: 1, dispensadas: 1 });
+    expect(r).toEqual({ iaDesligada: true, aplicadas: 0, ignoradas: 0, semFornecedor: 0, fechadasSemAlterar: 1, dispensadas: 1, consultasResolvidas: 0 });
     expect(mocks.aplicar).not.toHaveBeenCalled();
     expect(mocks.db.$transaction).not.toHaveBeenCalled();
   });
@@ -177,5 +222,82 @@ describe("executarFechamento", () => {
     const r = await executarFechamento("u1");
     expect(r.semFornecedor).toBe(0);
     expect(mocks.tx.respostaEmailPendente.updateMany).toHaveBeenLastCalledWith({ where: { id: "p3" }, data: { resolvidaEm: null } });
+  });
+
+  describe("consultas órfãs", () => {
+    const ORF: O[] = [
+      { m: "mo1", c: "nao_e_resposta", k: "co1" },
+      { m: "mo2", c: "recusa", k: "co2" },
+    ];
+
+    it("'não é resposta' devolve a consulta a sem_resposta, só se ainda for a_confirmar e desta mensagem (guarda atômica)", async () => {
+      cenario([], [ORF[0]]);
+      const r = await executarFechamento("u1");
+      expect(r.consultasResolvidas).toBe(1);
+      expect(mocks.tx.consultaCotacao.updateMany).toHaveBeenCalledWith({
+        where: { id: "co1", situacao: "a_confirmar", gmailRespostaId: "mo1" },
+        data: { situacao: "sem_resposta", dataResposta: null, gmailRespostaId: null, regra: null },
+      });
+    });
+
+    it("recusa/dúvida/orçamento definem a consulta com regra 'ia' e a data da resposta (se faltava)", async () => {
+      cenario([], [ORF[1]]);
+      await executarFechamento("u1");
+      expect(mocks.tx.consultaCotacao.updateMany).toHaveBeenCalledWith({
+        where: { id: "co2", situacao: "a_confirmar", gmailRespostaId: "mo2" },
+        data: { situacao: "recusa", regra: "ia", gmailRespostaId: "mo2" },
+      });
+      expect(mocks.tx.consultaCotacao.updateMany).toHaveBeenCalledWith({
+        where: { id: "co2", dataResposta: null },
+        data: { dataResposta: D_2026 },
+      });
+    });
+
+    it("deixa a linha da IA no formato do Desfazer: aplicadaEm e situacaoAnterior = a_confirmar", async () => {
+      cenario([], [ORF[1]]);
+      await executarFechamento("u1");
+      expect(mocks.tx.classificacaoIaResposta.updateMany).toHaveBeenCalledWith({
+        where: { gmailMensagemId: "mo2", aplicadaEm: null, desfeitaEm: null },
+        data: { aplicadaEm: expect.any(Date) },
+      });
+      expect(mocks.tx.classificacaoIaResposta.updateMany).toHaveBeenCalledWith({
+        where: { gmailMensagemId: "mo2", desfeitaEm: null },
+        data: { situacaoAnterior: "a_confirmar", dataRespostaDefinida: true },
+      });
+    });
+
+    it("consulta que mudou no meio (0 linhas): não conta, não audita e não marca a IA", async () => {
+      cenario([], [ORF[1]]);
+      mocks.tx.consultaCotacao.updateMany.mockResolvedValue({ count: 0 });
+      const r = await executarFechamento("u1");
+      expect(r.consultasResolvidas).toBe(0);
+      expect(mocks.tx.classificacaoIaResposta.updateMany).not.toHaveBeenCalled();
+      expect(mocks.db.auditLog.createMany).not.toHaveBeenCalled();
+    });
+
+    it("audita com a origem 'fechamento_consulta'", async () => {
+      cenario([], [ORF[0]]);
+      await executarFechamento("u1");
+      expect(mocks.db.auditLog.createMany).toHaveBeenCalledWith({
+        data: [
+          { userId: "u1", acao: "ia_aplicar_resposta_email", detalhes: { gmailMensagemId: "mo1", consultaId: "co1", classe: "nao_e_resposta", origem: "fechamento_consulta" } },
+        ],
+      });
+    });
+
+    it("erro numa consulta não derruba as outras", async () => {
+      cenario([], ORF);
+      mocks.tx.consultaCotacao.updateMany.mockRejectedValueOnce(new Error("falha")).mockResolvedValue({ count: 1 });
+      const r = await executarFechamento("u1");
+      expect(r.consultasResolvidas).toBe(1);
+    });
+
+    it("chave da IA desligada: não resolve nenhuma consulta", async () => {
+      mocks.ligada.mockReturnValue(false);
+      cenario([], ORF);
+      const r = await executarFechamento("u1");
+      expect(r.consultasResolvidas).toBe(0);
+      expect(mocks.tx.consultaCotacao.updateMany).not.toHaveBeenCalled();
+    });
   });
 });

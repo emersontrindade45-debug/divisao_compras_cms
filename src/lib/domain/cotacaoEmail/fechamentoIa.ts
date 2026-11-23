@@ -34,6 +34,15 @@ export function acaoDeFechamento(e: { classeIa: string; situacaoConsulta: string
   return "ignorar";
 }
 
+/**
+ * Consulta "a confirmar" cuja entrada da fila JÁ foi encerrada, mas que nunca recebeu a decisão (a
+ * classificação foi aplicada só na fila): aplica a leitura da IA direto na consulta. Só quando ela
+ * ainda está "a confirmar" — qualquer decisão posterior é preservada — e a classe é conhecida.
+ */
+export function aplicavelNaConsultaOrfa(e: { classeIa: string; situacaoConsulta: string }): boolean {
+  return e.situacaoConsulta === "a_confirmar" && (CLASSES_DO_FECHAMENTO as readonly string[]).includes(e.classeIa);
+}
+
 /** A resposta (sem leitura da IA) é das que o usuário mandou remover da fila? */
 export function dentroDaDispensa(dataResposta: Date): boolean {
   return dataResposta >= DISPENSA_DE && dataResposta < DISPENSA_ATE;

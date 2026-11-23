@@ -12,7 +12,7 @@ describe("fecharPendenciasIa (ação)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireRole.mockResolvedValue({ id: "u1" });
-    mocks.executar.mockResolvedValue({ iaDesligada: false, aplicadas: 2, ignoradas: 0, semFornecedor: 1, fechadasSemAlterar: 3, dispensadas: 4 });
+    mocks.executar.mockResolvedValue({ iaDesligada: false, aplicadas: 2, ignoradas: 0, semFornecedor: 1, fechadasSemAlterar: 3, dispensadas: 4, consultasResolvidas: 5 });
   });
 
   it("exige o papel de pesquisa antes de qualquer coisa", async () => {
