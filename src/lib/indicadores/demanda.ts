@@ -16,6 +16,11 @@ import { calcularDemanda, lerRemessas, type DemandaDivisao } from "@/lib/domain/
  *
  * O id da planilha vem do ambiente (`DEMANDA_PLANILHA_ID`), não do código: com link público o id
  * funciona como chave de leitura e não deve entrar no repositório.
+ *
+ * A exportação em CSV devolve SEMPRE a primeira aba. Em 2026-11-23 a planilha ganhou abas de painel na
+ * frente da tabela de remessas e a seção do dashboard passou a mostrar "Cabeçalho não reconhecido"; a
+ * aba certa se escolhe por `DEMANDA_PLANILHA_GID` (o `gid=` da URL da aba). Sem ela, vale a primeira aba,
+ * como antes.
  */
 
 export const PRAZO_LEITURA_MS = 10_000;
@@ -24,6 +29,8 @@ export const CACHE_SEGUNDOS = 3600;
 const MAX_BYTES = 5_000_000;
 /** Ids de planilha do Google: letras, dígitos, "-" e "_". Barra o que poderia alterar a URL. */
 const FORMATO_ID = /^[A-Za-z0-9_-]{20,80}$/;
+/** O `gid` de uma aba é um número. Só dígitos: nada que altere a URL passa. */
+const FORMATO_GID = /^\d{1,12}$/;
 
 export interface ProcessoNoSistema {
   id: string;
@@ -48,10 +55,10 @@ export function chaveDoNumero(numero: string): string | null {
   return m ? `${Number(m[1])}/${m[2]}` : null;
 }
 
-async function baixarCsv(id: string): Promise<{ ok: true; texto: string } | { ok: false; motivo: string }> {
+async function baixarCsv(id: string, gid?: string): Promise<{ ok: true; texto: string } | { ok: false; motivo: string }> {
   let res: Response;
   try {
-    res = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv`, {
+    res = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv${gid ? `&gid=${gid}` : ""}`, {
       signal: AbortSignal.timeout(PRAZO_LEITURA_MS),
       next: { revalidate: CACHE_SEGUNDOS },
     });
@@ -98,11 +105,20 @@ export async function carregarDemanda(ano: number): Promise<ResultadoDemanda> {
     return { estado: "indisponivel", motivo: "O id da planilha configurado tem formato inválido." };
   }
 
+  const gid = process.env.DEMANDA_PLANILHA_GID?.trim();
+  if (gid && !FORMATO_GID.test(gid)) {
+    return { estado: "indisponivel", motivo: "O id da aba configurado (DEMANDA_PLANILHA_GID) tem formato inválido." };
+  }
+
   try {
-    const csv = await baixarCsv(id);
+    const csv = await baixarCsv(id, gid);
     if (!csv.ok) return { estado: "indisponivel", motivo: csv.motivo };
     const leitura = lerRemessas(parseCsv(csv.texto));
-    if (!leitura.ok) return { estado: "indisponivel", motivo: leitura.motivo };
+    if (!leitura.ok) {
+      // Sem `gid` o CSV é da primeira aba: o motivo mais provável de "cabeçalho não reconhecido" é a aba errada.
+      const dica = gid ? "" : " Se a planilha tem mais de uma aba, informe a das remessas em DEMANDA_PLANILHA_GID.";
+      return { estado: "indisponivel", motivo: leitura.motivo + dica };
+    }
     return {
       estado: "ok",
       demanda: calcularDemanda(leitura.remessas, ano),
