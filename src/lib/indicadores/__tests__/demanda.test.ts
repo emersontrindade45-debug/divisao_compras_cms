@@ -61,7 +61,7 @@ describe("carregarDemanda", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(resposta(CSV));
     const r = await carregarDemanda(2026);
     if (r.estado !== "ok") throw new Error("esperava ok");
-    expect(r.demanda).toMatchObject({ remessas: 3, processosDistintos: 2, processosQueVoltaram: 1 });
+    expect(r.demanda).toMatchObject({ remessas: 3, processosDistintos: 2, processosQueVoltaram: 0, recorrencias: 0 });
     expect(r.noSistema).toEqual({ "92/2026": { id: "p92", numero: "0092/2026" } });
     expect(mocks.findMany).toHaveBeenCalledWith({ select: { id: true, numero: true } });
   });

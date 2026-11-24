@@ -102,14 +102,33 @@ describe("calcularDemanda", () => {
     R("2025-12-30", "9/2025"), // outro ano: fora
   ];
 
-  it("conta remessas, distintos, voltaram, extras e média", () => {
+  it("conta remessas, distintos e média; 3 passagens por processo não são recorrência", () => {
     const d = calcularDemanda(remessas, 2026);
     expect(d).toMatchObject({
       remessas: 5,
       processosDistintos: 3,
-      processosQueVoltaram: 1,
-      remessasExtras: 2,
+      processosQueVoltaram: 0, // 1/2026 passou 3 vezes: é o fluxo normal, não devolução
+      recorrencias: 0,
       mediaRemessas: 1.7,
+    });
+  });
+
+  it("recorrência = remessas além das 3 obrigatórias, por processo, sem valor negativo", () => {
+    const d = calcularDemanda(
+      [
+        ...Array.from({ length: 5 }, (_, i) => R(`2026-02-0${i + 1}`, "10/2026")), // 5 → 2 devoluções
+        ...Array.from({ length: 4 }, (_, i) => R(`2026-03-0${i + 1}`, "11/2026")), // 4 → 1 devolução
+        R("2026-04-01", "12/2026"), // 1 → 0 (ainda não fechou as 3 passagens)
+        R("2026-04-02", "12/2026"), // 2 → 0
+      ],
+      2026,
+    );
+    expect(d.recorrencias).toBe(3);
+    expect(d.processosQueVoltaram).toBe(2);
+    expect(Object.fromEntries(d.processos.map((p) => [p.chave, p.recorrencias]))).toEqual({
+      "10/2026": 2,
+      "11/2026": 1,
+      "12/2026": 0,
     });
   });
 

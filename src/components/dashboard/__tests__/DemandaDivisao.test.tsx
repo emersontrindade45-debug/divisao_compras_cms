@@ -13,15 +13,15 @@ const OK: Extract<ResultadoDemanda, { estado: "ok" }> = {
     remessas: 584,
     processosDistintos: 117,
     processosQueVoltaram: 81,
-    remessasExtras: 467,
+    recorrencias: 467,
     mediaRemessas: 5,
     porMes: [
       { mes: 1, remessas: 56, distintos: 26 },
       { mes: 2, remessas: 66, distintos: 32 },
     ],
     processos: [
-      { chave: "92/2026", rotulo: "Geral Nº 92/2026 - volume 1", remessas: 23, primeira: "2026-01-05", ultima: "2026-11-17" },
-      { chave: "5/2026", rotulo: "Aquisição de Bens Nº 5/2026 - volume 1", remessas: 1, primeira: "2026-02-03", ultima: "2026-02-03" },
+      { chave: "92/2026", rotulo: "Geral Nº 92/2026 - volume 1", remessas: 23, recorrencias: 20, primeira: "2026-01-05", ultima: "2026-11-17" },
+      { chave: "5/2026", rotulo: "Aquisição de Bens Nº 5/2026 - volume 1", remessas: 1, recorrencias: 0, primeira: "2026-02-03", ultima: "2026-02-03" },
     ],
     ultimaRemessa: "2026-11-17",
   },
@@ -62,10 +62,10 @@ describe("DemandaDivisao", () => {
     render(<DemandaDivisao resultado={OK} ano={2026} />);
     expect(cartao("Processos distintos")).toContain("117");
     expect(cartao("Remessas")).toContain("584");
-    const voltaram = cartao("Processos que voltaram");
+    const voltaram = cartao("Processos devolvidos");
     expect(voltaram).toContain("81");
     expect(voltaram).toContain("69%"); // 81 de 117
-    expect(voltaram).toContain("467 remessas extras");
+    expect(voltaram).toContain("467 recorrências");
     expect(cartao("Remessas por processo")).toContain("5,0");
   });
 

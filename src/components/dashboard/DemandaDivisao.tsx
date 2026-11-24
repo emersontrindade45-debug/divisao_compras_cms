@@ -53,9 +53,9 @@ export function DemandaDivisao({ resultado, ano }: { resultado: ResultadoDemanda
         />
         <MetricCard label="Remessas" value={numero(demanda.remessas)} hint="cada chegada de um processo" icon={Inbox} />
         <MetricCard
-          label="Processos que voltaram"
+          label="Processos devolvidos"
           value={numero(demanda.processosQueVoltaram)}
-          hint={`${pctVoltaram}% dos distintos · ${numero(demanda.remessasExtras)} remessas extras`}
+          hint={`${pctVoltaram}% dos distintos · ${numero(demanda.recorrencias)} recorrências (4ª passagem em diante)`}
           icon={RotateCcw}
         />
         <MetricCard
@@ -108,6 +108,7 @@ export function DemandaDivisao({ resultado, ano }: { resultado: ResultadoDemanda
               <tr>
                 <th className="px-4 py-2 font-medium">Processo</th>
                 <th className="px-4 py-2 text-right font-medium">Remessas</th>
+                <th className="px-4 py-2 text-right font-medium">Recorrências</th>
                 <th className="px-4 py-2 font-medium">Primeira</th>
                 <th className="px-4 py-2 font-medium">Última</th>
               </tr>
@@ -127,6 +128,7 @@ export function DemandaDivisao({ resultado, ano }: { resultado: ResultadoDemanda
                       )}
                     </td>
                     <td className="px-4 py-1.5 text-right tabular-nums">{numero(p.remessas)}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">{numero(p.recorrencias)}</td>
                     <td className="px-4 py-1.5 tabular-nums">{dataBr(p.primeira)}</td>
                     <td className="px-4 py-1.5 tabular-nums">{dataBr(p.ultima)}</td>
                   </tr>

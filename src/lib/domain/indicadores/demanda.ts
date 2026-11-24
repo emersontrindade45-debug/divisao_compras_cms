@@ -15,6 +15,18 @@
  * descartada e CONTADA — nunca some em silêncio.
  */
 
+/**
+ * Todo processo passa pela Divisão obrigatoriamente 3 vezes quando não há erro. Só a 4ª passagem em
+ * diante é devolução (recorrência real) — decisão do usuário em 2026-11-23: das remessas extras de cada
+ * processo, 2 são duplicidade esperada e saem da contagem.
+ */
+export const PASSAGENS_OBRIGATORIAS = 3;
+
+/** Recorrências (devoluções) de um processo: remessas além das passagens obrigatórias, nunca negativo. */
+export function recorrenciasDoProcesso(remessas: number): number {
+  return Math.max(0, remessas - PASSAGENS_OBRIGATORIAS);
+}
+
 export interface Remessa {
   /** "YYYY-MM-DD" — texto, não Date, para não depender de fuso. */
   data: string;
@@ -31,6 +43,8 @@ export interface ProcessoDemanda {
   /** Rótulo mais recente da planilha (ex.: "Aquisição de Bens Nº 210/2025 - volume 1"). */
   rotulo: string;
   remessas: number;
+  /** Devoluções: remessas além das 3 passagens obrigatórias. */
+  recorrencias: number;
   primeira: string;
   ultima: string;
 }
@@ -45,10 +59,10 @@ export interface DemandaDivisao {
   ano: number;
   remessas: number;
   processosDistintos: number;
-  /** Processos com mais de uma remessa. */
+  /** Processos devolvidos: com mais remessas que as passagens obrigatórias. */
   processosQueVoltaram: number;
-  /** Remessas além da primeira de cada processo. */
-  remessasExtras: number;
+  /** Soma das recorrências (devoluções) de todos os processos. */
+  recorrencias: number;
   /** Remessas por processo, uma casa decimal. */
   mediaRemessas: number;
   /** De janeiro até o último mês com remessa; meses sem remessa aparecem com zero. */
@@ -195,6 +209,7 @@ export function calcularDemanda(remessas: Remessa[], ano: number): DemandaDivisa
       chave,
       rotulo: ordenadas[ordenadas.length - 1]!.rotulo,
       remessas: lista.length,
+      recorrencias: recorrenciasDoProcesso(lista.length),
       primeira: ordenadas[0]!.data,
       ultima: ordenadas[ordenadas.length - 1]!.data,
     };
@@ -213,8 +228,8 @@ export function calcularDemanda(remessas: Remessa[], ano: number): DemandaDivisa
     ano,
     remessas: doAno.length,
     processosDistintos: distintos,
-    processosQueVoltaram: processos.filter((p) => p.remessas > 1).length,
-    remessasExtras: doAno.length - distintos,
+    processosQueVoltaram: processos.filter((p) => p.recorrencias > 0).length,
+    recorrencias: processos.reduce((soma, p) => soma + p.recorrencias, 0),
     mediaRemessas: distintos === 0 ? 0 : Math.round((doAno.length / distintos) * 10) / 10,
     porMes,
     processos,
