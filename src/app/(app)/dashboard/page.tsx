@@ -84,7 +84,7 @@ export default async function DashboardPage({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="dashboard-3d space-y-6">
       <PageHeader
         title="Dashboard"
         description="O que fazer agora e como a pesquisa de preços está andando."

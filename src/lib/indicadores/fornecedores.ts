@@ -14,6 +14,17 @@ const FORMATO_ID = /^[A-Za-z0-9_-]{20,80}$/;
 const ABA = "Por mês";
 const TTL_MS = 3_600_000;
 
+/**
+ * Aceita o que costuma ser colado na variável: só o id, o id entre aspas, ou a URL inteira da planilha
+ * (`https://docs.google.com/spreadsheets/d/<id>/edit#gid=0`). Devolve o id ou null se nada parecer um.
+ */
+export function extrairIdDePlanilha(bruto: string): string | null {
+  const limpo = bruto.trim().replace(/^["']+|["']+$/g, "").trim();
+  const dentroDaUrl = /\/d\/([A-Za-z0-9_-]+)/.exec(limpo)?.[1];
+  const id = dentroDaUrl ?? limpo;
+  return FORMATO_ID.test(id) ? id : null;
+}
+
 export type ResultadoFornecedores =
   | { estado: "nao_configurada" }
   | { estado: "indisponivel"; motivo: string }
@@ -38,10 +49,15 @@ async function ler(id: string): Promise<ResultadoFornecedores> {
 }
 
 export async function carregarFornecedores(): Promise<ResultadoFornecedores> {
-  const id = process.env.LEVANTAMENTO_GMAIL_PLANILHA_ID?.trim();
-  if (!id) return { estado: "nao_configurada" };
-  if (!FORMATO_ID.test(id))
-    return { estado: "indisponivel", motivo: "O id da planilha do Levantamento tem formato inválido." };
+  const configurado = process.env.LEVANTAMENTO_GMAIL_PLANILHA_ID?.trim();
+  if (!configurado) return { estado: "nao_configurada" };
+  const id = extrairIdDePlanilha(configurado);
+  if (!id)
+    return {
+      estado: "indisponivel",
+      motivo:
+        "O id da planilha do Levantamento (LEVANTAMENTO_GMAIL_PLANILHA_ID) não é válido: use só o trecho entre /d/ e /edit da URL da planilha.",
+    };
 
   if (cache && cache.id === id && Date.now() - cache.em < TTL_MS) return cache.valor;
   if (emAndamento?.id === id) return emAndamento.promessa;

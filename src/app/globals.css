@@ -193,3 +193,45 @@
     padding: 0 !important;
   }
 }
+
+/* Quadros em relevo (3D) no dashboard: cada card e cada seção recolhível ganha elevação em camadas, brilho na borda de
+   cima e, ao passar o mouse, sobe e inclina de leve. Só dentro de .dashboard-3d, para não mexer nos outros módulos. */
+.dashboard-3d {
+  --quadro-sombra:
+    0 1px 1px oklch(0.2 0 0 / 0.06), 0 3px 6px -1px oklch(0.2 0 0 / 0.08),
+    0 12px 24px -8px oklch(0.2 0 0 / 0.14), 0 22px 40px -18px oklch(0.2 0 0 / 0.12);
+  --quadro-sombra-alta:
+    0 2px 2px oklch(0.2 0 0 / 0.07), 0 8px 14px -2px oklch(0.2 0 0 / 0.12),
+    0 20px 34px -10px oklch(0.2 0 0 / 0.2), 0 34px 54px -22px oklch(0.2 0 0 / 0.18);
+  --quadro-brilho: inset 0 1px 0 oklch(1 0 0 / 0.75), inset 0 -2px 0 oklch(0.2 0 0 / 0.05);
+}
+.dark .dashboard-3d {
+  --quadro-sombra:
+    0 1px 1px oklch(0 0 0 / 0.4), 0 4px 8px -1px oklch(0 0 0 / 0.4),
+    0 14px 26px -8px oklch(0 0 0 / 0.5), 0 24px 44px -18px oklch(0 0 0 / 0.5);
+  --quadro-sombra-alta:
+    0 2px 2px oklch(0 0 0 / 0.45), 0 10px 16px -2px oklch(0 0 0 / 0.5),
+    0 24px 38px -10px oklch(0 0 0 / 0.6), 0 38px 58px -22px oklch(0 0 0 / 0.55);
+  --quadro-brilho: inset 0 1px 0 oklch(1 0 0 / 0.12), inset 0 -2px 0 oklch(0 0 0 / 0.35);
+}
+.dashboard-3d [data-slot="card"],
+.dashboard-3d details {
+  box-shadow: var(--quadro-brilho), var(--quadro-sombra);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease;
+  transform: perspective(1100px) translateZ(0);
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .dashboard-3d [data-slot="card"]:hover {
+    transform: perspective(1100px) translateY(-3px) rotateX(1.2deg);
+    box-shadow: var(--quadro-brilho), var(--quadro-sombra-alta);
+  }
+}
+@media print {
+  .dashboard-3d [data-slot="card"],
+  .dashboard-3d details {
+    box-shadow: none !important;
+    transform: none !important;
+  }
+}

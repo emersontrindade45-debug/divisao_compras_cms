@@ -37,6 +37,28 @@ describe("carregarFornecedores", () => {
     expect(lerAba).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [ID],
+    [`  ${ID}  `],
+    [`"${ID}"`],
+    [`'${ID}'`],
+    [`https://docs.google.com/spreadsheets/d/${ID}/edit#gid=0`],
+    [`https://docs.google.com/spreadsheets/d/${ID}`],
+  ])("aceita o id colado de jeitos comuns (%s) e lê a planilha pelo id limpo", async (valor) => {
+    process.env.LEVANTAMENTO_GMAIL_PLANILHA_ID = valor;
+    lerAba.mockResolvedValue([CAB, JAN]);
+    const r = await (await carregar())();
+    expect(r.estado).toBe("ok");
+    expect(lerAba).toHaveBeenCalledWith(ID, "Por mês");
+  });
+
+  it.each(["https://example.com/outra-coisa", "a b c", "curto"])("valor inválido (%s) ensina o que colocar", async (valor) => {
+    process.env.LEVANTAMENTO_GMAIL_PLANILHA_ID = valor;
+    const r = await (await carregar())();
+    expect(r).toMatchObject({ estado: "indisponivel", motivo: expect.stringContaining("entre /d/ e /edit") });
+    expect(lerAba).not.toHaveBeenCalled();
+  });
+
   it("lê a aba “Por mês” pelo nome", async () => {
     lerAba.mockResolvedValue([CAB, JAN]);
     const r = await (await carregar())();
