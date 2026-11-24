@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
     db: {
       respostaEmailPendente: { findMany: vi.fn(), updateMany: vi.fn() },
       classificacaoIaResposta: { findMany: vi.fn() },
-      consultaCotacao: { findMany: vi.fn() },
+      consultaCotacao: { findMany: vi.fn(), updateMany: vi.fn() },
       auditLog: { createMany: vi.fn() },
       $transaction: vi.fn<(fn: (t: typeof tx) => unknown, o?: unknown) => Promise<unknown>>(async (fn) => fn(tx)),
     },
@@ -30,7 +30,7 @@ const D_2026 = new Date("2026-11-10T12:00:00Z");
 const D_OUT25 = new Date("2025-11-05T12:00:00-03:00");
 
 interface P { id: string; m: string; d?: Date; ia?: { c: string; k: string | null }; sit?: string }
-interface O { m: string; c: string; k: string; fila?: "aberta" | "resolvida" | "nenhuma"; semIa?: boolean }
+interface O { m: string; c: string; k: string; fila?: "aberta" | "resolvida" | "nenhuma"; semIa?: boolean; dataResp?: Date | null; regra?: string | null }
 
 /** `ps` = entradas ABERTAS da fila; `os` = consultas "a confirmar" ligadas a uma mensagem (órfãs ou não). */
 function cenario(ps: P[], os: O[] = []) {
@@ -45,7 +45,7 @@ function cenario(ps: P[], os: O[] = []) {
     return [...das, ...dasOrf];
   });
   mocks.db.consultaCotacao.findMany.mockImplementation(async (a: { where: { situacao?: string; id?: { in: string[] } } }) => {
-    if (a.where.situacao === "a_confirmar") return os.map((o) => ({ id: o.k, gmailRespostaId: o.m, situacao: "a_confirmar" }));
+    if (a.where.situacao === "a_confirmar") return os.map((o) => ({ id: o.k, gmailRespostaId: o.m, situacao: "a_confirmar", regra: o.regra ?? null, dataResposta: o.dataResp ?? null }));
     return ps.filter((p) => p.ia?.k).map((p) => ({ id: p.ia!.k as string, situacao: p.sit ?? "a_confirmar" }));
   });
 }
@@ -74,7 +74,7 @@ describe("planejarFechamento", () => {
     });
     expect(mocks.db.consultaCotacao.findMany).toHaveBeenCalledWith({
       where: { situacao: "a_confirmar", gmailRespostaId: { not: null } },
-      select: { id: true, gmailRespostaId: true, situacao: true },
+      select: { id: true, gmailRespostaId: true, situacao: true, regra: true, dataResposta: true },
     });
   });
 
@@ -97,7 +97,7 @@ describe("planejarFechamento", () => {
   it("sem leitura da IA e FORA de out–dez/2025: fica na fila (não é dispensada)", async () => {
     cenario([{ id: "p1", m: "m1", d: new Date("2026-03-10T12:00:00Z") }, { id: "p2", m: "m2", d: new Date("2025-09-01T12:00:00Z") }]);
     const p = await planejarFechamento();
-    expect(p).toEqual({ aplicar: [], semFornecedor: [], fecharSemAlterar: [], dispensar: [], consultasOrfas: [] });
+    expect(p).toEqual({ aplicar: [], semFornecedor: [], fecharSemAlterar: [], dispensar: [], consultasOrfas: [], consultasDispensadas: [] });
   });
 
   it("'não é resposta' sem fornecedor não é tocada", async () => {
@@ -149,6 +149,7 @@ describe("executarFechamento", () => {
     mocks.tx.respostaEmailPendente.updateMany.mockResolvedValue({ count: 1 });
     mocks.tx.classificacaoIaResposta.updateMany.mockResolvedValue({ count: 1 });
     mocks.tx.consultaCotacao.updateMany.mockResolvedValue({ count: 1 });
+    mocks.db.consultaCotacao.updateMany.mockResolvedValue({ count: 1 });
     mocks.db.auditLog.createMany.mockResolvedValue({ count: 0 });
   });
 
@@ -164,7 +165,7 @@ describe("executarFechamento", () => {
     const r = await executarFechamento("u1");
     expect(mocks.aplicar).toHaveBeenCalledTimes(1);
     expect(mocks.aplicar).toHaveBeenCalledWith({ gmailMensagemId: "m1", classe: "nao_e_resposta", consultaId: "c1", dataResposta: D_2026 });
-    expect(r).toEqual({ iaDesligada: false, aplicadas: 1, ignoradas: 0, semFornecedor: 1, fechadasSemAlterar: 1, dispensadas: 1, consultasResolvidas: 0 });
+    expect(r).toEqual({ iaDesligada: false, aplicadas: 1, ignoradas: 0, semFornecedor: 1, fechadasSemAlterar: 1, dispensadas: 1, consultasResolvidas: 0, consultasDispensadas: 0 });
     // fecha a entrada (p2 e p4) só pelo id da fila, com resolvidaEm: null no WHERE (atômico)
     expect(mocks.db.respostaEmailPendente.updateMany).toHaveBeenCalledWith({ where: { id: "p2", resolvidaEm: null }, data: { resolvidaEm: expect.any(Date) } });
     expect(mocks.db.respostaEmailPendente.updateMany).toHaveBeenCalledWith({ where: { id: "p4", resolvidaEm: null }, data: { resolvidaEm: expect.any(Date) } });
@@ -211,7 +212,7 @@ describe("executarFechamento", () => {
     mocks.ligada.mockReturnValue(false);
     cenario(TUDO);
     const r = await executarFechamento("u1");
-    expect(r).toEqual({ iaDesligada: true, aplicadas: 0, ignoradas: 0, semFornecedor: 0, fechadasSemAlterar: 1, dispensadas: 1, consultasResolvidas: 0 });
+    expect(r).toEqual({ iaDesligada: true, aplicadas: 0, ignoradas: 0, semFornecedor: 0, fechadasSemAlterar: 1, dispensadas: 1, consultasResolvidas: 0, consultasDispensadas: 0 });
     expect(mocks.aplicar).not.toHaveBeenCalled();
     expect(mocks.db.$transaction).not.toHaveBeenCalled();
   });
@@ -299,5 +300,88 @@ describe("executarFechamento", () => {
       expect(r.consultasResolvidas).toBe(0);
       expect(mocks.tx.consultaCotacao.updateMany).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("consultas 'a confirmar' de out a dez/2025 sem leitura da IA", () => {
+  const D_2025 = new Date("2025-11-12T12:00:00-03:00");
+  const D_ANTES = new Date("2025-09-30T12:00:00-03:00");
+  const D_DEPOIS = new Date("2026-01-01T12:00:00-03:00");
+  const ANTIGA: O = { m: "ma1", c: "recusa", k: "ca1", semIa: true, dataResp: D_2025, regra: "sinais_ambiguos" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.ligada.mockReturnValue(true);
+    mocks.db.respostaEmailPendente.updateMany.mockResolvedValue({ count: 1 });
+    mocks.db.consultaCotacao.updateMany.mockResolvedValue({ count: 1 });
+    mocks.db.auditLog.createMany.mockResolvedValue({ count: 0 });
+  });
+
+  it("entra no plano só com data DENTRO da janela, sem leitura da IA e com a fila já encerrada", async () => {
+    cenario([], [
+      ANTIGA,
+      { ...ANTIGA, m: "ma2", k: "ca2", dataResp: D_ANTES },
+      { ...ANTIGA, m: "ma3", k: "ca3", dataResp: D_DEPOIS },
+      { ...ANTIGA, m: "ma4", k: "ca4", dataResp: null },
+      { ...ANTIGA, m: "ma5", k: "ca5", semIa: false, c: "nao_e_resposta" },
+    ]);
+    const p = await planejarFechamento();
+    expect(p.consultasDispensadas).toEqual([{ consultaId: "ca1", gmailMensagemId: "ma1", regraAnterior: "sinais_ambiguos", dataRespostaAnterior: D_2025 }]);
+    // a que a IA leu segue pelo caminho das órfãs, não por este
+    expect(p.consultasOrfas.map((o) => o.consultaId)).toEqual(["ca5"]);
+  });
+
+  it("devolve a 'sem resposta' com guarda atômica (situação e mensagem no WHERE) e limpa a ligação", async () => {
+    cenario([], [ANTIGA]);
+    const r = await executarFechamento("u1");
+    expect(r.consultasDispensadas).toBe(1);
+    expect(mocks.db.consultaCotacao.updateMany).toHaveBeenCalledWith({
+      where: { id: "ca1", situacao: "a_confirmar", gmailRespostaId: "ma1" },
+      data: { situacao: "sem_resposta", dataResposta: null, gmailRespostaId: null, regra: null },
+    });
+  });
+
+  it("audita o estado anterior (de onde se restaura), com ação própria", async () => {
+    cenario([], [ANTIGA]);
+    await executarFechamento("u1");
+    expect(mocks.db.auditLog.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: "u1",
+          acao: "fechar_consulta_dispensada",
+          detalhes: {
+            consultaId: "ca1",
+            gmailMensagemId: "ma1",
+            motivo: "a_confirmar_sem_leitura_da_ia_out_dez_2025",
+            situacaoAnterior: "a_confirmar",
+            regraAnterior: "sinais_ambiguos",
+            dataRespostaAnterior: D_2025.toISOString(),
+          },
+        },
+      ],
+    });
+  });
+
+  it("consulta que mudou no meio (0 linhas): não conta e não audita", async () => {
+    cenario([], [ANTIGA]);
+    mocks.db.consultaCotacao.updateMany.mockResolvedValue({ count: 0 });
+    const r = await executarFechamento("u1");
+    expect(r.consultasDispensadas).toBe(0);
+    expect(mocks.db.auditLog.createMany).not.toHaveBeenCalled();
+  });
+
+  it("erro numa consulta não derruba as outras", async () => {
+    cenario([], [ANTIGA, { ...ANTIGA, m: "ma2", k: "ca2" }]);
+    mocks.db.consultaCotacao.updateMany.mockRejectedValueOnce(new Error("falha")).mockResolvedValue({ count: 1 });
+    const r = await executarFechamento("u1");
+    expect(r.consultasDispensadas).toBe(1);
+  });
+
+  it("não depende da chave da IA: roda mesmo com a aplicação da IA desligada", async () => {
+    mocks.ligada.mockReturnValue(false);
+    cenario([], [ANTIGA]);
+    const r = await executarFechamento("u1");
+    expect(r.iaDesligada).toBe(true);
+    expect(r.consultasDispensadas).toBe(1);
   });
 });

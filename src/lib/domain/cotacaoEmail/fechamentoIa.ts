@@ -43,6 +43,16 @@ export function aplicavelNaConsultaOrfa(e: { classeIa: string; situacaoConsulta:
   return e.situacaoConsulta === "a_confirmar" && (CLASSES_DO_FECHAMENTO as readonly string[]).includes(e.classeIa);
 }
 
+/**
+ * Consulta "a confirmar" de out a dez/2025 que a IA NUNCA leu e cuja fila já foi encerrada pela dispensa:
+ * a dispensa fechou só a entrada da fila e deixou a consulta presa em "a confirmar", sem botão que a
+ * resolva. Decisão do usuário (2026-11-24): voltam para "sem resposta". Só vale com a consulta ainda
+ * "a confirmar" e com data de resposta DENTRO da janela — sem data, não há como provar que é de 2025.
+ */
+export function dispensavelNaConsulta(e: { situacaoConsulta: string; dataResposta: Date | null; temLeituraDaIa: boolean }): boolean {
+  return e.situacaoConsulta === "a_confirmar" && !e.temLeituraDaIa && e.dataResposta !== null && dentroDaDispensa(e.dataResposta);
+}
+
 /** A resposta (sem leitura da IA) é das que o usuário mandou remover da fila? */
 export function dentroDaDispensa(dataResposta: Date): boolean {
   return dataResposta >= DISPENSA_DE && dataResposta < DISPENSA_ATE;

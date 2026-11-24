@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acaoDeFechamento, aplicavelNaConsultaOrfa, dentroDaDispensa } from "../fechamentoIa";
+import { acaoDeFechamento, aplicavelNaConsultaOrfa, dentroDaDispensa, dispensavelNaConsulta } from "../fechamentoIa";
 
 describe("acaoDeFechamento", () => {
   it.each(["orcamento", "recusa", "duvida", "nao_e_resposta"])("consulta aberta: aplica a sugestão da IA (%s)", (classeIa) => {
@@ -45,5 +45,29 @@ describe("aplicavelNaConsultaOrfa", () => {
 
   it("classe desconhecida não entra", () => {
     expect(aplicavelNaConsultaOrfa({ classeIa: "outra", situacaoConsulta: "a_confirmar" })).toBe(false);
+  });
+});
+
+describe("dispensavelNaConsulta", () => {
+  const ok = { situacaoConsulta: "a_confirmar", dataResposta: new Date("2025-11-12T12:00:00-03:00"), temLeituraDaIa: false };
+
+  it("a confirmar, sem leitura da IA, dentro de out–dez/2025: dispensa", () => {
+    expect(dispensavelNaConsulta(ok)).toBe(true);
+  });
+
+  it.each([["2025-09-30T23:59:00-03:00"], ["2026-01-01T00:00:00-03:00"]])("fora da janela (%s): não dispensa", (d) => {
+    expect(dispensavelNaConsulta({ ...ok, dataResposta: new Date(d) })).toBe(false);
+  });
+
+  it("sem data de resposta: não dispensa (não há como provar que é de 2025)", () => {
+    expect(dispensavelNaConsulta({ ...ok, dataResposta: null })).toBe(false);
+  });
+
+  it("com leitura da IA: não dispensa (segue o caminho da leitura)", () => {
+    expect(dispensavelNaConsulta({ ...ok, temLeituraDaIa: true })).toBe(false);
+  });
+
+  it.each(["sem_resposta", "orcamento", "recusa", "duvida", "email_invalido"])("consulta já decidida (%s): preservada", (situacaoConsulta) => {
+    expect(dispensavelNaConsulta({ ...ok, situacaoConsulta })).toBe(false);
   });
 });

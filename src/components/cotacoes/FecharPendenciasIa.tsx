@@ -16,10 +16,12 @@ export interface ContagemFechamento {
   dispensar: number;
   /** Consultas "a confirmar" com a fila já encerrada: a leitura da IA vai direto na consulta. */
   consultasOrfas: number;
+  /** Consultas "a confirmar" de out a dez/2025 que a IA nunca leu: voltam a "sem resposta". */
+  consultasDispensadas: number;
 }
 
 export function totalDoFechamento(c: ContagemFechamento): number {
-  return c.aplicarOrcamento + c.aplicarRecusa + c.aplicarDuvida + c.aplicarNaoEResposta + c.semFornecedor + c.fecharSemAlterar + c.dispensar + c.consultasOrfas;
+  return c.aplicarOrcamento + c.aplicarRecusa + c.aplicarDuvida + c.aplicarNaoEResposta + c.semFornecedor + c.fecharSemAlterar + c.dispensar + c.consultasOrfas + c.consultasDispensadas;
 }
 
 /**
@@ -46,6 +48,7 @@ export function FecharPendenciasIa({ contagem }: { contagem: ContagemFechamento 
       toast.success(
         `${d.aplicadas} sugestão(ões) da IA aplicada(s), ${d.semFornecedor} sem fornecedor, ` +
           `${d.consultasResolvidas} consulta(s) "a confirmar" resolvida(s), ` +
+          `${d.consultasDispensadas} consulta(s) "a confirmar" de 2025 devolvida(s) a "sem resposta", ` +
           `${d.fechadasSemAlterar} entrada(s) já decidida(s) encerrada(s) e ${d.dispensadas} antiga(s) dispensada(s)` +
           (d.ignoradas ? `. ${d.ignoradas} já tinham sido decididas e não foram alteradas` : "") +
           (d.iaDesligada ? ". A aplicação da IA está desligada: só o encerramento foi feito" : "") +
@@ -74,6 +77,10 @@ export function FecharPendenciasIa({ contagem }: { contagem: ContagemFechamento 
         <li>
           <strong>{contagem.consultasOrfas}</strong> consulta(s) &ldquo;a confirmar&rdquo; cuja fila já foi encerrada: a leitura da IA
           é aplicada direto na consulta
+        </li>
+        <li>
+          <strong>{contagem.consultasDispensadas}</strong> consulta(s) &ldquo;a confirmar&rdquo; de out a dez/2025 que a IA nunca leu:
+          voltam a &ldquo;sem resposta&rdquo; (o estado anterior fica na auditoria)
         </li>
         <li>
           <strong>{contagem.dispensar}</strong> de out a dez/2025 que a IA nunca leu: dispensadas da fila

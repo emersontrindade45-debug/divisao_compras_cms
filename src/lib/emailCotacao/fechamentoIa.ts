@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import type { ClasseResposta } from "@/lib/domain/cotacaoEmail/criterioIa";
-import { acaoDeFechamento, aplicavelNaConsultaOrfa, dentroDaDispensa } from "@/lib/domain/cotacaoEmail/fechamentoIa";
+import { acaoDeFechamento, aplicavelNaConsultaOrfa, dentroDaDispensa, dispensavelNaConsulta } from "@/lib/domain/cotacaoEmail/fechamentoIa";
 import { aplicacaoIaLigada, aplicarClassificacaoIa, REGRA_IA } from "./aplicarIa";
 import { OPCOES_TRANSACAO } from "./classificarSemFornecedor";
 
@@ -16,6 +16,8 @@ import { OPCOES_TRANSACAO } from "./classificarSemFornecedor";
  *  - `dispensar`: sem leitura da IA, de out a dez/2025 → encerra a entrada da fila;
  *  - `consultasOrfas`: consulta "a confirmar" cuja fila já foi encerrada e que tem leitura da IA →
  *    aplica a leitura direto na consulta (só se ela ainda estiver "a confirmar" e ligada àquela mensagem).
+ *  - `consultasDispensadas`: consulta "a confirmar" de out a dez/2025 que a IA nunca leu e cuja fila já foi
+ *    encerrada pela dispensa → volta a "sem resposta" (não depende da IA; a auditoria guarda o estado anterior).
  * Nada é apagado: o fechamento grava `resolvidaEm` e a auditoria guarda os ids.
  * Nenhum texto de e-mail passa por aqui. `select` explícito em tudo (§9.46).
  */
@@ -26,17 +28,23 @@ export interface Plano {
   fecharSemAlterar: { pendenteId: string; gmailMensagemId: string }[];
   dispensar: { pendenteId: string; gmailMensagemId: string }[];
   consultasOrfas: { gmailMensagemId: string; classeIa: ClasseResposta; consultaId: string; dataResposta: Date | null }[];
+  consultasDispensadas: { consultaId: string; gmailMensagemId: string; regraAnterior: string | null; dataRespostaAnterior: Date }[];
+}
+
+interface Orfas {
+  consultasOrfas: Plano["consultasOrfas"];
+  consultasDispensadas: Plano["consultasDispensadas"];
 }
 
 export async function planejarFechamento(): Promise<Plano> {
-  const plano: Plano = { aplicar: [], semFornecedor: [], fecharSemAlterar: [], dispensar: [], consultasOrfas: [] };
+  const plano: Plano = { aplicar: [], semFornecedor: [], fecharSemAlterar: [], dispensar: [], consultasOrfas: [], consultasDispensadas: [] };
   const abertas = await db.respostaEmailPendente.findMany({
     where: { resolvidaEm: null },
     select: { id: true, gmailMensagemId: true, dataResposta: true },
   });
   const abertasPorMsg = new Set(abertas.map((a) => a.gmailMensagemId));
   if (abertas.length === 0) {
-    plano.consultasOrfas = await planejarConsultasOrfas(abertasPorMsg, new Set());
+    Object.assign(plano, await planejarConsultasOrfas(abertasPorMsg, new Set()));
     return plano;
   }
 
@@ -80,7 +88,7 @@ export async function planejarFechamento(): Promise<Plano> {
       plano.fecharSemAlterar.push({ pendenteId: p.id, gmailMensagemId: p.gmailMensagemId });
     }
   }
-  plano.consultasOrfas = await planejarConsultasOrfas(abertasPorMsg, new Set(plano.aplicar.map((a) => a.gmailMensagemId)));
+  Object.assign(plano, await planejarConsultasOrfas(abertasPorMsg, new Set(plano.aplicar.map((a) => a.gmailMensagemId))));
   return plano;
 }
 
@@ -88,12 +96,13 @@ export async function planejarFechamento(): Promise<Plano> {
  * Consultas "a confirmar" ligadas a uma mensagem que a IA leu e cuja entrada da fila NÃO está aberta
  * (as abertas são tratadas pelos outros grupos). `select` explícito (§9.46).
  */
-async function planejarConsultasOrfas(abertasPorMsg: Set<string>, jaPlanejadas: Set<string>): Promise<Plano["consultasOrfas"]> {
+async function planejarConsultasOrfas(abertasPorMsg: Set<string>, jaPlanejadas: Set<string>): Promise<Orfas> {
   const consultas = await db.consultaCotacao.findMany({
     where: { situacao: "a_confirmar", gmailRespostaId: { not: null } },
-    select: { id: true, gmailRespostaId: true, situacao: true },
+    select: { id: true, gmailRespostaId: true, situacao: true, regra: true, dataResposta: true },
   });
-  if (consultas.length === 0) return [];
+  const vazio: Orfas = { consultasOrfas: [], consultasDispensadas: [] };
+  if (consultas.length === 0) return vazio;
   const msgs = consultas.map((c) => c.gmailRespostaId as string);
   const ias = await db.classificacaoIaResposta.findMany({
     where: { gmailMensagemId: { in: msgs }, desfeitaEm: null },
@@ -106,13 +115,20 @@ async function planejarConsultasOrfas(abertasPorMsg: Set<string>, jaPlanejadas: 
   });
   const dataPorMsg = new Map(filas.map((f) => [f.gmailMensagemId, f.dataResposta]));
 
-  const saida: Plano["consultasOrfas"] = [];
+  const saida: Orfas = { consultasOrfas: [], consultasDispensadas: [] };
   for (const c of consultas) {
     const msg = c.gmailRespostaId as string;
+    if (abertasPorMsg.has(msg) || jaPlanejadas.has(msg)) continue;
     const classeIa = iaPorMsg.get(msg);
-    if (!classeIa || abertasPorMsg.has(msg) || jaPlanejadas.has(msg)) continue;
+    if (!classeIa) {
+      const dataResposta = c.dataResposta ?? null;
+      if (dispensavelNaConsulta({ situacaoConsulta: c.situacao as string, dataResposta, temLeituraDaIa: false }) && dataResposta) {
+        saida.consultasDispensadas.push({ consultaId: c.id, gmailMensagemId: msg, regraAnterior: c.regra ?? null, dataRespostaAnterior: dataResposta });
+      }
+      continue;
+    }
     if (!aplicavelNaConsultaOrfa({ classeIa, situacaoConsulta: c.situacao as string })) continue;
-    saida.push({ gmailMensagemId: msg, classeIa: classeIa as ClasseResposta, consultaId: c.id, dataResposta: dataPorMsg.get(msg) ?? null });
+    saida.consultasOrfas.push({ gmailMensagemId: msg, classeIa: classeIa as ClasseResposta, consultaId: c.id, dataResposta: dataPorMsg.get(msg) ?? null });
   }
   return saida;
 }
@@ -154,6 +170,19 @@ async function aplicarNaConsulta(a: Plano["consultasOrfas"][number]): Promise<bo
   }, OPCOES_TRANSACAO);
 }
 
+/**
+ * Devolve a "sem resposta" a consulta "a confirmar" de 2025 que a IA nunca leu. Atômico (§9.14): só muda
+ * com `situacao = a_confirmar` e `gmailRespostaId` desta mensagem no WHERE. Limpa a ligação à resposta,
+ * como já faz o "não é resposta"; o estado anterior vai para a auditoria, de onde se restaura.
+ */
+async function dispensarConsulta(a: Plano["consultasDispensadas"][number]): Promise<boolean> {
+  const r = await db.consultaCotacao.updateMany({
+    where: { id: a.consultaId, situacao: "a_confirmar", gmailRespostaId: a.gmailMensagemId },
+    data: { situacao: "sem_resposta", dataResposta: null, gmailRespostaId: null, regra: null },
+  });
+  return r.count > 0;
+}
+
 export interface ResultadoFechamento {
   /** A chave da IA está desligada: as partes que aplicam a IA foram puladas. */
   iaDesligada: boolean;
@@ -165,6 +194,8 @@ export interface ResultadoFechamento {
   dispensadas: number;
   /** Consultas "a confirmar" resolvidas direto pela leitura da IA. */
   consultasResolvidas: number;
+  /** Consultas "a confirmar" de out a dez/2025, nunca lidas pela IA, devolvidas a "sem resposta". */
+  consultasDispensadas: number;
 }
 
 async function emBlocos<T>(itens: T[], tamanho: number, fn: (i: T) => Promise<boolean>): Promise<T[]> {
@@ -186,7 +217,7 @@ async function fecharEntrada(pendenteId: string): Promise<boolean> {
 export async function executarFechamento(userId: string): Promise<ResultadoFechamento> {
   const plano = await planejarFechamento();
   const iaLigada = aplicacaoIaLigada();
-  const saida: ResultadoFechamento = { iaDesligada: !iaLigada, aplicadas: 0, ignoradas: 0, semFornecedor: 0, fechadasSemAlterar: 0, dispensadas: 0, consultasResolvidas: 0 };
+  const saida: ResultadoFechamento = { iaDesligada: !iaLigada, aplicadas: 0, ignoradas: 0, semFornecedor: 0, fechadasSemAlterar: 0, dispensadas: 0, consultasResolvidas: 0, consultasDispensadas: 0 };
 
   if (iaLigada) {
     const aplicadas = await emBlocos(plano.aplicar, 5, async (a) =>
@@ -271,6 +302,24 @@ export async function executarFechamento(userId: string): Promise<ResultadoFecha
   if (dispensadas.length > 0) {
     await db.auditLog.createMany({
       data: dispensadas.map((f) => ({ userId, acao: "fechar_pendencia_dispensada", detalhes: { gmailMensagemId: f.gmailMensagemId, motivo: "sem_leitura_da_ia_out_dez_2025" } })),
+    });
+  }
+  const consultasDispensadas = await emBlocos(plano.consultasDispensadas, 10, (a) => dispensarConsulta(a).catch(() => false));
+  saida.consultasDispensadas = consultasDispensadas.length;
+  if (consultasDispensadas.length > 0) {
+    await db.auditLog.createMany({
+      data: consultasDispensadas.map((f) => ({
+        userId,
+        acao: "fechar_consulta_dispensada",
+        detalhes: {
+          consultaId: f.consultaId,
+          gmailMensagemId: f.gmailMensagemId,
+          motivo: "a_confirmar_sem_leitura_da_ia_out_dez_2025",
+          situacaoAnterior: "a_confirmar",
+          regraAnterior: f.regraAnterior,
+          dataRespostaAnterior: f.dataRespostaAnterior.toISOString(),
+        },
+      })),
     });
   }
   return saida;

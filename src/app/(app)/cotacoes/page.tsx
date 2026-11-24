@@ -403,7 +403,7 @@ async function carregarOrcamentosPdfARevisar(): Promise<OrcamentoPdfRevisarItem[
 
 /** Pendências que o fechamento trata, por grupo (`catch` abre a página). */
 async function contarFechamento(): Promise<ContagemFechamento> {
-  const zero: ContagemFechamento = { aplicarOrcamento: 0, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 0, semFornecedor: 0, fecharSemAlterar: 0, dispensar: 0, consultasOrfas: 0 };
+  const zero: ContagemFechamento = { aplicarOrcamento: 0, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 0, semFornecedor: 0, fecharSemAlterar: 0, dispensar: 0, consultasOrfas: 0, consultasDispensadas: 0 };
   try {
     const plano = await planejarFechamento();
     for (const a of plano.aplicar) {
@@ -416,9 +416,10 @@ async function contarFechamento(): Promise<ContagemFechamento> {
     zero.fecharSemAlterar = plano.fecharSemAlterar.length;
     zero.dispensar = plano.dispensar.length;
     zero.consultasOrfas = plano.consultasOrfas.length;
+    zero.consultasDispensadas = plano.consultasDispensadas.length;
     return zero;
   } catch {
-    return { aplicarOrcamento: 0, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 0, semFornecedor: 0, fecharSemAlterar: 0, dispensar: 0, consultasOrfas: 0 };
+    return { aplicarOrcamento: 0, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 0, semFornecedor: 0, fecharSemAlterar: 0, dispensar: 0, consultasOrfas: 0, consultasDispensadas: 0 };
   }
 }
 

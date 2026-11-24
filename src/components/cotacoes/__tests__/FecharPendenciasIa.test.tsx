@@ -6,7 +6,7 @@ import { fecharPendenciasIa } from "@/lib/actions/fecharPendenciasIa";
 
 vi.mock("@/lib/actions/fecharPendenciasIa", () => ({
   fecharPendenciasIa: vi.fn(async () => ({
-    data: { iaDesligada: false, aplicadas: 19, ignoradas: 1, semFornecedor: 4, fechadasSemAlterar: 56, dispensadas: 81, consultasResolvidas: 40 },
+    data: { iaDesligada: false, aplicadas: 19, ignoradas: 1, semFornecedor: 4, fechadasSemAlterar: 56, dispensadas: 81, consultasResolvidas: 40, consultasDispensadas: 47 },
   })),
 }));
 const refresh = vi.fn();
@@ -15,18 +15,18 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const C: ContagemFechamento = {
   aplicarOrcamento: 5, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 14,
-  semFornecedor: 4, fecharSemAlterar: 56, dispensar: 81, consultasOrfas: 40,
+  semFornecedor: 4, fecharSemAlterar: 56, dispensar: 81, consultasOrfas: 40, consultasDispensadas: 47,
 };
 
 describe("FecharPendenciasIa", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("soma todos os grupos", () => {
-    expect(totalDoFechamento(C)).toBe(200);
+    expect(totalDoFechamento(C)).toBe(247);
   });
 
   it("sem nada a fechar não mostra o botão", () => {
-    const zero = { aplicarOrcamento: 0, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 0, semFornecedor: 0, fecharSemAlterar: 0, dispensar: 0, consultasOrfas: 0 };
+    const zero = { aplicarOrcamento: 0, aplicarRecusa: 0, aplicarDuvida: 0, aplicarNaoEResposta: 0, semFornecedor: 0, fecharSemAlterar: 0, dispensar: 0, consultasOrfas: 0, consultasDispensadas: 0 };
     const { container } = render(<FecharPendenciasIa contagem={zero} />);
     expect(container.textContent).toBe("");
   });
@@ -37,8 +37,9 @@ describe("FecharPendenciasIa", () => {
     expect(screen.getByText(/já tem decisão: só a entrada da fila é encerrada/)).toBeTruthy();
     expect(screen.getByText(/dispensadas da fila/)).toBeTruthy();
     expect(screen.getByText(/cuja fila já foi encerrada/)).toBeTruthy();
+    expect(screen.getByText(/que a IA nunca leu:\s*voltam a .sem resposta./)).toBeTruthy();
     expect(screen.getByText(/Nunca altera uma consulta que já tem decisão. Nada é apagado/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Fechar todas as pendências (200)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fechar todas as pendências (247)" })).toBeTruthy();
   });
 
   it("clicar fecha, informa cada grupo e atualiza a tela", async () => {
@@ -47,13 +48,13 @@ describe("FecharPendenciasIa", () => {
     await waitFor(() => expect(fecharPendenciasIa).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(toast.success).toHaveBeenCalledWith(
-      '19 sugestão(ões) da IA aplicada(s), 4 sem fornecedor, 40 consulta(s) "a confirmar" resolvida(s), 56 entrada(s) já decidida(s) encerrada(s) e 81 antiga(s) dispensada(s). 1 já tinham sido decididas e não foram alteradas.',
+      '19 sugestão(ões) da IA aplicada(s), 4 sem fornecedor, 40 consulta(s) "a confirmar" resolvida(s), 47 consulta(s) "a confirmar" de 2025 devolvida(s) a "sem resposta", 56 entrada(s) já decidida(s) encerrada(s) e 81 antiga(s) dispensada(s). 1 já tinham sido decididas e não foram alteradas.',
     );
   });
 
   it("avisa quando a aplicação da IA está desligada", async () => {
     vi.mocked(fecharPendenciasIa).mockResolvedValueOnce({
-      data: { iaDesligada: true, aplicadas: 0, ignoradas: 0, semFornecedor: 0, fechadasSemAlterar: 56, dispensadas: 81, consultasResolvidas: 0 },
+      data: { iaDesligada: true, aplicadas: 0, ignoradas: 0, semFornecedor: 0, fechadasSemAlterar: 56, dispensadas: 81, consultasResolvidas: 0, consultasDispensadas: 0 },
     });
     render(<FecharPendenciasIa contagem={C} />);
     fireEvent.click(screen.getByRole("button", { name: /Fechar todas as pendências/ }));
