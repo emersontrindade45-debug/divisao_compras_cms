@@ -28,9 +28,9 @@ export const CACHE_SEGUNDOS = 3600;
 /** Teto do corpo: a planilha tem ~55 KB; acima disso algo está errado (ou não é CSV). */
 const MAX_BYTES = 5_000_000;
 /** Ids de planilha do Google: letras, dígitos, "-" e "_". Barra o que poderia alterar a URL. */
-const FORMATO_ID = /^[A-Za-z0-9_-]{20,80}$/;
+export const FORMATO_ID = /^[A-Za-z0-9_-]{20,80}$/;
 /** O `gid` de uma aba é um número. Só dígitos: nada que altere a URL passa. */
-const FORMATO_GID = /^\d{1,12}$/;
+export const FORMATO_GID = /^\d{1,12}$/;
 
 export interface ProcessoNoSistema {
   id: string;
@@ -55,7 +55,7 @@ export function chaveDoNumero(numero: string): string | null {
   return m ? `${Number(m[1])}/${m[2]}` : null;
 }
 
-async function baixarCsv(id: string, gid?: string): Promise<{ ok: true; texto: string } | { ok: false; motivo: string }> {
+export async function baixarCsv(id: string, gid?: string): Promise<{ ok: true; texto: string } | { ok: false; motivo: string }> {
   let res: Response;
   try {
     res = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=csv${gid ? `&gid=${gid}` : ""}`, {
@@ -84,7 +84,7 @@ async function baixarCsv(id: string, gid?: string): Promise<{ ok: true; texto: s
 }
 
 /** Processos cadastrados no sistema, por número/ano. Falha aqui só tira o link, não a seção. */
-async function mapaDeProcessos(): Promise<Record<string, ProcessoNoSistema>> {
+export async function mapaDeProcessos(): Promise<Record<string, ProcessoNoSistema>> {
   try {
     const processos = await db.processo.findMany({ select: { id: true, numero: true } });
     const mapa: Record<string, ProcessoNoSistema> = {};
