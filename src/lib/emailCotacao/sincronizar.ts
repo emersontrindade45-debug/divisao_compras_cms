@@ -7,6 +7,7 @@ import { classificarResposta } from "@/lib/domain/cotacaoEmail/classificarRespos
 import { buscarCandidatosPorEmail } from "./candidatos";
 import { avaliarCriterioIa, type ClasseResposta } from "@/lib/domain/cotacaoEmail/criterioIa";
 import { classificarComIa, MODELO_REVISOR, type TrechoParaClassificar } from "./classificarComIa";
+import { anexarExemplosSeLigado } from "./exemplosIa";
 import { aplicacaoIaLigada, aplicarClassificacaoIa } from "./aplicarIa";
 import type { PayloadScript, RespostaScript } from "./payload";
 
@@ -521,7 +522,9 @@ async function classificarEmSombra(
     const alvo = itens.filter((i) => !jaFeitas.has(i.id) || semRevisao.has(i.id)).slice(0, MAX_IA_POR_LEITURA);
     if (alvo.length === 0) return [];
 
-    const { vereditos } = await classificarComIa(alvo, { prazoMs });
+    // Exemplos só na 1ª leitura (e só com IA_EXEMPLOS=1). `porId` e `paraRevisar` partem de `alvo`, SEM
+    // exemplos: a 2ª leitura é independente de propósito.
+    const { vereditos } = await classificarComIa(await anexarExemplosSeLigado(alvo), { prazoMs });
     if (vereditos.length === 0) return [];
     const porId = new Map(alvo.map((a) => [a.id, a]));
 

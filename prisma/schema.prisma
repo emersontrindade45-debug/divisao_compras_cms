@@ -1261,6 +1261,27 @@ model ConferenciaIaResposta {
   @@map("conferencias_ia_resposta")
 }
 
+/// Caso que a Divisão decidiu ou conferiu, guardado COMO EXEMPLO para a 1ª leitura da IA (M30.d). Só o
+/// trecho já ANONIMIZADO pelo script do Google (sem e-mail, telefone, documento, link ou valor) e a
+/// classe certa; nenhum endereço, nome ou número de processo. Só entra caso decidido por um humano —
+/// nunca a leitura da própria IA. Apagar a tabela devolve a IA ao comportamento anterior.
+model ExemploClassificacaoIa {
+  id              String   @id @default(cuid())
+  /// Id da mensagem no Gmail (único: um exemplo por mensagem; decisão corrigida atualiza a classe).
+  gmailMensagemId String   @unique
+  /// orcamento | recusa | duvida | nao_e_resposta — a classe que o analista decidiu.
+  classeCorreta   String
+  /// De onde veio a decisão: conferencia | manual.
+  origem          String
+  trecho          String
+  anexosPdf       Int      @default(0)
+  anexosOutros    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("exemplos_classificacao_ia")
+}
+
 /// E-mail que voltou (devolução do servidor). Some da lista de envio da "Nova cotação".
 model EmailInvalido {
   /// Minúsculo.

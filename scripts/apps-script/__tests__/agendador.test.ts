@@ -9,14 +9,16 @@ function trecho(nome: string): string {
   if (!m) throw new Error(`${nome} não encontrada no script`);
   return m;
 }
-const { pedido, resumo, resumoExportacao } = new Function(
+const { pedido, resumo, resumoExportacao, resumoExemplos } = new Function(
   `var AGENDADOR_CAMINHO = "/api/jobs/verificar-respostas";
    var AGENDADOR_CAMPOS_LOG = ["enviosNovos", "consultasNovas", "respostasClassificadas", "respostasNaFila", "emailsInvalidos"];
    var AGENDADOR_CAMPOS_EXPORTACAO = ["envios", "consultas", "linhasConsultas"];
-   ${trecho("agendadorPedido_")}${trecho("agendadorResumo_")}${trecho("agendadorResumoExportacao_")}
-   return { pedido: agendadorPedido_, resumo: agendadorResumo_, resumoExportacao: agendadorResumoExportacao_ };`,
+   var AGENDADOR_CAMPOS_EXEMPLOS = ["decisoes", "pedidos", "gravados", "atualizados", "semTexto", "restantes"];
+   ${trecho("agendadorPedido_")}${trecho("agendadorResumo_")}${trecho("agendadorResumoExportacao_")}${trecho("agendadorResumoExemplos_")}
+   return { pedido: agendadorPedido_, resumo: agendadorResumo_, resumoExportacao: agendadorResumoExportacao_, resumoExemplos: agendadorResumoExemplos_ };`,
 )() as {
   resumoExportacao: (j: unknown) => string;
+  resumoExemplos: (j: unknown) => string;
   pedido: (u: unknown, s: unknown, c?: string) => null | { url: string; opcoes: Record<string, unknown> & { headers: Record<string, string> } };
   resumo: (j: unknown) => string;
 };
@@ -120,5 +122,25 @@ describe("agendadorResumoExportacao_", () => {
     expect(resumoExportacao({ ok: true, pulou: "recente" })).toMatch(/pulou/);
     expect(resumoExportacao(null)).toBe("sem resposta em JSON");
     expect(resumoExportacao({})).toBe("sem resumo");
+  });
+});
+
+describe("agendadorResumoExemplos_", () => {
+  it("imprime só contagens numéricas de campos conhecidos", () => {
+    expect(resumoExemplos({ ok: true, resumo: { decisoes: 40, pedidos: 30, gravados: 27, atualizados: 1, semTexto: 1, restantes: 3, rejeitados: { email: 2 } } })).toBe(
+      "decisoes 40 | pedidos 30 | gravados 27 | atualizados 1 | semTexto 1 | restantes 3",
+    );
+  });
+
+  it("texto do servidor (inclusive o nome das regras recusadas) NUNCA é impresso", () => {
+    const s = resumoExemplos({ resumo: { gravados: "SEGREDO", pedidos: 2, rejeitados: { email: 1 } } });
+    expect(s).toBe("pedidos 2");
+    expect(s).not.toMatch(/SEGREDO|email/);
+    expect(resumoExemplos({ erro: "TEXTO LIVRE" })).toBe("falha informada pelo sistema");
+  });
+
+  it("casos sem resumo", () => {
+    expect(resumoExemplos(null)).toBe("sem resposta em JSON");
+    expect(resumoExemplos({ ok: true })).toBe("sem resumo");
   });
 });

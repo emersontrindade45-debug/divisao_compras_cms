@@ -1848,3 +1848,17 @@ não se repita — não remover uma entrada aqui sem entender por que ela foi es
      de decisões humanas que serve de gabarito pode ter viés (o analista pode ter seguido a sugestão
      da IA): dizer isso junto do número; (d) política que *tira* classe é tão válida quanto a que
      põe — "não é resposta" (0 de 9) e orçamento nas pendentes (0 de 9) ficam com o analista.
+
+138. **Backup manual de arquivo para mutação não pode se chamar pelo nome-base — dois arquivos com o mesmo nome
+     se sobrescrevem e a "restauração" corrompe o outro.** Ao rodar mutações (2026-11-24, M30.d) copiei
+     `domain/cotacaoEmail/exemplosIa.ts` e `emailCotacao/exemplosIa.ts` para `/tmp/bk_exemplosIa.ts`; o segundo
+     `cp` apagou o primeiro, e "restaurar" o de domínio colocou nele o conteúdo do de servidor — arquivo novo,
+     ainda não commitado, sem versão em lugar nenhum. Só se recuperou porque o conteúdo estava na conversa.
+     Regra: arquivo novo vai para o índice (`git add`) ANTES de mutar e se restaura com `git checkout -- <arquivo>`;
+     para arquivo já versionado também vale `git checkout`. Nunca `cp` para `/tmp` por nome-base, e conferir
+     `git diff --stat` depois do lote de mutações.
+139. **Teste de "um de cada classe" que passa quando o desempate cai certo por acaso não protege a regra.** A
+     mutação que removia a garantia de diversidade em `escolherExemplos` sobreviveu: nos dados do teste a classe
+     dominante tinha só UM caso entre os mais parecidos, então o resultado "diverso" saía igual sem a regra. Para
+     provar uma regra de seleção, o caso precisa ter DUAS candidatas da mesma classe empatadas no topo — só então
+     remover a regra muda o resultado (§9.35, §9.89).

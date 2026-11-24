@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   },
   buscarCandidatosPorEmail: vi.fn(),
   classificarComIa: vi.fn(),
+  anexarExemplos: vi.fn(),
   ligada: vi.fn(),
   aplicar: vi.fn(),
 }));
@@ -28,6 +29,7 @@ vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("../aplicarIa", () => ({ aplicacaoIaLigada: mocks.ligada, aplicarClassificacaoIa: mocks.aplicar }));
 vi.mock("../classificarComIa", () => ({ classificarComIa: mocks.classificarComIa, MODELO_REVISOR: "modelo-revisor" }));
 vi.mock("../candidatos", () => ({ buscarCandidatosPorEmail: mocks.buscarCandidatosPorEmail }));
+vi.mock("../exemplosIa", () => ({ anexarExemplosSeLigado: mocks.anexarExemplos }));
 
 import { sincronizarRespostasEmail } from "../sincronizar";
 import type { EnvioScript, RespostaScript } from "../payload";
@@ -107,6 +109,7 @@ describe("sincronizarRespostasEmail", () => {
     mocks.aplicar.mockResolvedValue("aplicada");
     mocks.db.auditLog.createMany.mockResolvedValue({ count: 0 });
     mocks.classificarComIa.mockResolvedValue({ vereditos: [], lotesComFalha: 0 });
+    mocks.anexarExemplos.mockImplementation(async (itens: unknown[]) => itens);
     mocks.db.emailInvalido.createMany.mockResolvedValue({ count: 0 });
     mocks.db.$executeRaw.mockResolvedValue(0);
     mocks.buscarCandidatosPorEmail.mockResolvedValue(new Map());
@@ -672,6 +675,21 @@ describe("sincronizarRespostasEmail", () => {
         await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
         expect(mocks.classificarComIa).toHaveBeenCalledTimes(2);
         expect(mocks.classificarComIa.mock.calls[1]![1]).toMatchObject({ modelo: "modelo-revisor", revisor: true });
+      });
+
+      it("exemplos já decididos vão SÓ à 1ª leitura: a 2ª (revisor independente) recebe os itens sem eles", async () => {
+        mocks.anexarExemplos.mockImplementation(async (itens: Array<{ id: string }>) =>
+          itens.map((i) => ({ ...i, exemplos: [{ classe: "recusa", trecho: "EXEMPLO-DECIDIDO" }] })),
+        );
+        armar({ existentes: ["g1"], jaTem: 3 });
+        ia([veredito("m1")]);
+        await sincronizarRespostasEmail({ envios: [envio()], respostas: [resposta({ trecho: TRECHO })] });
+        expect(mocks.classificarComIa).toHaveBeenCalledTimes(2);
+        const primeira = mocks.classificarComIa.mock.calls[0]![0] as Array<{ exemplos?: unknown }>;
+        const segunda = mocks.classificarComIa.mock.calls[1]![0] as Array<{ exemplos?: unknown }>;
+        expect(primeira[0]!.exemplos).toEqual([{ classe: "recusa", trecho: "EXEMPLO-DECIDIDO" }]);
+        expect(segunda[0]!.exemplos).toBeUndefined();
+        expect(JSON.stringify(segunda)).not.toContain("EXEMPLO-DECIDIDO");
       });
 
       it("o que as regras já decidiram (fora da fila) não é revisado nem passa pelo critério", async () => {

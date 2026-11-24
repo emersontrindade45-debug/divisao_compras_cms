@@ -26,6 +26,8 @@ var AGENDADOR_FUNCAO = "agendadorVerificar";
 var AGENDADOR_CAMINHO = "/api/jobs/verificar-respostas";
 /** Logo depois da verificação: o sistema escreve o levantamento nas abas "Plataforma_*" da planilha. */
 var AGENDADOR_CAMINHO_EXPORTAR = "/api/jobs/exportar-levantamento";
+/** Por último: o sistema guarda, anonimizados, os casos que a Divisão decidiu como exemplo da IA. */
+var AGENDADOR_CAMINHO_EXEMPLOS = "/api/jobs/coletar-exemplos";
 
 /**
  * Monta a chamada, ou devolve null se a configuração não presta. O segredo só viaja para um endereço
@@ -79,6 +81,19 @@ function agendadorResumoExportacao_(json) {
   return partes.join(" | ");
 }
 
+var AGENDADOR_CAMPOS_EXEMPLOS = ["decisoes", "pedidos", "gravados", "atualizados", "semTexto", "restantes"];
+
+/** Texto para o log da coleta de exemplos: só contagens numéricas de campos conhecidos. */
+function agendadorResumoExemplos_(json) {
+  if (!json || typeof json !== "object") return "sem resposta em JSON";
+  if (json.erro) return "falha informada pelo sistema";
+  var r = json.resumo;
+  if (!r || typeof r !== "object") return "sem resumo";
+  return AGENDADOR_CAMPOS_EXEMPLOS.filter(function (k) { return typeof r[k] === "number"; })
+    .map(function (k) { return k + " " + r[k]; })
+    .join(" | ");
+}
+
 /** Faz uma chamada ao sistema e devolve { codigo, json }. Só o chamador decide se o código é falha. */
 function agendadorChamar_(props, caminho) {
   var pedido = agendadorPedido_(props.getProperty("SISTEMA_URL"), props.getProperty("CRON_SECRET"), caminho);
@@ -113,6 +128,14 @@ function agendadorVerificar() {
     if (x.codigo !== 200 && x.codigo !== 503) falhas.push("A exportação do levantamento respondeu HTTP " + x.codigo + ".");
   } catch (err) {
     falhas.push("A exportação do levantamento não pôde ser chamada.");
+  }
+  try {
+    var e = agendadorChamar_(props, AGENDADOR_CAMINHO_EXEMPLOS);
+    Logger.log("AGENDADOR exemplos: HTTP " + e.codigo + " | " + agendadorResumoExemplos_(e.json));
+    // Falha aqui não derruba a verificação nem a exportação: só entra na lista que avisa o dono.
+    if (e.codigo !== 200) falhas.push("A coleta de exemplos respondeu HTTP " + e.codigo + ".");
+  } catch (err) {
+    falhas.push("A coleta de exemplos não pôde ser chamada.");
   }
   if (falhas.length > 0) throw new Error(falhas.join(" "));
 }

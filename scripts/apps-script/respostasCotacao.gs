@@ -765,6 +765,8 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ erro: "conta_errada", contaEfetiva: contaEfetiva_() }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+  // Ação `trechos` (M30.d, arquivo trechosExemplos.gs): texto anonimizado de mensagens PEDIDAS por id.
+  if (corpo.acao === "trechos") return trechosResponder_(corpo);
   var dias = Math.min(Math.max(Number(corpo.dias) || 30, 1), 90);
   // desdeDias: começa a janela N dias atrás (0 = hoje). O sistema percorre o histórico em
   // fatias ("hoje para trás"), porque uma leitura longa estoura o prazo da função dele.

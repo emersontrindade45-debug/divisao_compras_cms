@@ -8,6 +8,7 @@ import { RespostasAConfirmar, type RespostaPendenteItem } from "@/components/cot
 import { AplicadasPelaIa, type AplicadaPelaIaItem } from "@/components/cotacoes/AplicadasPelaIa";
 import { OrcamentosPorPdfARevisar, type OrcamentoPdfRevisarItem } from "@/components/cotacoes/OrcamentosPorPdfARevisar";
 import { ConferirClassificacaoIa } from "@/components/cotacoes/ConferirClassificacaoIa";
+import { ColetarExemplosIa } from "@/components/cotacoes/ColetarExemplosIa";
 import { LigarRespostasAFornecedor, type RespostaLigavelItem } from "@/components/cotacoes/LigarRespostasAFornecedor";
 import { listarRespostasLigaveis } from "@/lib/emailCotacao/ligarRespostaFornecedor";
 import { carregarPainelConferencia, type Escopo } from "@/lib/emailCotacao/conferenciaIa";
@@ -210,7 +211,8 @@ export default async function CotacoesPage({
           <LigarRespostasAFornecedor itens={ligaveis} />
         </TabsContent>
 
-        <TabsContent value="conferir">
+        <TabsContent value="conferir" className="space-y-3">
+          <ColetarExemplosIa />
           <ConferirClassificacaoIa painel={painelConferencia} escopo={escopoConferencia} classe={classeConferencia} />
         </TabsContent>
 
