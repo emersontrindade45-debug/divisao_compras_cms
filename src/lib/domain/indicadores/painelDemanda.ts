@@ -49,10 +49,26 @@ export function categoriaDoRotulo(rotulo: string): CategoriaProcesso {
   return "outros";
 }
 
+/**
+ * Filtros do painel vindos da URL (`?ano=2025&categoria=bens`). Valor fora do esperado é ignorado — nunca vira
+ * ano nem categoria —, então um link adulterado só mostra o painel padrão.
+ */
+export function lerFiltrosDoPainel(params: { ano?: string; categoria?: string }): {
+  ano?: number;
+  categoria: CategoriaProcesso | null;
+} {
+  const ano = /^\d{4}$/.test(params.ano ?? "") ? Number(params.ano) : undefined;
+  const categoria = CATEGORIAS.find((c) => c.id === params.categoria)?.id ?? null;
+  return { ano, categoria };
+}
+
 // ------------------------------------------------------------------ datas (texto, UTC)
 
 function emDias(data: string): number {
-  return Date.UTC(Number(data.slice(0, 4)), Number(data.slice(5, 7)) - 1, Number(data.slice(8, 10))) / 86_400_000;
+  return (
+    Date.UTC(Number(data.slice(0, 4)), Number(data.slice(5, 7)) - 1, Number(data.slice(8, 10))) /
+    86_400_000
+  );
 }
 
 export function diasEntre(anterior: string, posterior: string): number {
@@ -94,7 +110,11 @@ export function filtrarRemessas(remessas: Remessa[], f: FiltroRemessas): Remessa
   return remessas.filter((r) => {
     if (r.ano !== f.ano) return false;
     if (f.categoria && categoriaDoRotulo(r.rotulo) !== f.categoria) return false;
-    if (f.ate && (r.mes > f.ate.mes || (r.mes === f.ate.mes && Number(r.data.slice(8, 10)) > f.ate.dia))) return false;
+    if (
+      f.ate &&
+      (r.mes > f.ate.mes || (r.mes === f.ate.mes && Number(r.data.slice(8, 10)) > f.ate.dia))
+    )
+      return false;
     return true;
   });
 }
@@ -110,7 +130,9 @@ function agruparPorProcesso(remessas: Remessa[]): Map<string, Remessa[]> {
     else mapa.set(r.chave, [r]);
   }
   for (const lista of mapa.values()) {
-    lista.sort((a, b) => a.data.localeCompare(b.data) || (a.idEmail ?? "").localeCompare(b.idEmail ?? ""));
+    lista.sort(
+      (a, b) => a.data.localeCompare(b.data) || (a.idEmail ?? "").localeCompare(b.idEmail ?? ""),
+    );
   }
   return mapa;
 }
@@ -180,7 +202,11 @@ export interface MesSerie {
 
 /** Doze meses, de janeiro a dezembro (meses sem remessa com zero). */
 export function serieMensal(remessas: Remessa[]): MesSerie[] {
-  const serie: MesSerie[] = Array.from({ length: 12 }, (_, i) => ({ mes: i + 1, remessas: 0, devolucoes: 0 }));
+  const serie: MesSerie[] = Array.from({ length: 12 }, (_, i) => ({
+    mes: i + 1,
+    remessas: 0,
+    devolucoes: 0,
+  }));
   for (const lista of agruparPorProcesso(remessas).values()) {
     lista.forEach((r, i) => {
       const m = serie[r.mes - 1]!;
@@ -219,7 +245,10 @@ export interface ProcessoDetalhado {
 }
 
 /** Mais passagens primeiro; empate pela chave, para a ordem não oscilar entre leituras. */
-export function detalharProcessos(remessas: Remessa[], hoje: string | null = null): ProcessoDetalhado[] {
+export function detalharProcessos(
+  remessas: Remessa[],
+  hoje: string | null = null,
+): ProcessoDetalhado[] {
   const saida: ProcessoDetalhado[] = [];
   for (const [chave, lista] of agruparPorProcesso(remessas)) {
     const ints = intervalos(lista);
@@ -255,11 +284,41 @@ export type Tendencia = "piora" | "melhora" | "neutra";
  * `piora`/`melhora` seguem o sentido de negócio: mais devolução é pior; mais ou menos remessa é neutro.
  */
 export type FraseMudou =
-  | { codigo: "remessas_7d"; tendencia: Tendencia; atual: number; anterior: number; variacaoPct: number | null }
-  | { codigo: "devolucao_30d"; tendencia: Tendencia; atual: number; anterior: number; deltaPp: number }
-  | { codigo: "criticos_novos"; tendencia: Tendencia; total: number; processos: { chave: string; rotulo: string; passagens: number }[] }
-  | { codigo: "categoria_maior_devolucao"; tendencia: Tendencia; categoria: CategoriaProcesso; taxa: number; deltaPpAnoAnterior: number | null }
-  | { codigo: "processo_mais_passagens"; tendencia: Tendencia; chave: string; rotulo: string; passagens: number; ultima: string };
+  | {
+      codigo: "remessas_7d";
+      tendencia: Tendencia;
+      atual: number;
+      anterior: number;
+      variacaoPct: number | null;
+    }
+  | {
+      codigo: "devolucao_30d";
+      tendencia: Tendencia;
+      atual: number;
+      anterior: number;
+      deltaPp: number;
+    }
+  | {
+      codigo: "criticos_novos";
+      tendencia: Tendencia;
+      total: number;
+      processos: { chave: string; rotulo: string; passagens: number }[];
+    }
+  | {
+      codigo: "categoria_maior_devolucao";
+      tendencia: Tendencia;
+      categoria: CategoriaProcesso;
+      taxa: number;
+      deltaPpAnoAnterior: number | null;
+    }
+  | {
+      codigo: "processo_mais_passagens";
+      tendencia: Tendencia;
+      chave: string;
+      rotulo: string;
+      passagens: number;
+      ultima: string;
+    };
 
 interface Marcada {
   r: Remessa;
@@ -291,7 +350,9 @@ export function frasesMudou(
   categoria: CategoriaProcesso | null = null,
 ): FraseMudou[] {
   const ano = Number(hoje.slice(0, 4));
-  const base = categoria ? remessas.filter((r) => categoriaDoRotulo(r.rotulo) === categoria) : remessas;
+  const base = categoria
+    ? remessas.filter((r) => categoriaDoRotulo(r.rotulo) === categoria)
+    : remessas;
   const marcadas = marcarDevolucoes(base);
   const entre = (de: number, ate: number) =>
     marcadas.filter(({ r }) => {
@@ -347,7 +408,9 @@ export function frasesMudou(
   const corte = diaDoAno(hoje);
   const taxas = CATEGORIAS.map(({ id }) => {
     const atual = resumirPeriodo(filtrarRemessas(base, { ano, categoria: id, ate: corte }));
-    const anterior = resumirPeriodo(filtrarRemessas(base, { ano: ano - 1, categoria: id, ate: corte }));
+    const anterior = resumirPeriodo(
+      filtrarRemessas(base, { ano: ano - 1, categoria: id, ate: corte }),
+    );
     return { id, atual, anterior };
   })
     .filter((c) => c.atual.remessas >= MIN_REMESSAS_CATEGORIA)
@@ -355,7 +418,9 @@ export function frasesMudou(
   const lider = taxas[0];
   if (lider) {
     const temAnterior = lider.anterior.remessas >= MIN_REMESSAS_CATEGORIA;
-    const deltaPp = temAnterior ? (lider.atual.taxaDevolucao - lider.anterior.taxaDevolucao) * 100 : null;
+    const deltaPp = temAnterior
+      ? (lider.atual.taxaDevolucao - lider.anterior.taxaDevolucao) * 100
+      : null;
     frases.push({
       codigo: "categoria_maior_devolucao",
       tendencia: "neutra",
@@ -442,7 +507,11 @@ export function montarPainelDemanda(
     porCategoria: CATEGORIAS.map(({ id }) => {
       const a = filtrarRemessas(remessas, { ano, categoria: id, ate: corte });
       const p = filtrarRemessas(remessas, { ano: ano - 1, categoria: id, ate: corte });
-      return { categoria: id, atual: resumirPeriodo(a), anterior: p.length > 0 ? resumirPeriodo(p) : null };
+      return {
+        categoria: id,
+        atual: resumirPeriodo(a),
+        anterior: p.length > 0 ? resumirPeriodo(p) : null,
+      };
     }),
     processos: detalharProcessos(doAno, parcial ? hoje : null),
     frases: parcial ? frasesMudou(remessas, hoje, categoria) : [],

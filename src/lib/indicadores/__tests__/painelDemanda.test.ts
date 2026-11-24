@@ -17,14 +17,25 @@ const GID = "94296670";
 const CAB = ["ID Remessa", "Data", "Horário", "Mês", "Processo Encaminhado", "ID do E-mail"];
 
 const linha = (data: string, proc: string, email: string) => ["1", data, "10:00", "x", proc, email];
-const abasDoGoogle = (...titulos: string[]) => ({ data: { sheets: titulos.map((title) => ({ properties: { title } })) } });
-const csv = (corpo: string) => new Response(corpo, { status: 200, headers: { "content-type": "text/csv; charset=utf-8" } });
+const abasDoGoogle = (...titulos: string[]) => ({
+  data: { sheets: titulos.map((title) => ({ properties: { title } })) },
+});
+const csv = (corpo: string) =>
+  new Response(corpo, { status: 200, headers: { "content-type": "text/csv; charset=utf-8" } });
 
 /** Duas abas de ano, no formato da planilha. */
 function abas(): Record<string, string[][]> {
   return {
-    "Remessas 2025": [CAB, linha("10/03/2025", "Geral Nº 1/2025 - volume 1", "a1"), linha("11/03/2025", "Geral Nº 1/2025 - volume 1", "a2")],
-    "Remessas 2026": [CAB, linha("24/11/2026", "Geral Nº 2/2026 - volume 1", "b1"), linha("05/01/2026", "Geral Nº 2/2026 - volume 1", "b2")],
+    "Remessas 2025": [
+      CAB,
+      linha("10/03/2025", "Geral Nº 1/2025 - volume 1", "a1"),
+      linha("11/03/2025", "Geral Nº 1/2025 - volume 1", "a2"),
+    ],
+    "Remessas 2026": [
+      CAB,
+      linha("24/11/2026", "Geral Nº 2/2026 - volume 1", "b1"),
+      linha("05/01/2026", "Geral Nº 2/2026 - volume 1", "b2"),
+    ],
   };
 }
 
@@ -53,7 +64,9 @@ describe("carregarPainelDemanda", () => {
   });
 
   function comApi(tabelas: Record<string, string[][]>, extras: string[] = []) {
-    mocks.obterPlanilha.mockResolvedValue(abasDoGoogle("Painel Remessas", ...Object.keys(tabelas), ...extras));
+    mocks.obterPlanilha.mockResolvedValue(
+      abasDoGoogle("Painel Remessas", ...Object.keys(tabelas), ...extras),
+    );
     mocks.lerAba.mockImplementation(async (_id: string, titulo: string) => tabelas[titulo] ?? []);
   }
 
@@ -67,16 +80,25 @@ describe("carregarPainelDemanda", () => {
 
   it("gid inválido nunca chega ao Google", async () => {
     process.env.DEMANDA_PLANILHA_GID = "94296670&x=1";
-    expect(await (await carregar())()).toMatchObject({ estado: "indisponivel", motivo: expect.stringContaining("DEMANDA_PLANILHA_GID") });
+    expect(await (await carregar())()).toMatchObject({
+      estado: "indisponivel",
+      motivo: expect.stringContaining("DEMANDA_PLANILHA_GID"),
+    });
     expect(mocks.obterPlanilha).not.toHaveBeenCalled();
   });
 
   it("pela API: abre cada aba 'Remessas <ano>' pelo NOME e junta os anos (última camada: o que vai ao Google)", async () => {
     comApi(abas(), ["Remessas Extraídas (backup 24-11 0904)", "Calc_Dashboards"]);
     const r = await (await carregar())();
-    expect(mocks.obterPlanilha).toHaveBeenCalledWith({ spreadsheetId: ID, fields: "sheets.properties.title" });
+    expect(mocks.obterPlanilha).toHaveBeenCalledWith({
+      spreadsheetId: ID,
+      fields: "sheets.properties.title",
+    });
     // só as abas de ano: nem o painel, nem o backup, nem o Calc
-    expect(mocks.lerAba.mock.calls).toEqual([[ID, "Remessas 2025"], [ID, "Remessas 2026"]]);
+    expect(mocks.lerAba.mock.calls).toEqual([
+      [ID, "Remessas 2025"],
+      [ID, "Remessas 2026"],
+    ]);
     expect(r).toMatchObject({ estado: "ok", fonte: "api", aviso: null, anos: [2026, 2025] });
     if (r.estado !== "ok") return;
     expect(r.painel.ano).toBe(2026);
@@ -112,9 +134,15 @@ describe("carregarPainelDemanda", () => {
 
   it("sem acesso pela API: usa o CSV público da aba configurada, SEM comparativo, e avisa", async () => {
     mocks.obterPlanilha.mockRejectedValue(new Error("403"));
-    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(csv([CAB.join(","), "1,24/11/2026,10:00,x,Geral Nº 2/2026 - volume 1,b1"].join("\n")));
+    const f = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        csv([CAB.join(","), "1,24/11/2026,10:00,x,Geral Nº 2/2026 - volume 1,b1"].join("\n")),
+      );
     const r = await (await carregar())();
-    expect(f.mock.calls[0]![0]).toBe(`https://docs.google.com/spreadsheets/d/${ID}/export?format=csv&gid=${GID}`);
+    expect(f.mock.calls[0]![0]).toBe(
+      `https://docs.google.com/spreadsheets/d/${ID}/export?format=csv&gid=${GID}`,
+    );
     expect(r).toMatchObject({ estado: "ok", fonte: "csv", anos: [2026] });
     if (r.estado !== "ok") return;
     expect(r.aviso).toContain("sem comparativo");
@@ -123,7 +151,9 @@ describe("carregarPainelDemanda", () => {
 
   it("API sem nenhuma aba 'Remessas <ano>' (planilha antiga): também cai no CSV e explica o motivo", async () => {
     mocks.obterPlanilha.mockResolvedValue(abasDoGoogle("Remessas Extraídas", "Painel Remessas"));
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(csv([CAB.join(","), "1,24/11/2026,10:00,x,Geral Nº 2/2026 - volume 1,b1"].join("\n")));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      csv([CAB.join(","), "1,24/11/2026,10:00,x,Geral Nº 2/2026 - volume 1,b1"].join("\n")),
+    );
     const r = await (await carregar())();
     expect(r.estado === "ok" && r.fonte).toBe("csv");
     expect(r.estado === "ok" && r.aviso).toContain("Remessas <ano>");
@@ -131,10 +161,19 @@ describe("carregarPainelDemanda", () => {
   });
 
   it("falha de CONTEÚDO não usa a reserva: aba de ano com cabeçalho irreconhecível = indisponível, com o nome da aba", async () => {
-    comApi({ ...abas(), "Remessas 2024": [["a", "b"], ["x", "y"]] });
+    comApi({
+      ...abas(),
+      "Remessas 2024": [
+        ["a", "b"],
+        ["x", "y"],
+      ],
+    });
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const r = await (await carregar())();
-    expect(r).toMatchObject({ estado: "indisponivel", motivo: expect.stringContaining("Remessas 2024") });
+    expect(r).toMatchObject({
+      estado: "indisponivel",
+      motivo: expect.stringContaining("Remessas 2024"),
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -147,7 +186,10 @@ describe("carregarPainelDemanda", () => {
 
   it("planilha sem nenhuma remessa válida: indisponível, não painel vazio", async () => {
     comApi({ "Remessas 2026": [CAB] });
-    expect(await (await carregar())()).toEqual({ estado: "indisponivel", motivo: expect.stringContaining("remessas válidas") });
+    expect(await (await carregar())()).toEqual({
+      estado: "indisponivel",
+      motivo: expect.stringContaining("remessas válidas"),
+    });
   });
 
   it("cache de 1 hora: a segunda leitura não vai ao Google; passada a hora, vai", async () => {
@@ -186,7 +228,9 @@ describe("carregarPainelDemanda", () => {
     comApi(abas());
     mocks.findMany.mockResolvedValue([{ id: "p1", numero: "0002/2026" }]);
     const r = await (await carregar())();
-    expect(r.estado === "ok" && r.noSistema).toEqual({ "2/2026": { id: "p1", numero: "0002/2026" } });
+    expect(r.estado === "ok" && r.noSistema).toEqual({
+      "2/2026": { id: "p1", numero: "0002/2026" },
+    });
     mocks.findMany.mockRejectedValue(new Error("db"));
     const r2 = await (await carregar())();
     expect(r2.estado === "ok" && r2.noSistema).toEqual({});

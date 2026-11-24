@@ -7,14 +7,15 @@ import { WorkQueueCard } from "@/components/dashboard/WorkQueueCard";
 import { AtribuirResponsavelSelect } from "@/components/dashboard/AtribuirResponsavelSelect";
 import { IndicadoresDesempenho } from "@/components/dashboard/IndicadoresDesempenho";
 import { RespostaPorProcesso } from "@/components/dashboard/RespostaPorProcesso";
-import { DemandaDivisao } from "@/components/dashboard/DemandaDivisao";
+import { PainelDemandaDivisao } from "@/components/dashboard/PainelDemanda";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAuth } from "@/lib/auth/rbac";
 import { buscarAlertas } from "@/lib/actions/alertas";
 import { escopoPadrao } from "@/lib/domain/indicadores/camadaAcao";
 import { lerPeriodo, PERIODO_LABEL, PERIODOS, tituloPeriodo, type Periodo } from "@/lib/domain/indicadores/desempenho";
 import { carregarCamadaDesempenho } from "@/lib/indicadores/desempenho";
-import { carregarDemanda } from "@/lib/indicadores/demanda";
+import { lerFiltrosDoPainel } from "@/lib/domain/indicadores/painelDemanda";
+import { carregarPainelDemanda } from "@/lib/indicadores/painelDemanda";
 import {
   carregarCamadaAcao,
   contarProcessosDoUsuario,
@@ -33,7 +34,7 @@ const DIA_MS = 24 * 60 * 60 * 1000;
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ escopo?: string; fila?: string; periodo?: string }>;
+  searchParams: Promise<{ escopo?: string; fila?: string; periodo?: string; ano?: string; categoria?: string }>;
 }) {
   const user = await requireAuth();
   const params = await searchParams;
@@ -46,14 +47,15 @@ export default async function DashboardPage({
   const filaCompleta = params.fila === "todas";
   const periodo = lerPeriodo(params.periodo);
 
-  const anoDaDemanda = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric" }).format(agora));
+  // Filtros do painel de demanda: ficam na URL; valor fora do esperado é ignorado.
+  const { ano: anoPedido, categoria: categoriaPedida } = lerFiltrosDoPainel(params);
 
   const [acao, desempenho, usuarios, alertas, demanda] = await Promise.all([
     carregarCamadaAcao(escopo, user.id, agora),
     carregarCamadaDesempenho(periodo, escopo, user.id, agora),
     listarUsuariosAtribuiveis(),
     buscarAlertas(),
-    carregarDemanda(anoDaDemanda),
+    carregarPainelDemanda({ ano: anoPedido, categoria: categoriaPedida }),
   ]);
 
   const { resumo } = acao;
@@ -61,6 +63,8 @@ export default async function DashboardPage({
   const href = (o: { escopo?: Escopo; periodo?: Periodo; fila?: boolean }) => {
     const q = new URLSearchParams({ escopo: o.escopo ?? escopo, periodo: o.periodo ?? periodo });
     if (o.fila ?? filaCompleta) q.set("fila", "todas");
+    if (anoPedido) q.set("ano", String(anoPedido));
+    if (categoriaPedida) q.set("categoria", categoriaPedida);
     return `/dashboard?${q.toString()}`;
   };
 
@@ -72,6 +76,18 @@ export default async function DashboardPage({
       />
 
       {alertas.length > 0 && <AlertasBanner alertas={alertas} />}
+
+      <section aria-labelledby="camada-demanda" className="space-y-4">
+        <div>
+          <h2 id="camada-demanda" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Demanda da Divisão{demanda.estado === "ok" ? ` · ${demanda.painel.ano}` : ""}
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Onde a Divisão perde tempo: processos que chegam e voltam. Independe do período e do escopo abaixo.
+          </p>
+        </div>
+        <PainelDemandaDivisao resultado={demanda} />
+      </section>
 
       <section aria-labelledby="camada-acao" className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -269,17 +285,6 @@ export default async function DashboardPage({
         <RespostaPorProcesso processos={desempenho.porProcesso} />
       </section>
 
-      <section aria-labelledby="camada-demanda" className="space-y-4">
-        <div>
-          <h2 id="camada-demanda" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Demanda da Divisão · {anoDaDemanda}
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Processos que chegaram à Divisão de Compras e quantas vezes cada um voltou. Independe do período e do escopo.
-          </p>
-        </div>
-        <DemandaDivisao resultado={demanda} ano={anoDaDemanda} />
-      </section>
     </div>
   );
 }

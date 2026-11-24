@@ -8,7 +8,14 @@ import {
   type CategoriaProcesso,
   type PainelDemanda,
 } from "@/lib/domain/indicadores/painelDemanda";
-import { baixarCsv, CACHE_SEGUNDOS, FORMATO_GID, FORMATO_ID, mapaDeProcessos, type ProcessoNoSistema } from "./demanda";
+import {
+  baixarCsv,
+  CACHE_SEGUNDOS,
+  FORMATO_GID,
+  FORMATO_ID,
+  mapaDeProcessos,
+  type ProcessoNoSistema,
+} from "./demanda";
 
 /**
  * Leitura das remessas de TODOS os anos para o painel "Demanda da Divisão" (redesenho de 2026-11-24).
@@ -78,21 +85,27 @@ function juntar(partes: Remessa[][]): { remessas: Remessa[]; repetidas: number }
 }
 
 async function titulosDasAbasDeAno(id: string): Promise<string[]> {
-  const meta = await getSheetsClient().spreadsheets.get({ spreadsheetId: id, fields: "sheets.properties.title" });
+  const meta = await getSheetsClient().spreadsheets.get({
+    spreadsheetId: id,
+    fields: "sheets.properties.title",
+  });
   return (meta.data.sheets ?? [])
     .map((s) => s.properties?.title ?? "")
     .filter((t) => ABA_DE_ANO.test(t))
     .sort();
 }
 
-async function lerPelaApi(id: string): Promise<TentativaLeitura | "sem_acesso" | "sem_abas_de_ano"> {
+async function lerPelaApi(
+  id: string,
+): Promise<TentativaLeitura | "sem_acesso" | "sem_abas_de_ano"> {
   let titulos: string[];
   let linhasPorAba: { titulo: string; linhas: string[][] }[];
   try {
     titulos = await titulosDasAbasDeAno(id);
     if (titulos.length === 0) return "sem_abas_de_ano";
     linhasPorAba = [];
-    for (const titulo of titulos) linhasPorAba.push({ titulo, linhas: await lerAbaAutenticado(id, titulo) });
+    for (const titulo of titulos)
+      linhasPorAba.push({ titulo, linhas: await lerAbaAutenticado(id, titulo) });
   } catch {
     return "sem_acesso";
   }
@@ -107,10 +120,23 @@ async function lerPelaApi(id: string): Promise<TentativaLeitura | "sem_acesso" |
     duplicadas += leitura.duplicadas;
   }
   const { remessas, repetidas } = juntar(partes);
-  return { ok: true, leitura: { remessas, fonte: "api", aviso: null, descartadas, duplicadas: duplicadas + repetidas } };
+  return {
+    ok: true,
+    leitura: {
+      remessas,
+      fonte: "api",
+      aviso: null,
+      descartadas,
+      duplicadas: duplicadas + repetidas,
+    },
+  };
 }
 
-async function lerPeloCsv(id: string, gid: string | undefined, motivoDaReserva: string): Promise<TentativaLeitura> {
+async function lerPeloCsv(
+  id: string,
+  gid: string | undefined,
+  motivoDaReserva: string,
+): Promise<TentativaLeitura> {
   const csv = await baixarCsv(id, gid);
   if (!csv.ok) return { ok: false, motivo: csv.motivo };
   const leitura = lerRemessas(parseCsv(csv.texto));
@@ -170,7 +196,9 @@ export interface OpcoesPainelDemanda {
   categoria?: CategoriaProcesso | null;
 }
 
-export async function carregarPainelDemanda(opcoes: OpcoesPainelDemanda = {}): Promise<ResultadoPainelDemanda> {
+export async function carregarPainelDemanda(
+  opcoes: OpcoesPainelDemanda = {},
+): Promise<ResultadoPainelDemanda> {
   const id = process.env.DEMANDA_PLANILHA_ID?.trim();
   if (!id) return { estado: "nao_configurada" };
   if (!FORMATO_ID.test(id)) {
@@ -178,7 +206,10 @@ export async function carregarPainelDemanda(opcoes: OpcoesPainelDemanda = {}): P
   }
   const gid = process.env.DEMANDA_PLANILHA_GID?.trim() || undefined;
   if (gid && !FORMATO_GID.test(gid)) {
-    return { estado: "indisponivel", motivo: "O id da aba configurado (DEMANDA_PLANILHA_GID) tem formato inválido." };
+    return {
+      estado: "indisponivel",
+      motivo: "O id da aba configurado (DEMANDA_PLANILHA_GID) tem formato inválido.",
+    };
   }
 
   try {
@@ -186,13 +217,18 @@ export async function carregarPainelDemanda(opcoes: OpcoesPainelDemanda = {}): P
     if (!lida.ok) return { estado: "indisponivel", motivo: lida.motivo };
     const { leitura } = lida;
     const hoje = dataMaisRecente(leitura.remessas);
-    if (hoje === null) return { estado: "indisponivel", motivo: "A planilha não tem remessas válidas." };
+    if (hoje === null)
+      return { estado: "indisponivel", motivo: "A planilha não tem remessas válidas." };
 
     const anos = [...new Set(leitura.remessas.map((r) => r.ano))].sort((a, b) => b - a);
     const ano = opcoes.ano !== undefined && anos.includes(opcoes.ano) ? opcoes.ano : anos[0]!;
     return {
       estado: "ok",
-      painel: montarPainelDemanda(leitura.remessas, { ano, hoje, categoria: opcoes.categoria ?? null }),
+      painel: montarPainelDemanda(leitura.remessas, {
+        ano,
+        hoje,
+        categoria: opcoes.categoria ?? null,
+      }),
       anos,
       fonte: leitura.fonte,
       aviso: leitura.aviso,
