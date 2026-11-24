@@ -9,6 +9,7 @@ import { somarDias } from "@/lib/domain/indicadores/painelDemanda";
 import type { ResultadoPainelDemanda } from "@/lib/indicadores/painelDemanda";
 import { PainelDemandaDivisao } from "../PainelDemanda";
 import { FiltrosPainelDemanda } from "../FiltrosPainelDemanda";
+import { PendenciasDaFila } from "../PendenciasDaFila";
 
 const push = vi.fn();
 let parametros = new URLSearchParams();
@@ -374,6 +375,34 @@ describe("FiltrosPainelDemanda", () => {
       renderiza({ estado: "ok", meses, inconsistentes: ["2026-02"] });
       expect(screen.getByText(/2026-02 as classes não somam/)).toBeInTheDocument();
       expect(screen.getByText(/Fornecedores e cotações por e-mail/).closest("details")!.className).toContain("print:hidden");
+    });
+  });
+  describe("pendências da fila (etapa 5)", () => {
+    const pend = (o: Partial<Parameters<typeof PendenciasDaFila>[0]> = {}) => (
+      <PendenciasDaFila respostasAConfirmar={3} enviosSemProcesso={2} semResponsavel={4} vencidas={1} {...o} />
+    );
+
+    it("lista só o que tem pendência, com link, e fica ao lado de “O que mudou”", () => {
+      render(<PainelDemandaDivisao resultado={ok()} pendencias={pend({ vencidas: 0 })} />);
+      const lista = screen.getByRole("region", { name: "Pendências da fila" });
+      expect(within(lista).getByRole("link", { name: /3 mensagem\(ns\) de fornecedor a confirmar/ })).toHaveAttribute("href", "/cotacoes?aba=confirmar");
+      expect(within(lista).getByText(/4/)).toBeInTheDocument();
+      expect(within(lista).queryByText(/prazo vencido/)).not.toBeInTheDocument();
+      const mudou = screen.getByRole("region", { name: "O que mudou" });
+      expect(mudou.parentElement).toBe(lista.parentElement); // mesma linha...
+      expect(lista.parentElement!.className).toContain("lg:grid-cols-2"); // ...de uma grade de duas colunas
+    });
+
+    it("sem nenhuma pendência diz isso", () => {
+      render(<PendenciasDaFila respostasAConfirmar={0} enviosSemProcesso={0} semResponsavel={0} vencidas={0} />);
+      expect(screen.getByText("Nenhuma pendência no momento.")).toBeInTheDocument();
+    });
+
+    it("aparece mesmo quando a planilha de demanda não carrega", () => {
+      render(<PainelDemandaDivisao resultado={{ estado: "indisponivel", motivo: "x" }} pendencias={pend()} />);
+      expect(screen.getByRole("region", { name: "Pendências da fila" })).toBeInTheDocument();
+      render(<PainelDemandaDivisao resultado={{ estado: "nao_configurada" }} pendencias={pend()} />);
+      expect(screen.getAllByRole("region", { name: "Pendências da fila" })).toHaveLength(2);
     });
   });
 });

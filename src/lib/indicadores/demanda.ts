@@ -1,26 +1,14 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { parseCsv } from "@/lib/sheets/csv";
-import { calcularDemanda, lerRemessas, type DemandaDivisao } from "@/lib/domain/indicadores/demanda";
 
 /**
- * Leitura da planilha de remessas (M30.e) para a camada "Demanda da Divisão" do dashboard.
+ * Peças comuns da leitura da planilha de remessas (M30.e), usadas por `painelDemanda.ts`: o download do CSV
+ * público (reserva), os formatos aceitos de id/aba e o vínculo dos processos da planilha com o cadastro.
  *
- * A planilha é atualizada de hora em hora fora do sistema e está com link público de leitura
- * (decisão do usuário, 2026-11-19). O sistema a lê SOB DEMANDA — nada é copiado para o banco — com
- * cache de 1 hora, que acompanha a atualização dela.
+ * Fail-visible (§9.93): planilha que não abre NÃO vira "0 processos" — `baixarCsv` devolve o motivo e quem
+ * chama mostra a frase certa. O id da planilha vem do ambiente, não do código.
  *
- * Fail-visible (§9.93): planilha que não abre NÃO vira "0 processos". O resultado distingue
- * "não configurada", "indisponível" (com o motivo) e "ok"; a tela mostra cada um com sua frase. E a
- * leitura nunca derruba o dashboard: todo erro é capturado aqui.
- *
- * O id da planilha vem do ambiente (`DEMANDA_PLANILHA_ID`), não do código: com link público o id
- * funciona como chave de leitura e não deve entrar no repositório.
- *
- * A exportação em CSV devolve SEMPRE a primeira aba. Em 2026-11-23 a planilha ganhou abas de painel na
- * frente da tabela de remessas e a seção do dashboard passou a mostrar "Cabeçalho não reconhecido"; a
- * aba certa se escolhe por `DEMANDA_PLANILHA_GID` (o `gid=` da URL da aba). Sem ela, vale a primeira aba,
- * como antes.
+ * A exportação em CSV devolve SEMPRE a primeira aba; a aba certa se escolhe por `gid` (`DEMANDA_PLANILHA_GID`).
  */
 
 export const PRAZO_LEITURA_MS = 10_000;
@@ -36,18 +24,6 @@ export interface ProcessoNoSistema {
   id: string;
   numero: string;
 }
-
-export type ResultadoDemanda =
-  | { estado: "nao_configurada" }
-  | { estado: "indisponivel"; motivo: string }
-  | {
-      estado: "ok";
-      demanda: DemandaDivisao;
-      descartadas: number;
-      duplicadas: number;
-      /** Processos da planilha que existem no cadastro do sistema, pela chave número/ano. */
-      noSistema: Record<string, ProcessoNoSistema>;
-    };
 
 /** "0092/2026" → "92/2026": mesma chave que `chaveDoProcesso` usa para a planilha. */
 export function chaveDoNumero(numero: string): string | null {
@@ -95,38 +71,5 @@ export async function mapaDeProcessos(): Promise<Record<string, ProcessoNoSistem
     return mapa;
   } catch {
     return {};
-  }
-}
-
-export async function carregarDemanda(ano: number): Promise<ResultadoDemanda> {
-  const id = process.env.DEMANDA_PLANILHA_ID?.trim();
-  if (!id) return { estado: "nao_configurada" };
-  if (!FORMATO_ID.test(id)) {
-    return { estado: "indisponivel", motivo: "O id da planilha configurado tem formato inválido." };
-  }
-
-  const gid = process.env.DEMANDA_PLANILHA_GID?.trim();
-  if (gid && !FORMATO_GID.test(gid)) {
-    return { estado: "indisponivel", motivo: "O id da aba configurado (DEMANDA_PLANILHA_GID) tem formato inválido." };
-  }
-
-  try {
-    const csv = await baixarCsv(id, gid);
-    if (!csv.ok) return { estado: "indisponivel", motivo: csv.motivo };
-    const leitura = lerRemessas(parseCsv(csv.texto));
-    if (!leitura.ok) {
-      // Sem `gid` o CSV é da primeira aba: o motivo mais provável de "cabeçalho não reconhecido" é a aba errada.
-      const dica = gid ? "" : " Se a planilha tem mais de uma aba, informe a das remessas em DEMANDA_PLANILHA_GID.";
-      return { estado: "indisponivel", motivo: leitura.motivo + dica };
-    }
-    return {
-      estado: "ok",
-      demanda: calcularDemanda(leitura.remessas, ano),
-      descartadas: leitura.descartadas,
-      duplicadas: leitura.duplicadas,
-      noSistema: await mapaDeProcessos(),
-    };
-  } catch {
-    return { estado: "indisponivel", motivo: "Não foi possível ler a planilha." };
   }
 }

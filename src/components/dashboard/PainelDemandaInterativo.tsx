@@ -121,10 +121,13 @@ export function PainelDemandaInterativo({
   painel,
   noSistema,
   fornecedores,
+  pendencias,
 }: {
   painel: PainelDemanda;
   noSistema: Record<string, ProcessoNoSistema>;
   fornecedores: FornecedoresNoPainel;
+  /** Painel de pendências da fila, desenhado pela página (vem do banco); fica ao lado de "O que mudou". */
+  pendencias?: React.ReactNode;
 }) {
   const [visao, setVisao] = useState<Visao | null>(null);
   const { atual, anterior } = painel;
@@ -221,79 +224,82 @@ export function PainelDemandaInterativo({
         </li>
       </ul>
 
-      <section aria-labelledby="o-que-mudou" className="space-y-2">
-        <h3
-          id="o-que-mudou"
-          className="text-sm font-semibold uppercase tracking-wide text-muted-foreground"
-        >
-          O que mudou
-        </h3>
-        <Card>
-          <CardContent className="pt-4">
-            {painel.frases.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {painel.parcial
-                  ? "Ainda não há movimento suficiente nos últimos dias para comparar."
-                  : `${painel.ano} é um ano fechado: as frases de “o que mudou” valem só para o ano corrente.`}
+      <div className={pendencias ? "grid items-start gap-4 lg:grid-cols-2" : undefined}>
+        <section aria-labelledby="o-que-mudou" className="space-y-2">
+          <h3
+            id="o-que-mudou"
+            className="text-sm font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            O que mudou
+          </h3>
+          <Card>
+            <CardContent className="pt-4">
+              {painel.frases.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {painel.parcial
+                    ? "Ainda não há movimento suficiente nos últimos dias para comparar."
+                    : `${painel.ano} é um ano fechado: as frases de “o que mudou” valem só para o ano corrente.`}
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {painel.frases.map((f) => {
+                    const Icone =
+                      f.tendencia === "piora"
+                        ? TrendingUp
+                        : f.tendencia === "melhora"
+                          ? TrendingDown
+                          : Minus;
+                    const cor =
+                      f.tendencia === "piora"
+                        ? "text-danger"
+                        : f.tendencia === "melhora"
+                          ? "text-success"
+                          : "text-muted-foreground";
+                    const leitura =
+                      f.tendencia === "piora"
+                        ? "Piorou"
+                        : f.tendencia === "melhora"
+                          ? "Melhorou"
+                          : "Informação";
+                    return (
+                      <li
+                        key={f.codigo}
+                        className="flex items-start gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
+                      >
+                        <Icone className={cn("mt-0.5 size-4 shrink-0", cor)} aria-hidden />
+                        <span className="sr-only">{leitura}: </span>
+                        <span>
+                          {trechosDaFrase(f).map((x, i) =>
+                            x.tipo === "forte" ? (
+                              <strong key={i}>{x.texto}</strong>
+                            ) : x.tipo === "processo" ? (
+                              <AcaoEmLinha
+                                key={i}
+                                onAbrir={() =>
+                                  setVisao({ tipo: "processo", chave: x.chave, voltarPara: null })
+                                }
+                              >
+                                {x.texto}
+                              </AcaoEmLinha>
+                            ) : (
+                              <span key={i}>{x.texto}</span>
+                            ),
+                          )}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="mt-3 text-xs text-muted-foreground">
+                Frases geradas por regras fixas sobre as remessas; cada uma traz o número que a
+                sustenta.
               </p>
-            ) : (
-              <ul className="space-y-2">
-                {painel.frases.map((f) => {
-                  const Icone =
-                    f.tendencia === "piora"
-                      ? TrendingUp
-                      : f.tendencia === "melhora"
-                        ? TrendingDown
-                        : Minus;
-                  const cor =
-                    f.tendencia === "piora"
-                      ? "text-danger"
-                      : f.tendencia === "melhora"
-                        ? "text-success"
-                        : "text-muted-foreground";
-                  const leitura =
-                    f.tendencia === "piora"
-                      ? "Piorou"
-                      : f.tendencia === "melhora"
-                        ? "Melhorou"
-                        : "Informação";
-                  return (
-                    <li
-                      key={f.codigo}
-                      className="flex items-start gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
-                    >
-                      <Icone className={cn("mt-0.5 size-4 shrink-0", cor)} aria-hidden />
-                      <span className="sr-only">{leitura}: </span>
-                      <span>
-                        {trechosDaFrase(f).map((x, i) =>
-                          x.tipo === "forte" ? (
-                            <strong key={i}>{x.texto}</strong>
-                          ) : x.tipo === "processo" ? (
-                            <AcaoEmLinha
-                              key={i}
-                              onAbrir={() =>
-                                setVisao({ tipo: "processo", chave: x.chave, voltarPara: null })
-                              }
-                            >
-                              {x.texto}
-                            </AcaoEmLinha>
-                          ) : (
-                            <span key={i}>{x.texto}</span>
-                          ),
-                        )}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <p className="mt-3 text-xs text-muted-foreground">
-              Frases geradas por regras fixas sobre as remessas; cada uma traz o número que a
-              sustenta.
-            </p>
-          </CardContent>
-        </Card>
-      </section>
+            </CardContent>
+          </Card>
+        </section>
+        {pendencias}
+      </div>
 
       <GraficosPainelDemanda painel={painel} />
 

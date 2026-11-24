@@ -38,40 +38,6 @@ export interface Remessa {
   idEmail: string | null;
 }
 
-export interface ProcessoDemanda {
-  chave: string;
-  /** Rótulo mais recente da planilha (ex.: "Aquisição de Bens Nº 210/2025 - volume 1"). */
-  rotulo: string;
-  remessas: number;
-  /** Devoluções: remessas além das 3 passagens obrigatórias. */
-  recorrencias: number;
-  primeira: string;
-  ultima: string;
-}
-
-export interface MesDemanda {
-  mes: number;
-  remessas: number;
-  distintos: number;
-}
-
-export interface DemandaDivisao {
-  ano: number;
-  remessas: number;
-  processosDistintos: number;
-  /** Processos devolvidos: com mais remessas que as passagens obrigatórias. */
-  processosQueVoltaram: number;
-  /** Soma das recorrências (devoluções) de todos os processos. */
-  recorrencias: number;
-  /** Remessas por processo, uma casa decimal. */
-  mediaRemessas: number;
-  /** De janeiro até o último mês com remessa; meses sem remessa aparecem com zero. */
-  porMes: MesDemanda[];
-  /** Mais recorrentes primeiro; empate pela chave, para a ordem não oscilar. */
-  processos: ProcessoDemanda[];
-  ultimaRemessa: string | null;
-}
-
 export interface LeituraRemessas {
   remessas: Remessa[];
   /** Linhas com data inválida ou sem processo. */
@@ -192,47 +158,4 @@ export function lerRemessas(linhas: string[][]): ResultadoLeitura {
     remessas.push({ data: data.data, ano: data.ano, mes: data.mes, chave, rotulo, idEmail });
   }
   return { ok: true, remessas, descartadas, duplicadas };
-}
-
-export function calcularDemanda(remessas: Remessa[], ano: number): DemandaDivisao {
-  const doAno = remessas.filter((r) => r.ano === ano);
-  const porProcesso = new Map<string, Remessa[]>();
-  for (const r of doAno) {
-    const lista = porProcesso.get(r.chave);
-    if (lista) lista.push(r);
-    else porProcesso.set(r.chave, [r]);
-  }
-
-  const processos: ProcessoDemanda[] = [...porProcesso.entries()].map(([chave, lista]) => {
-    const ordenadas = [...lista].sort((a, b) => a.data.localeCompare(b.data));
-    return {
-      chave,
-      rotulo: ordenadas[ordenadas.length - 1]!.rotulo,
-      remessas: lista.length,
-      recorrencias: recorrenciasDoProcesso(lista.length),
-      primeira: ordenadas[0]!.data,
-      ultima: ordenadas[ordenadas.length - 1]!.data,
-    };
-  });
-  processos.sort((a, b) => b.remessas - a.remessas || a.chave.localeCompare(b.chave));
-
-  const ultimoMes = doAno.reduce((m, r) => Math.max(m, r.mes), 0);
-  const porMes: MesDemanda[] = [];
-  for (let mes = 1; mes <= ultimoMes; mes++) {
-    const doMes = doAno.filter((r) => r.mes === mes);
-    porMes.push({ mes, remessas: doMes.length, distintos: new Set(doMes.map((r) => r.chave)).size });
-  }
-
-  const distintos = processos.length;
-  return {
-    ano,
-    remessas: doAno.length,
-    processosDistintos: distintos,
-    processosQueVoltaram: processos.filter((p) => p.recorrencias > 0).length,
-    recorrencias: processos.reduce((soma, p) => soma + p.recorrencias, 0),
-    mediaRemessas: distintos === 0 ? 0 : Math.round((doAno.length / distintos) * 10) / 10,
-    porMes,
-    processos,
-    ultimaRemessa: doAno.length === 0 ? null : doAno.map((r) => r.data).sort().pop()!,
-  };
 }

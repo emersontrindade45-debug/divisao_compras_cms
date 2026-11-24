@@ -8,11 +8,18 @@ import { AtribuirResponsavelSelect } from "@/components/dashboard/AtribuirRespon
 import { IndicadoresDesempenho } from "@/components/dashboard/IndicadoresDesempenho";
 import { RespostaPorProcesso } from "@/components/dashboard/RespostaPorProcesso";
 import { PainelDemandaDivisao } from "@/components/dashboard/PainelDemanda";
+import { PendenciasDaFila } from "@/components/dashboard/PendenciasDaFila";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAuth } from "@/lib/auth/rbac";
 import { buscarAlertas } from "@/lib/actions/alertas";
 import { escopoPadrao } from "@/lib/domain/indicadores/camadaAcao";
-import { lerPeriodo, PERIODO_LABEL, PERIODOS, tituloPeriodo, type Periodo } from "@/lib/domain/indicadores/desempenho";
+import {
+  lerPeriodo,
+  PERIODO_LABEL,
+  PERIODOS,
+  tituloPeriodo,
+  type Periodo,
+} from "@/lib/domain/indicadores/desempenho";
 import { carregarCamadaDesempenho } from "@/lib/indicadores/desempenho";
 import { lerFiltrosDoPainel } from "@/lib/domain/indicadores/painelDemanda";
 import { carregarPainelDemanda } from "@/lib/indicadores/painelDemanda";
@@ -35,7 +42,13 @@ const DIA_MS = 24 * 60 * 60 * 1000;
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ escopo?: string; fila?: string; periodo?: string; ano?: string; categoria?: string }>;
+  searchParams: Promise<{
+    escopo?: string;
+    fila?: string;
+    periodo?: string;
+    ano?: string;
+    categoria?: string;
+  }>;
 }) {
   const user = await requireAuth();
   const params = await searchParams;
@@ -81,19 +94,37 @@ export default async function DashboardPage({
 
       <section aria-labelledby="camada-demanda" className="space-y-4">
         <div>
-          <h2 id="camada-demanda" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          <h2
+            id="camada-demanda"
+            className="text-sm font-semibold uppercase tracking-wide text-muted-foreground"
+          >
             Demanda da Divisão{demanda.estado === "ok" ? ` · ${demanda.painel.ano}` : ""}
           </h2>
           <p className="text-xs text-muted-foreground">
-            Onde a Divisão perde tempo: processos que chegam e voltam. Independe do período e do escopo abaixo.
+            Onde a Divisão perde tempo: processos que chegam e voltam. Independe do período e do
+            escopo abaixo.
           </p>
         </div>
-        <PainelDemandaDivisao resultado={demanda} fornecedores={fornecedores} />
+        <PainelDemandaDivisao
+          resultado={demanda}
+          fornecedores={fornecedores}
+          pendencias={
+            <PendenciasDaFila
+              respostasAConfirmar={acao.emails.respostasAConfirmar}
+              enviosSemProcesso={acao.emails.enviosSemProcesso}
+              semResponsavel={resumo.semResponsavel}
+              vencidas={resumo.vencidas}
+            />
+          }
+        />
       </section>
 
       <section aria-labelledby="camada-acao" className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="camada-acao" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          <h2
+            id="camada-acao"
+            className="text-sm font-semibold uppercase tracking-wide text-muted-foreground"
+          >
             Agora
           </h2>
           <nav aria-label="Escopo" className="inline-flex rounded-lg border p-0.5 text-xs">
@@ -104,7 +135,9 @@ export default async function DashboardPage({
                 aria-current={escopo === e ? "page" : undefined}
                 className={cn(
                   "rounded-md px-3 py-1 font-medium",
-                  escopo === e ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                  escopo === e
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 {e === "meus" ? "Meus" : "Todos"}
@@ -143,23 +176,6 @@ export default async function DashboardPage({
           />
         </div>
 
-        {(acao.emails.respostasAConfirmar > 0 || acao.emails.enviosSemProcesso > 0) && (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
-            {acao.emails.respostasAConfirmar > 0 && (
-              <Link href="/cotacoes?aba=confirmar" className="font-medium hover:underline">
-                {acao.emails.respostasAConfirmar.toLocaleString("pt-BR")} mensagem(ns) de fornecedor a confirmar
-                (todo o período) →
-              </Link>
-            )}
-            {acao.emails.enviosSemProcesso > 0 && (
-              <span>
-                {acao.emails.enviosSemProcesso.toLocaleString("pt-BR")} envio(s) de cotação sem processo
-                importado — importe a planilha para ligá-los.
-              </span>
-            )}
-          </div>
-        )}
-
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="min-w-0 lg:col-span-2">
             <WorkQueueCard
@@ -191,7 +207,9 @@ export default async function DashboardPage({
                       >
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{c.fornecedor}</p>
-                          <p className="font-mono text-xs text-muted-foreground">{c.processoNumero}</p>
+                          <p className="font-mono text-xs text-muted-foreground">
+                            {c.processoNumero}
+                          </p>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-0.5">
                           <span
@@ -214,7 +232,10 @@ export default async function DashboardPage({
                   })
                 )}
                 {acao.cotacoesPendentes.length > 5 && (
-                  <Link href="/cotacoes" className="block pt-1 text-center text-xs font-medium text-primary hover:underline">
+                  <Link
+                    href="/cotacoes"
+                    className="block pt-1 text-center text-xs font-medium text-primary hover:underline"
+                  >
                     Ver todas ({acao.cotacoesPendentes.length})
                   </Link>
                 )}
@@ -239,7 +260,11 @@ export default async function DashboardPage({
                         <p className="text-sm font-medium tabular-nums">{p.numero}</p>
                         <p className="truncate text-xs text-muted-foreground">{p.objeto}</p>
                       </Link>
-                      <AtribuirResponsavelSelect processoId={p.id} numero={p.numero} usuarios={usuarios} />
+                      <AtribuirResponsavelSelect
+                        processoId={p.id}
+                        numero={p.numero}
+                        usuarios={usuarios}
+                      />
                     </div>
                   ))}
                   {acao.semResponsavel.length > 8 && (
@@ -254,39 +279,53 @@ export default async function DashboardPage({
         </div>
       </section>
 
-      <section aria-labelledby="camada-desempenho" className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 id="camada-desempenho" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Desempenho · {tituloPeriodo(periodo, agora)}
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              {desempenho.dadosTempoDesde
-                ? `Tempos calculados com dados confiáveis desde ${desempenho.dadosTempoDesde.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`
-                : "Ainda não há processo com data de abertura confirmada — os tempos aparecem a partir das próximas importações."}
-            </p>
+      <details
+        open={Boolean(params.periodo)}
+        className="group rounded-xl border bg-card print:hidden"
+      >
+        <summary className="cursor-pointer select-none px-4 py-3">
+          <h2
+            id="camada-desempenho"
+            className="inline text-sm font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            Desempenho · {tituloPeriodo(periodo, agora)}
+          </h2>
+          <span className="ml-2 text-xs text-muted-foreground">
+            tempos e respostas da pesquisa de preços (clique para abrir)
+          </span>
+        </summary>
+        <div className="space-y-4 border-t p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs text-muted-foreground">
+                {desempenho.dadosTempoDesde
+                  ? `Tempos calculados com dados confiáveis desde ${desempenho.dadosTempoDesde.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`
+                  : "Ainda não há processo com data de abertura confirmada — os tempos aparecem a partir das próximas importações."}
+              </p>
+            </div>
+            <nav aria-label="Período" className="inline-flex rounded-lg border p-0.5 text-xs">
+              {PERIODOS.map((p) => (
+                <Link
+                  key={p}
+                  href={href({ periodo: p })}
+                  aria-current={periodo === p ? "page" : undefined}
+                  className={cn(
+                    "rounded-md px-3 py-1 font-medium",
+                    periodo === p
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {PERIODO_LABEL[p]}
+                </Link>
+              ))}
+            </nav>
           </div>
-          <nav aria-label="Período" className="inline-flex rounded-lg border p-0.5 text-xs">
-            {PERIODOS.map((p) => (
-              <Link
-                key={p}
-                href={href({ periodo: p })}
-                aria-current={periodo === p ? "page" : undefined}
-                className={cn(
-                  "rounded-md px-3 py-1 font-medium",
-                  periodo === p ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {PERIODO_LABEL[p]}
-              </Link>
-            ))}
-          </nav>
+
+          <IndicadoresDesempenho dados={desempenho} />
+          <RespostaPorProcesso processos={desempenho.porProcesso} />
         </div>
-
-        <IndicadoresDesempenho dados={desempenho} />
-        <RespostaPorProcesso processos={desempenho.porProcesso} />
-      </section>
-
+      </details>
     </div>
   );
 }

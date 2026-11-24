@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcularDemanda, chaveDoProcesso, lerRemessas, type Remessa } from "../demanda";
+import { chaveDoProcesso, lerRemessas } from "../demanda";
 
 const CAB = ["ID Remessa", "Data", "Horário", "Mês", "Processo Encaminhado", "ID do E-mail"];
 const linha = (data: string, proc: string, email = "", id = "1") => [id, data, "10:00", "x", proc, email];
@@ -87,87 +87,6 @@ describe("lerRemessas", () => {
   });
 });
 
-const R = (data: string, chave: string, rotulo = chave): Remessa => {
-  const [a, m] = data.split("-");
-  return { data, ano: Number(a), mes: Number(m), chave, rotulo, idEmail: null };
-};
-
-describe("calcularDemanda", () => {
-  const remessas = [
-    R("2026-01-05", "1/2026"),
-    R("2026-01-06", "1/2026"),
-    R("2026-01-06", "1/2026"), // mesmo dia: conta como outra remessa (decisão do usuário)
-    R("2026-01-20", "2/2026"),
-    R("2026-03-02", "3/2025"),
-    R("2025-12-30", "9/2025"), // outro ano: fora
-  ];
-
-  it("conta remessas, distintos e média; 3 passagens por processo não são recorrência", () => {
-    const d = calcularDemanda(remessas, 2026);
-    expect(d).toMatchObject({
-      remessas: 5,
-      processosDistintos: 3,
-      processosQueVoltaram: 0, // 1/2026 passou 3 vezes: é o fluxo normal, não devolução
-      recorrencias: 0,
-      mediaRemessas: 1.7,
-    });
-  });
-
-  it("recorrência = remessas além das 3 obrigatórias, por processo, sem valor negativo", () => {
-    const d = calcularDemanda(
-      [
-        ...Array.from({ length: 5 }, (_, i) => R(`2026-02-0${i + 1}`, "10/2026")), // 5 → 2 devoluções
-        ...Array.from({ length: 4 }, (_, i) => R(`2026-03-0${i + 1}`, "11/2026")), // 4 → 1 devolução
-        R("2026-04-01", "12/2026"), // 1 → 0 (ainda não fechou as 3 passagens)
-        R("2026-04-02", "12/2026"), // 2 → 0
-      ],
-      2026,
-    );
-    expect(d.recorrencias).toBe(3);
-    expect(d.processosQueVoltaram).toBe(2);
-    expect(Object.fromEntries(d.processos.map((p) => [p.chave, p.recorrencias]))).toEqual({
-      "10/2026": 2,
-      "11/2026": 1,
-      "12/2026": 0,
-    });
-  });
-
-  it("filtra pelo ano da DATA da remessa, não pelo ano do número do processo", () => {
-    const d = calcularDemanda(remessas, 2026);
-    expect(d.processos.map((p) => p.chave)).toContain("3/2025");
-    expect(d.processos.map((p) => p.chave)).not.toContain("9/2025");
-  });
-
-  it("por mês: vai de janeiro ao último mês com remessa e preenche os vazios com zero", () => {
-    const d = calcularDemanda(remessas, 2026);
-    expect(d.porMes).toEqual([
-      { mes: 1, remessas: 4, distintos: 2 },
-      { mes: 2, remessas: 0, distintos: 0 },
-      { mes: 3, remessas: 1, distintos: 1 },
-    ]);
-  });
-
-  it("lista: mais recorrentes primeiro, com primeira e última data, e empate pela chave", () => {
-    const d = calcularDemanda(remessas, 2026);
-    expect(d.processos.map((p) => [p.chave, p.remessas])).toEqual([
-      ["1/2026", 3],
-      ["2/2026", 1],
-      ["3/2025", 1],
-    ]);
-    expect(d.processos[0]).toMatchObject({ primeira: "2026-01-05", ultima: "2026-01-06" });
-    expect(d.ultimaRemessa).toBe("2026-03-02");
-  });
-
-  it("o rótulo exibido é o da remessa mais recente", () => {
-    const d = calcularDemanda([R("2026-01-05", "1/2026", "Antigo"), R("2026-02-05", "1/2026", "Novo")], 2026);
-    expect(d.processos[0]!.rotulo).toBe("Novo");
-  });
-
-  it("ano sem remessa: zeros e sem divisão por zero", () => {
-    const d = calcularDemanda(remessas, 2030);
-    expect(d).toMatchObject({ remessas: 0, processosDistintos: 0, mediaRemessas: 0, porMes: [], ultimaRemessa: null });
-  });
-});
 
 describe("lerRemessas — tabela sem cabeçalho abaixo da principal (planilha de 2026-11-23)", () => {
   // [ID Remessa, "dd/mm/aaaa hh:mm", Mês, Processo, ID do E-mail]
