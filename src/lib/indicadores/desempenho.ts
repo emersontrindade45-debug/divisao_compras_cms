@@ -173,7 +173,7 @@ async function carregarConsultas(
 }
 
 /** Consultas por e-mail mais as respostas classificadas pela IA sem fornecedor ligado (M30.d). */
-async function carregarConsultasComSemFornecedor(
+export async function carregarConsultasComSemFornecedor(
   desde: Date,
   filtroProcesso: { responsavelId: string } | null,
 ): Promise<ConsultaDesempenhoInput[]> {

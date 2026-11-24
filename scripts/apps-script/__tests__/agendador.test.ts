@@ -9,13 +9,15 @@ function trecho(nome: string): string {
   if (!m) throw new Error(`${nome} não encontrada no script`);
   return m;
 }
-const { pedido, resumo } = new Function(
+const { pedido, resumo, resumoExportacao } = new Function(
   `var AGENDADOR_CAMINHO = "/api/jobs/verificar-respostas";
    var AGENDADOR_CAMPOS_LOG = ["enviosNovos", "consultasNovas", "respostasClassificadas", "respostasNaFila", "emailsInvalidos"];
-   ${trecho("agendadorPedido_")}${trecho("agendadorResumo_")}
-   return { pedido: agendadorPedido_, resumo: agendadorResumo_ };`,
+   var AGENDADOR_CAMPOS_EXPORTACAO = ["envios", "consultas", "linhasConsultas"];
+   ${trecho("agendadorPedido_")}${trecho("agendadorResumo_")}${trecho("agendadorResumoExportacao_")}
+   return { pedido: agendadorPedido_, resumo: agendadorResumo_, resumoExportacao: agendadorResumoExportacao_ };`,
 )() as {
-  pedido: (u: unknown, s: unknown) => null | { url: string; opcoes: Record<string, unknown> & { headers: Record<string, string> } };
+  resumoExportacao: (j: unknown) => string;
+  pedido: (u: unknown, s: unknown, c?: string) => null | { url: string; opcoes: Record<string, unknown> & { headers: Record<string, string> } };
   resumo: (j: unknown) => string;
 };
 
@@ -77,5 +79,46 @@ describe("agendadorResumo_", () => {
     expect(resumo(null)).toBe("sem resposta em JSON");
     expect(resumo("texto")).toBe("sem resposta em JSON");
     expect(resumo({ ok: true })).toBe("sem resumo");
+  });
+});
+
+describe("agendadorPedido_ com caminho próprio (exportação)", () => {
+  it("usa o caminho informado, mantendo as mesmas travas de segurança", () => {
+    const p = pedido("https://x.vercel.app", SEGREDO, "/api/jobs/exportar-levantamento")!;
+    expect(p.url).toBe("https://x.vercel.app/api/jobs/exportar-levantamento");
+    expect(p.opcoes.headers).toEqual({ Authorization: `Bearer ${SEGREDO}` });
+    expect(p.opcoes.followRedirects).toBe(false);
+  });
+
+  it("o caminho NÃO afrouxa a validação do endereço nem do segredo", () => {
+    expect(pedido("http://x.vercel.app", SEGREDO, "/api/jobs/exportar-levantamento")).toBeNull();
+    expect(pedido("https://x.vercel.app", "curto", "/api/jobs/exportar-levantamento")).toBeNull();
+  });
+});
+
+describe("agendadorResumoExportacao_", () => {
+  it("imprime só contagens conhecidas e o veredito da releitura", () => {
+    expect(resumoExportacao({ ok: true, resumo: { envios: 275, consultas: 17804, linhasConsultas: 1100, releituraOk: true }, divergentes: [] })).toBe(
+      "envios 275 | consultas 17804 | linhasConsultas 1100 | releitura OK | conferências divergentes 0",
+    );
+  });
+
+  it("releitura que diverge é dita como DIVERGE e conta as conferências divergentes", () => {
+    expect(resumoExportacao({ ok: false, resumo: { envios: 1, releituraOk: false }, divergentes: ["a", "b"] })).toBe(
+      "envios 1 | releitura DIVERGE | conferências divergentes 2",
+    );
+  });
+
+  it("texto do servidor NUNCA é impresso", () => {
+    const s = resumoExportacao({ resumo: { envios: "SEGREDO", consultas: 3, releituraOk: true }, divergentes: ["Nome da conferência com e-mail a@b.com"] });
+    expect(s).toBe("consultas 3 | releitura OK | conferências divergentes 1");
+    expect(s).not.toMatch(/SEGREDO|a@b\.com|Nome/);
+    expect(resumoExportacao({ erro: "TEXTO LIVRE" })).toBe("falha informada pelo sistema");
+  });
+
+  it("casos sem resumo", () => {
+    expect(resumoExportacao({ ok: true, pulou: "recente" })).toMatch(/pulou/);
+    expect(resumoExportacao(null)).toBe("sem resposta em JSON");
+    expect(resumoExportacao({})).toBe("sem resumo");
   });
 });
