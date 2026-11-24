@@ -4,6 +4,16 @@ import { FiltrosPainelDemanda } from "@/components/dashboard/FiltrosPainelDemand
 import { dataBr, rotuloDaCategoria } from "@/lib/domain/indicadores/formatosPainel";
 import type { CategoriaProcesso } from "@/lib/domain/indicadores/painelDemanda";
 import type { ResultadoPainelDemanda } from "@/lib/indicadores/painelDemanda";
+import type { ResultadoFornecedores } from "@/lib/indicadores/fornecedores";
+import { resumirFornecedores } from "@/lib/domain/indicadores/fornecedoresLevantamento";
+import type { FornecedoresNoPainel } from "@/components/dashboard/FornecedoresDemanda";
+
+/** Traduz o que foi lido da planilha do Levantamento para o ano do painel. */
+export function fornecedoresDoAno(f: ResultadoFornecedores, ano: number): FornecedoresNoPainel {
+  if (f.estado !== "ok") return f;
+  const resumo = resumirFornecedores(f.meses, ano);
+  return resumo ? { estado: "ok", resumo, inconsistentes: f.inconsistentes } : { estado: "sem_dados", ano };
+}
 
 const numero = (n: number) => n.toLocaleString("pt-BR");
 
@@ -12,7 +22,13 @@ const numero = (n: number) => n.toLocaleString("pt-BR");
  * (`carregarPainelDemanda`), então cada falha tem a sua frase — "não configurada", "indisponível" (com o motivo) —
  * e nenhuma mostra zero como se fosse fato. Quando a leitura cai na reserva (sem comparativo), a tela avisa.
  */
-export function PainelDemandaDivisao({ resultado }: { resultado: ResultadoPainelDemanda }) {
+export function PainelDemandaDivisao({
+  resultado,
+  fornecedores = { estado: "nao_configurada" },
+}: {
+  resultado: ResultadoPainelDemanda;
+  fornecedores?: ResultadoFornecedores;
+}) {
   if (resultado.estado === "nao_configurada") {
     return (
       <p role="status" className="text-sm text-muted-foreground">
@@ -64,7 +80,11 @@ export function PainelDemandaDivisao({ resultado }: { resultado: ResultadoPainel
           {categoria ? ` para ${rotuloDaCategoria(categoria)}` : ""}.
         </p>
       ) : (
-        <PainelDemandaInterativo painel={painel} noSistema={noSistema} />
+        <PainelDemandaInterativo
+          painel={painel}
+          noSistema={noSistema}
+          fornecedores={fornecedoresDoAno(fornecedores, painel.ano)}
+        />
       )}
 
       <p className="text-xs text-muted-foreground">

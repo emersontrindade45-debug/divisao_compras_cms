@@ -16,6 +16,7 @@ import { lerPeriodo, PERIODO_LABEL, PERIODOS, tituloPeriodo, type Periodo } from
 import { carregarCamadaDesempenho } from "@/lib/indicadores/desempenho";
 import { lerFiltrosDoPainel } from "@/lib/domain/indicadores/painelDemanda";
 import { carregarPainelDemanda } from "@/lib/indicadores/painelDemanda";
+import { carregarFornecedores } from "@/lib/indicadores/fornecedores";
 import {
   carregarCamadaAcao,
   contarProcessosDoUsuario,
@@ -50,12 +51,13 @@ export default async function DashboardPage({
   // Filtros do painel de demanda: ficam na URL; valor fora do esperado é ignorado.
   const { ano: anoPedido, categoria: categoriaPedida } = lerFiltrosDoPainel(params);
 
-  const [acao, desempenho, usuarios, alertas, demanda] = await Promise.all([
+  const [acao, desempenho, usuarios, alertas, demanda, fornecedores] = await Promise.all([
     carregarCamadaAcao(escopo, user.id, agora),
     carregarCamadaDesempenho(periodo, escopo, user.id, agora),
     listarUsuariosAtribuiveis(),
     buscarAlertas(),
     carregarPainelDemanda({ ano: anoPedido, categoria: categoriaPedida }),
+    carregarFornecedores(),
   ]);
 
   const { resumo } = acao;
@@ -86,7 +88,7 @@ export default async function DashboardPage({
             Onde a Divisão perde tempo: processos que chegam e voltam. Independe do período e do escopo abaixo.
           </p>
         </div>
-        <PainelDemandaDivisao resultado={demanda} />
+        <PainelDemandaDivisao resultado={demanda} fornecedores={fornecedores} />
       </section>
 
       <section aria-labelledby="camada-acao" className="space-y-4">

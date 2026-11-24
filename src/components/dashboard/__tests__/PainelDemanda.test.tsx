@@ -336,4 +336,44 @@ describe("FiltrosPainelDemanda", () => {
       expect(screen.getByRole("button", { name: /imprimir/i })).toBeInTheDocument();
     });
   });
+  describe("fornecedores (etapa 4)", () => {
+    const meses = [
+      { mes: "2026-01", emails: 10, destinatarios: 100, orcamento: 5, recusa: 6, duvida: 4, outra: 5, semResposta: 70, enderecoErrado: 8, devolvidoOutro: 2 },
+      { mes: "2026-02", emails: 10, destinatarios: 100, orcamento: 5, recusa: 6, duvida: 4, outra: 5, semResposta: 70, enderecoErrado: 8, devolvidoOutro: 2 },
+    ];
+    const renderiza = (f: Parameters<typeof PainelDemandaDivisao>[0]["fornecedores"], ano = 2026) =>
+      render(<PainelDemandaDivisao resultado={ok({ ano })} fornecedores={f} />);
+
+    it("5º indicador: recusa + dúvida sobre os contatos, com orçamento à parte e selo", () => {
+      renderiza({ estado: "ok", meses, inconsistentes: [] });
+      const kpi = screen.getByLabelText("Retorno útil dos fornecedores");
+      expect(within(kpi).getByText("10,0%")).toBeInTheDocument(); // (12+8)/200
+      expect(within(kpi).getByText("+ orçamento 5,0%")).toBeInTheDocument();
+      expect(within(kpi).getByText("orçamento em validação")).toBeInTheDocument();
+    });
+
+    it("sem planilha configurada ou com falha: nunca mostra número", () => {
+      renderiza({ estado: "nao_configurada" });
+      const kpi = screen.getByLabelText("Retorno útil dos fornecedores");
+      expect(within(kpi).getByText("—")).toBeInTheDocument();
+      expect(within(kpi).getByText(/não configurada/i)).toBeInTheDocument();
+    });
+
+    it("falha de leitura mostra o motivo na seção", () => {
+      renderiza({ estado: "indisponivel", motivo: "Sem acesso." });
+      expect(screen.getByText(/Não foi possível carregar os fornecedores agora. Sem acesso./)).toBeInTheDocument();
+      expect(within(screen.getByLabelText("Retorno útil dos fornecedores")).getByText("—")).toBeInTheDocument();
+    });
+
+    it("ano sem dados no Levantamento diz isso em vez de zero", () => {
+      renderiza({ estado: "ok", meses, inconsistentes: [] }, 2025);
+      expect(within(screen.getByLabelText("Retorno útil dos fornecedores")).getByText(/não tem dados de 2025/)).toBeInTheDocument();
+    });
+
+    it("avisa o mês cujas classes não fecham e não vai para a impressão", () => {
+      renderiza({ estado: "ok", meses, inconsistentes: ["2026-02"] });
+      expect(screen.getByText(/2026-02 as classes não somam/)).toBeInTheDocument();
+      expect(screen.getByText(/Fornecedores e cotações por e-mail/).closest("details")!.className).toContain("print:hidden");
+    });
+  });
 });

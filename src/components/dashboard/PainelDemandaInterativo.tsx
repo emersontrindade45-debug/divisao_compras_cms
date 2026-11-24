@@ -6,6 +6,10 @@ import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GraficosPainelDemanda } from "@/components/dashboard/GraficosPainelDemanda";
+import {
+  FornecedoresDemanda,
+  type FornecedoresNoPainel,
+} from "@/components/dashboard/FornecedoresDemanda";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -116,9 +120,11 @@ const LISTA_KPI: Record<KpiClicavel, { titulo: (p: PainelDemanda) => string; des
 export function PainelDemandaInterativo({
   painel,
   noSistema,
+  fornecedores,
 }: {
   painel: PainelDemanda;
   noSistema: Record<string, ProcessoNoSistema>;
+  fornecedores: FornecedoresNoPainel;
 }) {
   const [visao, setVisao] = useState<Visao | null>(null);
   const { atual, anterior } = painel;
@@ -184,7 +190,7 @@ export function PainelDemandaInterativo({
 
   return (
     <div className="space-y-6">
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Indicadores de demanda">
+      <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-label="Indicadores de demanda">
         {kpis.map((k) => (
           <li key={k.id}>
             <button
@@ -210,6 +216,9 @@ export function PainelDemandaInterativo({
             </button>
           </li>
         ))}
+        <li>
+          <RetornoUtil fornecedores={fornecedores} />
+        </li>
       </ul>
 
       <section aria-labelledby="o-que-mudou" className="space-y-2">
@@ -297,6 +306,8 @@ export function PainelDemandaInterativo({
         onAbrir={(chave) => setVisao({ tipo: "processo", chave, voltarPara: null })}
       />
 
+      <FornecedoresDemanda dados={fornecedores} />
+
       <Sheet open={visao !== null} onOpenChange={(aberto) => !aberto && setVisao(null)}>
         <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
           {visao?.tipo === "kpi" && (
@@ -319,6 +330,44 @@ export function PainelDemandaInterativo({
         </SheetContent>
       </Sheet>
     </div>
+  );
+}
+
+/** 5º indicador: retorno útil dos fornecedores (recusa + dúvida), com o orçamento à parte e sem comparativo. */
+function RetornoUtil({ fornecedores }: { fornecedores: FornecedoresNoPainel }) {
+  let valor = "—";
+  let nota = "";
+  let extra: string | null = null;
+  if (fornecedores.estado === "ok") {
+    const r = fornecedores.resumo;
+    valor = r.retornoFirme === null ? "—" : pct(r.retornoFirme);
+    extra = r.retornoOrcamento === null ? null : `+ orçamento ${pct(r.retornoOrcamento)}`;
+    nota = `recusa + dúvida em ${r.destinatarios.toLocaleString("pt-BR")} contatos; orçamento separado`;
+  } else if (fornecedores.estado === "sem_dados") {
+    nota = `O Levantamento não tem dados de ${fornecedores.ano}.`;
+  } else if (fornecedores.estado === "indisponivel") {
+    nota = "Não foi possível ler o Levantamento agora.";
+  } else {
+    nota = "Planilha do Levantamento não configurada.";
+  }
+  return (
+    <Card className="h-full" aria-label="Retorno útil dos fornecedores">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          Retorno útil dos fornecedores
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1">
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <span className="text-2xl font-semibold tabular-nums">{valor}</span>
+          {extra && <span className="text-xs text-muted-foreground">{extra}</span>}
+        </div>
+        <p className="text-xs text-muted-foreground">{nota}</p>
+        {fornecedores.estado === "ok" && (
+          <Badge className="bg-warning/15 text-warning-strong">orçamento em validação</Badge>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
