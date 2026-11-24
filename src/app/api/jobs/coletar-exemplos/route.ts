@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   if (!r.ok) return NextResponse.json({ erro: r.erro }, { status: 502 });
 
   // Rodada sem nada novo não enche a auditoria (24 linhas por dia sem informação).
-  if (r.resultado.pedidos > 0 || r.resultado.atualizados > 0) {
+  if (r.resultado.pedidos > 0 || r.resultado.atualizados > 0 || r.resultado.removidos > 0) {
     await db.auditLog.create({
       data: { userId: usuario.id, acao: "coletar_exemplos_ia", detalhes: { origem: "automatica", ...r.resultado } },
     });

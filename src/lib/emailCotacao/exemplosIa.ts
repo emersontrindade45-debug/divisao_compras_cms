@@ -6,6 +6,7 @@ import {
   classeDaSituacao,
   ehClasseExemplo,
   escolherExemplos,
+  limparTrecho,
   parecerAnonimo,
   type ClasseExemplo,
   type ExemploGuardado,
@@ -43,8 +44,11 @@ export async function carregarExemplos(): Promise<ExemploGuardado[]> {
       orderBy: { createdAt: "desc" },
       take: MAX_EXEMPLOS_LIDOS,
     });
+    // Defesa em profundidade: mesmo o que já está guardado passa pelo filtro ATUAL antes de ir ao modelo.
     return linhas.flatMap((l) =>
-      ehClasseExemplo(l.classeCorreta) ? [{ id: l.gmailMensagemId, classe: l.classeCorreta, trecho: l.trecho }] : [],
+      ehClasseExemplo(l.classeCorreta) && parecerAnonimo(l.trecho).ok
+        ? [{ id: l.gmailMensagemId, classe: l.classeCorreta, trecho: l.trecho }]
+        : [],
     );
   } catch {
     // Tabela ainda não criada ou banco indisponível: a IA lê sem exemplo, como sempre leu.
@@ -126,6 +130,8 @@ export interface ResultadoColeta {
   semTexto: number;
   /** Ainda sem exemplo depois desta rodada. */
   restantes: number;
+  /** Exemplos já guardados que NÃO passam no filtro atual e foram apagados (serão coletados de novo, limpos). */
+  removidos: number;
 }
 
 export type RespostaColeta = { ok: true; resultado: ResultadoColeta } | { ok: false; erro: string };
@@ -136,8 +142,18 @@ export async function coletarExemplos(): Promise<RespostaColeta> {
   if (!url || !segredo) return { ok: false, erro: "A leitura de e-mails ainda não foi configurada neste ambiente." };
 
   const decisoes = await decisoesHumanas();
-  const existentes = await db.exemploClassificacaoIa.findMany({ select: { gmailMensagemId: true, classeCorreta: true } });
-  const classeGuardada = new Map(existentes.map((e) => [e.gmailMensagemId, e.classeCorreta]));
+  const existentes = await db.exemploClassificacaoIa.findMany({
+    select: { id: true, gmailMensagemId: true, classeCorreta: true, trecho: true },
+  });
+  // Autolimpeza: o que foi guardado com um filtro mais fraco e hoje não passa é apagado e coletado de novo.
+  const inseguros = existentes.filter((e) => !parecerAnonimo(e.trecho).ok);
+  let removidos = 0;
+  if (inseguros.length > 0) {
+    const r = await db.exemploClassificacaoIa.deleteMany({ where: { id: { in: inseguros.map((e) => e.id) } } });
+    removidos = r.count;
+  }
+  const idsInseguros = new Set(inseguros.map((e) => e.gmailMensagemId));
+  const classeGuardada = new Map(existentes.filter((e) => !idsInseguros.has(e.gmailMensagemId)).map((e) => [e.gmailMensagemId, e.classeCorreta]));
 
   // Decisão corrigida depois da coleta: só a classe muda, o trecho continua valendo.
   let atualizados = 0;
@@ -163,6 +179,7 @@ export async function coletarExemplos(): Promise<RespostaColeta> {
     rejeitados: {},
     semTexto: 0,
     restantes: faltando.length,
+    removidos,
   };
   if (pedir.length === 0) return { ok: true, resultado: base };
 
@@ -194,7 +211,9 @@ export async function coletarExemplos(): Promise<RespostaColeta> {
     const decisao = pedidos.get(t.id);
     if (!decisao || devolvidos.has(t.id)) continue; // id que não foi pedido ou repetido: ignora
     devolvidos.add(t.id);
-    const avaliacao = parecerAnonimo(t.trecho);
+    // Corta a assinatura (nome, empresa, telefone) e SÓ ENTÃO avalia: guarda o que o fornecedor escreveu sobre o pedido.
+    const limpo = limparTrecho(t.trecho);
+    const avaliacao = parecerAnonimo(limpo);
     if (!avaliacao.ok) {
       rejeitados[avaliacao.motivo] = (rejeitados[avaliacao.motivo] ?? 0) + 1;
       continue;
@@ -203,7 +222,7 @@ export async function coletarExemplos(): Promise<RespostaColeta> {
       gmailMensagemId: decisao.gmailMensagemId,
       classeCorreta: decisao.classe,
       origem: decisao.origem,
-      trecho: t.trecho.trim(),
+      trecho: limpo,
       anexosPdf: t.anexosPdf,
       anexosOutros: t.anexosOutros,
     });

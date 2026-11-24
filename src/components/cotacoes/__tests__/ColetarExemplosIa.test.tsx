@@ -9,7 +9,7 @@ const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-const R = { decisoes: 40, jaTinham: 10, pedidos: 30, gravados: 27, atualizados: 1, rejeitados: { email: 2 }, semTexto: 1, restantes: 3 };
+const R = { decisoes: 40, jaTinham: 10, pedidos: 30, gravados: 27, atualizados: 1, rejeitados: { email: 2 }, semTexto: 1, restantes: 3, removidos: 0 };
 
 describe("ColetarExemplosIa", () => {
   beforeEach(() => {

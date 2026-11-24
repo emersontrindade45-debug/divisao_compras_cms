@@ -7,7 +7,7 @@ vi.mock("@/lib/emailCotacao/exemplosIa", () => ({ coletarExemplos: mocks.coletar
 import { GET } from "../route";
 
 const SEGREDO = "s3gredo-longo-de-teste";
-const RES = { decisoes: 5, jaTinham: 3, pedidos: 2, gravados: 2, atualizados: 0, rejeitados: {}, semTexto: 0, restantes: 0 };
+const RES = { decisoes: 5, jaTinham: 3, pedidos: 2, gravados: 2, atualizados: 0, rejeitados: {}, semTexto: 0, restantes: 0, removidos: 0 };
 const chamar = (auth: string | null = `Bearer ${SEGREDO}`) =>
   GET(new Request("https://x.test/api/jobs/coletar-exemplos", { headers: auth ? { authorization: auth } : {} }));
 

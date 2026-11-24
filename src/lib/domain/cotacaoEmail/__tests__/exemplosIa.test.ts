@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classeDaSituacao,
   escolherExemplos,
+  limparTrecho,
   MAX_EXEMPLOS_POR_ITEM,
   MAX_TRECHO_EXEMPLO,
   palavrasDoTexto,
@@ -28,6 +29,9 @@ describe("parecerAnonimo", () => {
     ["valor em reais", "O valor total fica R$ 1.250,00 com frete", "valor"],
     ["número longo (sem pontuação)", "Protocolo 123456789 registrado aqui", "numero_longo"],
     ["CNPJ sem pontuação", "Documento 12345678901234 informado aqui", "documento"],
+    ["telefone sem DDD com hífen (caso real de 2026-11-24)", "Contato direto pelo 97412-3921 no comercial", "telefone_local"],
+    ["telefone fixo sem DDD com espaço", "Ligue para 3232 1234 e peça o setor", "telefone_local"],
+    ["CEP", "Entrega no endereço de CEP 11010-000 em Santos", "cep"],
   ])("recusa %s e nomeia a regra, sem devolver o texto", (_n, texto, regra) => {
     const r = parecerAnonimo(texto);
     expect(r).toEqual({ ok: false, motivo: regra });
@@ -106,4 +110,39 @@ describe("escolherExemplos", () => {
 describe("classeDaSituacao", () => {
   it.each(["orcamento", "recusa", "duvida"])("%s vira exemplo", (s) => expect(classeDaSituacao(s)).toBe(s));
   it.each(["a_confirmar", "sem_resposta", "email_invalido", "outra"])("%s NÃO vira exemplo", (s) => expect(classeDaSituacao(s)).toBeNull());
+});
+
+describe("limparTrecho", () => {
+  it("corta na despedida: sobra só o que o fornecedor escreveu sobre o pedido (caso real)", () => {
+    const sujo = "Esta linha de produto não faz parte de nosso escopo! Obrigado pelo convite! Atte Depto Comercial Telefone [tel] / 97412-3921";
+    const limpo = limparTrecho(sujo);
+    expect(limpo).toBe("Esta linha de produto não faz parte de nosso escopo! Obrigado pelo convite!");
+    expect(parecerAnonimo(limpo)).toEqual({ ok: true });
+    expect(parecerAnonimo(sujo).ok).toBe(false); // o original já NÃO passa mais no filtro
+  });
+
+  it.each([
+    ["Atenciosamente, João", "Segue em anexo o orçamento solicitado. Atenciosamente, João da Silva", "Segue em anexo o orçamento solicitado."],
+    ["Cordialmente", "Não temos interesse no item. Cordialmente Maria Souza Ltda", "Não temos interesse no item."],
+    ["rótulo de telefone", "Pode detalhar a quantidade? Tel: [tel] ramal 12", "Pode detalhar a quantidade?"],
+    ["whatsapp", "Segue proposta em anexo. WhatsApp 13 9 8888", "Segue proposta em anexo."],
+    ["maiúsculas", "Não fornecemos esse item. ATT. Comercial", "Não fornecemos esse item."],
+  ])("corta em %s", (_n, entrada, esperado) => {
+    expect(limparTrecho(entrada)).toBe(esperado);
+  });
+
+  it("sem assinatura devolve o texto igual (espaços colapsados)", () => {
+    expect(limparTrecho("Pode  detalhar\n a quantidade do item 3?")).toBe("Pode detalhar a quantidade do item 3?");
+  });
+
+  it("palavra que só CONTÉM o rótulo não corta (att dentro de outra palavra)", () => {
+    expect(limparTrecho("Precisamos do attestado e do tel de entrega? Sim")).toBe("Precisamos do attestado e do");
+    expect(limparTrecho("Isso é a matéria da celulose atual")).toBe("Isso é a matéria da celulose atual");
+  });
+
+  it("despedida logo no começo: sobra vazio, e o filtro recusa por curto demais (nada é guardado)", () => {
+    const l = limparTrecho("Atenciosamente, equipe comercial");
+    expect(l).toBe("");
+    expect(parecerAnonimo(l)).toEqual({ ok: false, motivo: "curto_demais" });
+  });
 });

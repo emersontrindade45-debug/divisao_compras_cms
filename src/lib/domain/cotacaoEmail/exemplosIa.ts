@@ -44,9 +44,29 @@ const PADROES_PROIBIDOS: Array<[string, RegExp]> = [
   ["link", /(https?:\/\/|www\.)/i],
   ["documento", /\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{3}\.?\d{3}\.?\d{3}-?\d{2}/],
   ["telefone", /\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}/],
+  // Telefone SEM DDD ("97412-3921", "3232 1234"): o anonimizador do script só troca o com DDD.
+  ["telefone_local", /\d{4,5}[-.\s]\d{4}/],
+  ["cep", /\b\d{5}-\d{3}\b/],
   ["valor", /r\$\s*\d/i],
   ["numero_longo", /\d{8,}/],
 ];
+
+/**
+ * Despedida ou rótulo de contato: o que vem DEPOIS é assinatura (nome, cargo, empresa, telefone). O
+ * anonimizador do script só corta a despedida quando ela abre uma linha; aqui o texto já vem numa linha
+ * só, então a regra é por palavra.
+ */
+const INICIO_DE_ASSINATURA = /(^|[\s.!?,;:])(atte|att|atenciosamente|cordialmente|abra[cç]os?|grato|grata|fone\/fax|fone|telefone|tel|cel|celular|whatsapp)\b\.?/i;
+
+/**
+ * Corta o texto no início da assinatura. Sobra só o que o fornecedor escreveu sobre o pedido. Se a
+ * despedida for a primeira coisa do texto, sobra vazio (e `parecerAnonimo` recusa por "curto_demais").
+ */
+export function limparTrecho(trecho: string): string {
+  const t = trecho.replace(/\s+/g, " ").trim();
+  const m = INICIO_DE_ASSINATURA.exec(t);
+  return (m ? t.slice(0, m.index + m[1]!.length) : t).trim();
+}
 
 export type AvaliacaoAnonimato = { ok: true } | { ok: false; motivo: string };
 

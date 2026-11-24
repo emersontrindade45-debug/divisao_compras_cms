@@ -25,10 +25,11 @@ export function ColetarExemplosIa() {
       const d = r.data;
       const rejeitados = Object.values(d.rejeitados).reduce((a, b) => a + b, 0);
       toast.success(
-        d.pedidos === 0 && d.atualizados === 0
+        d.pedidos === 0 && d.atualizados === 0 && d.removidos === 0
           ? `Nada novo: os ${d.jaTinham} caso(s) decidido(s) já são exemplos.`
           : `${d.gravados} exemplo(s) novo(s) guardado(s)` +
               (d.atualizados ? `, ${d.atualizados} corrigido(s)` : "") +
+              (d.removidos ? `, ${d.removidos} apagado(s) por não passarem no filtro de anonimato (serão coletados de novo, limpos)` : "") +
               (rejeitados ? `, ${rejeitados} recusado(s) por ainda parecerem conter dado pessoal` : "") +
               (d.semTexto ? `, ${d.semTexto} sem texto` : "") +
               (d.restantes > 0 ? `. Faltam ${d.restantes}: clique de novo.` : "."),

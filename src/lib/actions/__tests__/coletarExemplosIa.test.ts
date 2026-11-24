@@ -13,7 +13,7 @@ vi.mock("@/lib/emailCotacao/exemplosIa", () => ({ coletarExemplos: mocks.coletar
 
 import { apagarExemplosIa, coletarExemplosIa } from "../coletarExemplosIa";
 
-const RES = { decisoes: 2, jaTinham: 0, pedidos: 2, gravados: 2, atualizados: 0, rejeitados: { email: 1 }, semTexto: 0, restantes: 0 };
+const RES = { decisoes: 2, jaTinham: 0, pedidos: 2, gravados: 2, atualizados: 0, rejeitados: { email: 1 }, semTexto: 0, restantes: 0, removidos: 0 };
 
 describe("coletarExemplosIa (ação)", () => {
   beforeEach(() => {

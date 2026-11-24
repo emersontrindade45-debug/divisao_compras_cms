@@ -112,6 +112,7 @@ describe("coletarExemplos", () => {
     mocks.exemplos.findMany.mockResolvedValue([]);
     mocks.exemplos.createMany.mockImplementation(async (a: { data: unknown[] }) => ({ count: a.data.length }));
     mocks.exemplos.updateMany.mockResolvedValue({ count: 1 });
+    mocks.exemplos.deleteMany.mockResolvedValue({ count: 0 });
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -203,7 +204,7 @@ describe("coletarExemplos", () => {
   });
 
   it("não pede de novo o que já tem exemplo", async () => {
-    mocks.exemplos.findMany.mockResolvedValue([{ gmailMensagemId: "m1", classeCorreta: "recusa" }]);
+    mocks.exemplos.findMany.mockResolvedValue([{ id: "e1", gmailMensagemId: "m1", classeCorreta: "recusa", trecho: "Não trabalhamos com esse item." }]);
     await coletarExemplos();
     const enviado = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
     expect(enviado.ids).toEqual(["m2"]);
@@ -211,8 +212,8 @@ describe("coletarExemplos", () => {
 
   it("tudo já coletado: não chama o Google", async () => {
     mocks.exemplos.findMany.mockResolvedValue([
-      { gmailMensagemId: "m1", classeCorreta: "recusa" },
-      { gmailMensagemId: "m2", classeCorreta: "duvida" },
+      { id: "e1", gmailMensagemId: "m1", classeCorreta: "recusa", trecho: "Não trabalhamos com esse item." },
+      { id: "e2", gmailMensagemId: "m2", classeCorreta: "duvida", trecho: "Pode detalhar a quantidade do item 3?" },
     ]);
     const r = await coletarExemplos();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -230,7 +231,10 @@ describe("coletarExemplos", () => {
   });
 
   it("decisão corrigida depois: atualiza só a classe do exemplo existente, com guarda no WHERE", async () => {
-    mocks.exemplos.findMany.mockResolvedValue([{ gmailMensagemId: "m1", classeCorreta: "orcamento" }, { gmailMensagemId: "m2", classeCorreta: "duvida" }]);
+    mocks.exemplos.findMany.mockResolvedValue([
+      { id: "e1", gmailMensagemId: "m1", classeCorreta: "orcamento", trecho: "Segue orçamento em anexo, obrigado." },
+      { id: "e2", gmailMensagemId: "m2", classeCorreta: "duvida", trecho: "Pode detalhar a quantidade do item 3?" },
+    ]);
     const r = await coletarExemplos();
     expect(mocks.exemplos.updateMany).toHaveBeenCalledTimes(1);
     expect(mocks.exemplos.updateMany).toHaveBeenCalledWith({
@@ -238,6 +242,69 @@ describe("coletarExemplos", () => {
       data: { classeCorreta: "recusa", origem: "manual" },
     });
     expect(r).toMatchObject({ ok: true, resultado: { atualizados: 1 } });
+  });
+
+  it("corta a ASSINATURA antes de guardar: o que vai ao banco é só o que o fornecedor escreveu sobre o pedido", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        trechos: [
+          { id: "m1", trecho: "Esta linha de produto não faz parte de nosso escopo! Obrigado pelo convite! Atte Depto Comercial Telefone [tel] / 97412-3921" },
+          { id: "m2", trecho: "Pode detalhar a quantidade do item 3?" },
+        ],
+      }),
+    });
+    await coletarExemplos();
+    const gravado = (mocks.exemplos.createMany.mock.calls[0]![0] as { data: Array<{ gmailMensagemId: string; trecho: string }> }).data;
+    expect(gravado.find((g) => g.gmailMensagemId === "m1")!.trecho).toBe("Esta linha de produto não faz parte de nosso escopo! Obrigado pelo convite!");
+    expect(JSON.stringify(gravado)).not.toMatch(/97412|Atte|Telefone/);
+  });
+
+  it("telefone local no MEIO do texto não tem como ser cortado: recusado e nunca gravado", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ trechos: [{ id: "m1", trecho: "Ligue no 97412-3921 que atendemos o pedido hoje mesmo" }, { id: "m2", trecho: "Pode detalhar a quantidade do item 3?" }] }),
+    });
+    const r = await coletarExemplos();
+    const gravado = (mocks.exemplos.createMany.mock.calls[0]![0] as { data: Array<{ trecho: string }> }).data;
+    expect(gravado).toHaveLength(1);
+    expect(JSON.stringify(gravado)).not.toContain("97412");
+    expect(r).toMatchObject({ ok: true, resultado: { rejeitados: { telefone_local: 1 } } });
+  });
+
+  describe("autolimpeza do que já estava guardado com um filtro mais fraco", () => {
+    const sujo = { id: "e-sujo", gmailMensagemId: "m1", classeCorreta: "recusa", trecho: "Não temos interesse. Atte Depto Telefone [tel] / 97412-3921" };
+    const limpo = { id: "e-ok", gmailMensagemId: "m2", classeCorreta: "duvida", trecho: "Pode detalhar a quantidade do item 3?" };
+
+    it("apaga SÓ o que não passa no filtro atual, pelo id, e conta quantos", async () => {
+      mocks.exemplos.findMany.mockResolvedValue([sujo, limpo]);
+      mocks.exemplos.deleteMany.mockResolvedValue({ count: 1 });
+      const r = await coletarExemplos();
+      expect(mocks.exemplos.deleteMany).toHaveBeenCalledTimes(1);
+      expect(mocks.exemplos.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["e-sujo"] } } });
+      expect(r).toMatchObject({ ok: true, resultado: { removidos: 1 } });
+    });
+
+    it("o caso apagado volta a ser PEDIDO na mesma rodada (para ser guardado já limpo)", async () => {
+      mocks.exemplos.findMany.mockResolvedValue([sujo, limpo]);
+      mocks.exemplos.deleteMany.mockResolvedValue({ count: 1 });
+      await coletarExemplos();
+      const enviado = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
+      expect(enviado.ids).toEqual(["m1"]); // o m2 já tem exemplo seguro e não é pedido de novo
+    });
+
+    it("nada inseguro: não chama deleteMany", async () => {
+      mocks.exemplos.findMany.mockResolvedValue([limpo]);
+      await coletarExemplos();
+      expect(mocks.exemplos.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("na hora de USAR, exemplo inseguro que ainda não foi apagado nunca vai ao modelo", async () => {
+      mocks.exemplos.findMany.mockResolvedValue([sujo, limpo]);
+      const r = await carregarExemplos();
+      expect(r.map((e) => e.id)).toEqual(["m2"]);
+      expect(JSON.stringify(r)).not.toContain("97412");
+    });
   });
 
   it("falha do Google (HTTP ou rede): erro com texto fixo, nada gravado", async () => {
