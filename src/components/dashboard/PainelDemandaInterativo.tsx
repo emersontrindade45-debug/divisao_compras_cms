@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GraficosPainelDemanda } from "@/components/dashboard/GraficosPainelDemanda";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -285,6 +286,8 @@ export function PainelDemandaInterativo({
         </Card>
       </section>
 
+      <GraficosPainelDemanda painel={painel} />
+
       <ProcessosQueMaisVoltaram
         painel={painel}
         onAbrir={(chave) => setVisao({ tipo: "processo", chave, voltarPara: null })}
@@ -463,7 +466,7 @@ function MetricasPorProcesso({
   };
 
   return (
-    <section aria-labelledby="por-processo" className="space-y-2">
+    <section aria-labelledby="por-processo" className="space-y-2 print:hidden">
       <h3
         id="por-processo"
         className="text-sm font-semibold uppercase tracking-wide text-muted-foreground"

@@ -1,4 +1,10 @@
-import { CATEGORIAS, type FraseMudou, type ProcessoDetalhado } from "./painelDemanda";
+import {
+  CATEGORIAS,
+  MIN_REMESSAS_CATEGORIA,
+  type FraseMudou,
+  type ProcessoDetalhado,
+  type ResumoPeriodo,
+} from "./painelDemanda";
 
 /**
  * Texto do painel "Demanda da Divisão": formatação pt-BR, variações com o sentido de negócio e as frases de
@@ -185,4 +191,42 @@ export function trechosDaFrase(f: FraseMudou): TrechoFrase[] {
         t(`, a última em ${dataBr(f.ultima)}.`),
       ];
   }
+}
+
+// ------------------------------------------------------------------ gráficos
+
+export const MESES_CURTOS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+/** Altura (ou largura) de uma barra em % do maior valor do gráfico; nunca passa de 100 e valor > 0 sempre aparece. */
+export function proporcaoEmPct(valor: number, maximo: number): number {
+  if (!(maximo > 0) || !(valor > 0)) return 0;
+  return Math.min(100, Math.max(2, (valor / maximo) * 100));
+}
+
+export interface BarraDeCategoria {
+  categoria: string;
+  rotulo: string;
+  remessas: number;
+  taxa: number;
+  taxaAnterior: number | null;
+  /** Abaixo de MIN_REMESSAS_CATEGORIA: a taxa oscila demais para ser comparada. */
+  amostraPequena: boolean;
+  larguraPct: number;
+}
+
+/** Linhas do gráfico "taxa de devolução por tipo de processo": só as categorias que tiveram remessa no período. */
+export function barrasDeCategoria(
+  porCategoria: { categoria: string; atual: ResumoPeriodo; anterior: ResumoPeriodo | null }[],
+): BarraDeCategoria[] {
+  const comRemessa = porCategoria.filter((c) => c.atual.remessas > 0);
+  const maximo = Math.max(0, ...comRemessa.map((c) => c.atual.taxaDevolucao));
+  return comRemessa.map((c) => ({
+    categoria: c.categoria,
+    rotulo: rotuloDaCategoria(c.categoria),
+    remessas: c.atual.remessas,
+    taxa: c.atual.taxaDevolucao,
+    taxaAnterior: c.anterior && c.anterior.remessas > 0 ? c.anterior.taxaDevolucao : null,
+    amostraPequena: c.atual.remessas < MIN_REMESSAS_CATEGORIA,
+    larguraPct: proporcaoEmPct(c.atual.taxaDevolucao, maximo),
+  }));
 }

@@ -171,3 +171,25 @@
     outline-offset: 2px;
   }
 }
+
+/* Impressão do dashboard (A4): só o conteúdo, sem menus. O painel de demanda esconde sozinho o que não cabe numa folha. */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  [data-slot="sidebar-wrapper"] [data-slot="sidebar"],
+  [data-slot="sidebar-gap"],
+  [data-slot="sidebar-container"],
+  header {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  main {
+    padding: 0 !important;
+  }
+}

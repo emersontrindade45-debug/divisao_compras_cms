@@ -1,4 +1,5 @@
 import { PainelDemandaInterativo } from "@/components/dashboard/PainelDemandaInterativo";
+import { BotaoImprimir } from "@/components/dashboard/BotaoImprimir";
 import { FiltrosPainelDemanda } from "@/components/dashboard/FiltrosPainelDemanda";
 import { dataBr, rotuloDaCategoria } from "@/lib/domain/indicadores/formatosPainel";
 import type { CategoriaProcesso } from "@/lib/domain/indicadores/painelDemanda";
@@ -42,7 +43,10 @@ export function PainelDemandaDivisao({ resultado }: { resultado: ResultadoPainel
             : `Ano de ${painel.ano} inteiro, comparado a ${painel.ano - 1} inteiro.`}
           {categoria ? ` Só ${rotuloDaCategoria(categoria)}.` : ""}
         </p>
-        <FiltrosPainelDemanda anos={anos} ano={painel.ano} categoria={categoria} />
+        <div className="flex items-center gap-2 print:hidden">
+          <FiltrosPainelDemanda anos={anos} ano={painel.ano} categoria={categoria} />
+          <BotaoImprimir />
+        </div>
       </div>
 
       {aviso && (

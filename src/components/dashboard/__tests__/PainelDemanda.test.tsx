@@ -310,4 +310,30 @@ describe("FiltrosPainelDemanda", () => {
     expect([...select.options].map((o) => o.value)).toEqual(["2026", "2025", "2024"]);
     expect(select.value).toBe("2025");
   });
+  describe("gráficos (etapa 3)", () => {
+    it("mostra remessas e devoluções por mês com os dois anos e a taxa por tipo", () => {
+      render(<PainelDemandaDivisao resultado={ok()} />);
+      const g = screen.getByRole("region", { name: "Evolução no ano" });
+      expect(within(g).getAllByText("Remessas por mês").length).toBeGreaterThan(0);
+      expect(within(g).getAllByText("Devoluções por mês").length).toBeGreaterThan(0);
+      expect(within(g).getByText("Taxa de devolução por tipo de processo")).toBeInTheDocument();
+      // tabela acessível: fevereiro de 2026 teve 9 remessas do processo 110/2026 (3 por 3 dias) + ...
+      const tabela = within(g).getByRole("table", { name: "Remessas por mês" });
+      expect(within(tabela).getAllByRole("row")).toHaveLength(13);
+    });
+
+    it("com filtro de tipo, o gráfico por tipo some (só haveria uma barra)", () => {
+      render(<PainelDemandaDivisao resultado={ok({ categoria: "bens" })} />);
+      expect(screen.queryByText("Taxa de devolução por tipo de processo")).not.toBeInTheDocument();
+      expect(screen.getAllByText("Remessas por mês").length).toBeGreaterThan(0);
+    });
+
+    it("não vai para a impressão (A4 leva só KPIs, o que mudou e os 15 processos)", () => {
+      render(<PainelDemandaDivisao resultado={ok()} />);
+      expect(screen.getByRole("region", { name: "Evolução no ano" }).className).toContain("print:hidden");
+      expect(screen.getByRole("region", { name: "Métricas por processo" }).className).toContain("print:hidden");
+      expect(screen.getByRole("region", { name: "O que mudou" }).className).not.toContain("print:hidden");
+      expect(screen.getByRole("button", { name: /imprimir/i })).toBeInTheDocument();
+    });
+  });
 });
